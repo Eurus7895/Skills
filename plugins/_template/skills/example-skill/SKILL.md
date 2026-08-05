@@ -11,8 +11,9 @@ description: Template skill showing the required structure of a SKILL.md. Replac
 <!--
   Copy this file to start a new skill.
   - `name` above must equal this folder's name.
-  - See ../../../../CONTRIBUTING.md for the rules behind every section here. (That link works in the repo
-    only — it must NOT appear in a shipped skill, because plugins install standalone.)
+  - The rules behind every section here live in CONTRIBUTING.md at the root of the Skills repository.
+    Consult it there. Do not add a link to it from this file: a path pointing outside the plugin is dead
+    once the plugin is installed standalone.
   Delete every comment like this one before shipping.
 -->
 
