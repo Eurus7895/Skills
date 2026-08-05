@@ -1,0 +1,83 @@
+# AGENTS.md
+
+Instructions for any AI agent working inside this repository.
+
+## What this repo is
+
+A **GitHub Copilot plugin marketplace**. It ships plugins; each plugin bundles one or more Agent Skills.
+
+There is no application here — no build, no test suite, no runtime, no dependencies to install. Do not look for
+a `package.json` to run, and do not add a toolchain unless you are explicitly asked to. The deliverable is
+always Markdown and JSON.
+
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before authoring anything. It is the normative standard; this file
+tells you how to operate, that file tells you what correct output looks like.
+
+## Before you write anything
+
+1. Read the plugin catalog in [`README.md`](README.md) and list `plugins/`.
+2. Decide which of these the request actually is:
+   - **A new skill in an existing plugin** — the default when the request fits a plugin's theme. Prefer this.
+   - **A new skill in a new plugin** — only when no existing plugin's theme covers it.
+   - **An edit to an existing skill** — when a skill already does most of the job. Prefer this over adding a
+     near-duplicate skill; two skills with overlapping descriptions make triggering worse for both.
+3. If the choice is genuinely ambiguous, ask rather than guessing. Splitting or merging plugins later is
+   disruptive because it changes install names.
+
+## Adding a skill to an existing plugin
+
+1. Create `plugins/<plugin>/skills/<skill-name>/SKILL.md` — copy
+   `plugins/_template/skills/example-skill/SKILL.md` as the starting point.
+2. Add `"./skills/<skill-name>/"` to the `skills` array in `plugins/<plugin>/.github/plugin/plugin.json`.
+3. Bump the plugin's `version` (minor for a new skill).
+4. Update the plugin's `README.md` and the plugin's `description` if the scope changed.
+5. Update the plugin's row in the root [`README.md`](README.md) catalog.
+
+## Adding a new plugin
+
+1. Copy `plugins/_template/` to `plugins/<plugin-name>/`. Use lowercase kebab-case.
+2. Fill in `plugins/<plugin-name>/.github/plugin/plugin.json`: `name` must equal the folder name; write a real
+   `description`; start at `"version": "0.1.0"`; list every skill in `skills`.
+3. Replace the example skill with real ones, or delete it if the plugin starts with different skills.
+4. Rewrite `plugins/<plugin-name>/README.md` — what the plugin is for, the install command, what each skill
+   does.
+5. Add an entry to `plugins` in [`.github/plugin/marketplace.json`](.github/plugin/marketplace.json):
+   ```json
+   { "name": "<plugin-name>", "source": "plugins/<plugin-name>", "description": "...", "version": "0.1.0" }
+   ```
+   Keep `description` and `version` identical to the plugin's own `plugin.json`.
+6. Add a row to the catalog table in the root [`README.md`](README.md).
+
+## Editing an existing skill
+
+Change `SKILL.md` in place. If the change alters **when** the skill should fire, update the frontmatter
+`description` and the root README row in the same commit — a stale description is a triggering bug, not a
+documentation nit.
+
+## Hard rules
+
+- Every skill folder contains exactly one `SKILL.md`, at its root.
+- A skill's frontmatter `name` **must** equal its folder name. Same for a plugin.
+- Every skill folder must be listed in its plugin's `skills` array. An unlisted skill silently does not install.
+- **A `SKILL.md` may never link outside its own plugin folder.** Plugins install standalone onto a user's
+  machine, so a link to a repo-level file becomes a dead path. Shared conventions live in
+  [`docs/GENERAL.md`](docs/GENERAL.md) and are **inlined** into each skill, not linked.
+- Use relative paths only. No absolute paths, no `/home/...`, no machine-specific anything.
+- No secrets, tokens, or credentials — not in docs, not in scripts, not in examples.
+- If a bundled script makes network calls, installs packages, or writes outside the working directory, say so
+  explicitly in the `SKILL.md`. Silent side effects are not acceptable.
+- Do not edit `docs/GENERAL.md` as part of adding a single skill. It is cross-cutting; changing it changes every
+  skill, so it gets its own commit and its own reason.
+- Do not create a pull request unless you were asked to.
+
+## Definition of done
+
+- [ ] `SKILL.md` exists, frontmatter has `name` (kebab-case, matches folder) and `description`.
+- [ ] The `description` states what the skill does **and** the phrases/contexts that should trigger it —
+      see the rules and examples in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- [ ] `SKILL.md` is under ~500 lines; anything longer lives in `references/` with a pointer from `SKILL.md`.
+- [ ] The skill is listed in its plugin's `skills` array.
+- [ ] Plugin `version` bumped, and matched in `marketplace.json`.
+- [ ] The plugin appears in `marketplace.json` and in the root `README.md` catalog, with matching text.
+- [ ] All JSON parses; all relative links resolve; no link leaves the plugin folder.
+- [ ] Committed to the working branch with a message describing the skill or plugin added.
