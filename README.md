@@ -24,22 +24,26 @@ Register this repository as a plugin marketplace, then install the plugins you w
 
 ```bash
 copilot plugin marketplace add Eurus7895/Skills
-copilot plugin install <plugin-name>@eurus-skills
+copilot plugin install <plugin-name>@CopilotBox
 ```
+
+The marketplace registers under the name in its manifest — **`CopilotBox`** — not under the repository
+name. `add` takes `Eurus7895/Skills`; everything afterwards takes `CopilotBox`. The name is
+case-sensitive.
 
 Useful companions:
 
 ```bash
 copilot plugin marketplace list          # marketplaces you have registered
-copilot plugin marketplace browse eurus-skills   # what this marketplace offers
-copilot plugin marketplace update eurus-skills   # re-read the catalog (alias: refresh)
-copilot plugin marketplace remove eurus-skills   # --force also uninstalls its plugins
+copilot plugin marketplace browse CopilotBox   # what this marketplace offers
+copilot plugin marketplace update CopilotBox   # re-read the catalog (alias: refresh)
+copilot plugin marketplace remove CopilotBox   # --force also uninstalls its plugins
 copilot plugin list                      # plugins you have installed
 copilot plugin update <plugin-name>
 copilot plugin uninstall <plugin-name>
 ```
 
-Inside an interactive Copilot session, the same commands work as `/plugin install <plugin-name>@eurus-skills`.
+Inside an interactive Copilot session, the same commands work as `/plugin install <plugin-name>@CopilotBox`.
 
 ### Installing from a branch, or from a local checkout
 
@@ -61,10 +65,11 @@ copilot plugin marketplace add .
 
 | Symptom | Cause | Fix |
 | ------- | ----- | --- |
-| `Available plugins: none` | The catalog is cached, or the default branch has no plugins yet | `copilot plugin marketplace update eurus-skills`; if the plugins are on an unmerged branch, re-add with `#branch` |
-| `Marketplace "eurus-skills" already registered` | `add` will not overwrite a registration | `update` to refresh it, or `remove` then `add` |
+| `Available plugins: none` | The catalog is cached, or the default branch has no plugins yet | `copilot plugin marketplace update CopilotBox`; if the plugins are on an unmerged branch, re-add with `#branch` |
+| `Marketplace "CopilotBox" already registered` | `add` will not overwrite a registration | `update` to refresh it, or `remove` then `add` |
 | `File not found: marketplace.json, ...` listing doubled paths | A path to the manifest file was passed | Pass the directory that contains `.github/plugin/`, e.g. `.` |
 | `Repository not found` on a ref | `@` used instead of `#` | `owner/repo#ref` |
+| `Marketplace "eurus-skills" ...` | A registration from before this marketplace was renamed | `copilot plugin marketplace remove eurus-skills --force`, then `add` again |
 
 ### VS Code
 

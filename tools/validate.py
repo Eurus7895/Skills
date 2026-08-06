@@ -216,6 +216,34 @@ def check_marketplace(manifests):
             fail(rel(MARKETPLACE), "lists %r, which is not a plugin directory" % name)
 
 
+# `copilot plugin install <plugin>@<marketplace>` -- the marketplace half is an
+# identifier users type verbatim, so a rename that misses a doc sends them to a
+# marketplace that does not exist. Only the `@` form is checked: the troubleshooting
+# table deliberately names the *old* marketplace in a `remove` command.
+INSTALL_REF = re.compile(r"plugin install\s+\S+?@([A-Za-z0-9_.-]+)")
+
+
+def check_marketplace_name():
+    catalog = load_json(MARKETPLACE)
+    if catalog is None:
+        return
+    expected = catalog.get("name")
+    if not expected:
+        fail(rel(MARKETPLACE), "has no name")
+        return
+
+    for dirpath, dirnames, filenames in os.walk(REPO):
+        dirnames[:] = [d for d in dirnames if d != ".git"]
+        for fn in filenames:
+            if not fn.endswith(".md"):
+                continue
+            path = os.path.join(dirpath, fn)
+            for found in set(INSTALL_REF.findall(read(path))):
+                if found != expected:
+                    fail(rel(path), "installs from marketplace %r, but the manifest "
+                                    "is named %r" % (found, expected))
+
+
 def check_readme(names):
     text = read(README)
     for name in names:
@@ -287,6 +315,7 @@ def main():
             manifests[name] = manifest
 
     check_marketplace(manifests)
+    check_marketplace_name()
     check_readme(names)
     check_repo_links()
     check_tracked()

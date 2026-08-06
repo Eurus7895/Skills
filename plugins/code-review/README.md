@@ -11,7 +11,7 @@ Findings follow [Google's *Standard of Code Review*](https://google.github.io/en
 
 ```bash
 copilot plugin marketplace add Eurus7895/Skills
-copilot plugin install code-review@eurus-skills
+copilot plugin install code-review@CopilotBox
 ```
 
 ## Skills
