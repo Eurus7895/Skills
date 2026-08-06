@@ -31,13 +31,40 @@ Useful companions:
 
 ```bash
 copilot plugin marketplace list          # marketplaces you have registered
-copilot plugin marketplace browse eurus-skills
+copilot plugin marketplace browse eurus-skills   # what this marketplace offers
+copilot plugin marketplace update eurus-skills   # re-read the catalog (alias: refresh)
+copilot plugin marketplace remove eurus-skills   # --force also uninstalls its plugins
 copilot plugin list                      # plugins you have installed
 copilot plugin update <plugin-name>
 copilot plugin uninstall <plugin-name>
 ```
 
 Inside an interactive Copilot session, the same commands work as `/plugin install <plugin-name>@eurus-skills`.
+
+### Installing from a branch, or from a local checkout
+
+`add` reads the repository's **default branch**. To install work that has not been merged yet, name the ref
+with `#` — `@` is not the separator, and `owner/repo@ref` is parsed as a hostname:
+
+```bash
+copilot plugin marketplace add Eurus7895/Skills#some-branch
+```
+
+`add` also accepts a **directory** — the folder containing `.github/plugin/marketplace.json`, not the file
+itself. From a checkout of this repo:
+
+```bash
+copilot plugin marketplace add .
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+| ------- | ----- | --- |
+| `Available plugins: none` | The catalog is cached, or the default branch has no plugins yet | `copilot plugin marketplace update eurus-skills`; if the plugins are on an unmerged branch, re-add with `#branch` |
+| `Marketplace "eurus-skills" already registered` | `add` will not overwrite a registration | `update` to refresh it, or `remove` then `add` |
+| `File not found: marketplace.json, ...` listing doubled paths | A path to the manifest file was passed | Pass the directory that contains `.github/plugin/`, e.g. `.` |
+| `Repository not found` on a ref | `@` used instead of `#` | `owner/repo#ref` |
 
 ### VS Code
 
