@@ -1,0 +1,22 @@
+{
+  "name": "testing",
+  "description": "Write, review, and debug automated tests in whatever framework a repository already uses. Detects the stack at runtime rather than imposing a framework.",
+  "version": "0.1.0",
+  "keywords": [
+    "testing",
+    "unit-tests",
+    "test-coverage",
+    "flaky-tests",
+    "debugging"
+  ],
+  "author": {
+    "name": "Eurus7895"
+  },
+  "repository": "https://github.com/Eurus7895/Skills",
+  "license": "MIT",
+  "skills": [
+    "./skills/write-tests/",
+    "./skills/review-tests/",
+    "./skills/debug-failing-test/"
+  ]
+}
