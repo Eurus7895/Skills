@@ -1,0 +1,11 @@
+[project]
+name = "fixture-cart"
+version = "0.0.0"
+description = "Fixture for the review-tests skill: a green suite that catches nothing."
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

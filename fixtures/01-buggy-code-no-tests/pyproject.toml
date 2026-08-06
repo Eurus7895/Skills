@@ -1,0 +1,10 @@
+[project]
+name = "fixture-inventory"
+version = "0.0.0"
+description = "Intentionally defective fixture for the write-tests skill."
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,4 @@
+[project]
+name = "fixture-account-service"
+version = "0.0.0"
+description = "Intentionally vulnerable fixture for the review-code skill. Do not deploy."
