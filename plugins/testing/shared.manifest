@@ -1,0 +1,16 @@
+# Shared sources materialized into this plugin.
+#   <path under shared/>  ->  <path under this plugin>
+#
+# Destinations are per-skill: a SKILL.md resolves bundled paths relative to its own
+# folder, so each skill needs its own copy.
+#
+# Regenerate with: python3 tools/materialize.py
+
+references/framework-detection.md -> skills/write-tests/references/framework-detection.md
+scripts/detect_stack.py           -> skills/write-tests/scripts/detect_stack.py
+
+references/framework-detection.md -> skills/review-tests/references/framework-detection.md
+scripts/detect_stack.py           -> skills/review-tests/scripts/detect_stack.py
+
+references/framework-detection.md -> skills/debug-failing-test/references/framework-detection.md
+scripts/detect_stack.py           -> skills/debug-failing-test/scripts/detect_stack.py

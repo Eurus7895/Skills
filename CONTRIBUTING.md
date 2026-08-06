@@ -54,6 +54,44 @@ Every plugin must also be registered in [`.github/plugin/marketplace.json`](.git
 
 Drift between the two manifests is a bug. Keep `description` and `version` byte-identical.
 
+### Sharing content between plugins
+
+A plugin installs standalone into `~/.copilot/installed-plugins/<marketplace>/<plugin>/`. Nothing it references
+can live outside its own folder — a path into a repo-level directory is dead on the user's machine.
+
+So content used by more than one plugin is authored once under `shared/` and **copied in**:
+
+1. Put the file in `shared/references/` or `shared/scripts/`.
+2. List it in the consuming plugin's `shared.manifest`, one line per destination:
+
+   ```
+   references/framework-detection.md -> skills/write-tests/references/framework-detection.md
+   scripts/detect_stack.py           -> skills/write-tests/scripts/detect_stack.py
+   ```
+
+3. Run `python3 tools/materialize.py`. Commit the generated copies.
+
+**Destinations are per-skill, not per-plugin.** A `SKILL.md` resolves its bundled paths relative to its own
+folder, so a file at the plugin root will not resolve from `skills/<name>/SKILL.md`. Each skill that needs a
+shared file gets its own copy.
+
+The copies are committed because `copilot plugin marketplace add` reads the repository directly — an
+unmaterialized plugin installs broken.
+
+**Never hand-edit a generated file.** They carry a `GENERATED FILE -- DO NOT EDIT` banner, and
+`tools/validate.py` fails on any drift between source and copy. Edit `shared/` and re-run the script.
+
+### Checks before committing
+
+```bash
+python3 tools/validate.py
+```
+
+It verifies: every JSON parses; `plugin.json` and skill frontmatter `name`s match their folders; every
+`skills[]` path resolves to a `SKILL.md`; no skill folder is missing from `skills[]`; `marketplace.json` agrees
+with each `plugin.json` on `description` and `version`; no dead or plugin-escaping links; skills stay under the
+500-line budget; every plugin has a README catalog row; and no materialized file has drifted.
+
 ### Sizing a plugin
 
 - Group by **the job the user is doing**, not by technology. `release-management` is a plugin;

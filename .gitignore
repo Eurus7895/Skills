@@ -32,6 +32,11 @@ MANIFEST
 *.manifest
 *.spec
 
+# ...but a plugin's shared.manifest is source, not a PyInstaller artifact.
+# Without this, materialize.py finds zero entries on a fresh clone and every
+# generated copy silently goes stale.
+!plugins/*/shared.manifest
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
