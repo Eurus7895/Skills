@@ -1,0 +1,11 @@
+[project]
+name = "fixture-pricing"
+version = "0.0.0"
+description = "Fixture for the debug-failing-test skill: correct code, one wrong test."
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

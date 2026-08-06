@@ -131,6 +131,18 @@ python3 tools/validate.py        # manifests, frontmatter, links, catalog, drift
 python3 tools/materialize.py     # regenerate copies after editing shared/
 ```
 
+## Fixtures
+
+[`fixtures/`](fixtures/) holds deliberately broken sample projects for demonstrating and evaluating the
+plugins — buggy code with a stated contract, a wrong test against correct code, a green-but-worthless suite,
+and planted vulnerabilities. Each scenario asks whether the agent **finds** the defect or **accommodates** it.
+
+Open one scenario folder at a time; `fixtures/EXPECTED.md` is the answer key and must stay out of the session
+being demoed. See [`fixtures/README.md`](fixtures/README.md).
+
+Note: those scenarios carry their own `pyproject.toml`, so running `detect_stack.py` against the repository
+root now reports Python/pytest. That is the fixtures, not this repo — pass a target path to scope it.
+
 ## Contributing
 
 Read [`CONTRIBUTING.md`](CONTRIBUTING.md). If you are an AI agent, read [`AGENTS.md`](AGENTS.md) first.
