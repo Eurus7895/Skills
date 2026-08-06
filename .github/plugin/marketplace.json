@@ -1,0 +1,11 @@
+{
+  "name": "eurus-skills",
+  "metadata": {
+    "description": "A collection of Agent Skills for GitHub Copilot, grouped into installable plugins.",
+    "version": "0.1.0"
+  },
+  "owner": {
+    "name": "Eurus7895"
+  },
+  "plugins": []
+}
