@@ -1,5 +1,5 @@
 {
-  "name": "CopilotHarness",
+  "name": "CopilotBox",
   "metadata": {
     "description": "A collection of Agent Skills for GitHub Copilot, grouped into installable plugins.",
     "version": "0.1.0"

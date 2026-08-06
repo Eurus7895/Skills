@@ -9,7 +9,7 @@ never introduces a second test framework into a repo that already has one.
 
 ```bash
 copilot plugin marketplace add Eurus7895/Skills
-copilot plugin install testing@CopilotHarness
+copilot plugin install testing@CopilotBox
 ```
 
 ## Skills
