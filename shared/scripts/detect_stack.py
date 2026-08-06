@@ -4,7 +4,10 @@
 Reads the filesystem only. No network, no writes.
 
 Usage:
-    python3 detect_stack.py [PATH]
+    python3 detect_stack.py [REPO_ROOT] [TARGET]
+
+TARGET is the file or directory being worked on. In a monorepo it selects the nearest
+enclosing package rather than the first marker found repository-wide.
 
 Prints one JSON object to stdout:
 
@@ -85,6 +88,8 @@ def find_markers(root):
 
 def has_test_files(root, patterns):
     """True if any file under root matches one of the regex patterns."""
+    if not patterns:
+        return False
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
         for fn in filenames:
@@ -94,11 +99,49 @@ def has_test_files(root, patterns):
     return False
 
 
+def has_rust_tests(root):
+    """Rust tests are a tests/ directory or an inline #[cfg(test)] module."""
+    if os.path.isdir(os.path.join(root, "tests")):
+        return True
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+        for fn in filenames:
+            if fn.endswith(".rs") and "#[cfg(test)]" in read(os.path.join(dirpath, fn)):
+                return True
+    return False
+
+
+# Ecosystems whose framework is genuinely implied by the marker file, so the hard-coded
+# default is evidence rather than a guess. Everywhere else the default stays low
+# confidence until a manifest or config names the framework.
+SELF_EVIDENT = {"go", "rust"}
+
+
+def manifest_names_framework(ecosystem, marker_path, framework):
+    """True when the ecosystem's manifest actually mentions the framework."""
+    if not framework:
+        return False
+    if ecosystem in SELF_EVIDENT:
+        return True
+    haystack = read(marker_path).lower()
+    if ecosystem == "ruby":
+        for name, fw in (("rspec", "rspec"), ("minitest", "minitest")):
+            if name in haystack:
+                return fw == framework
+        return False
+    return framework.lower() in haystack
+
+
+RUBY_RUNNERS = {"rspec": "bundle exec rspec", "minitest": "bundle exec rake test"}
+
+
 TEST_FILE_PATTERNS = {
     "python": [r"^test_.*\.py$", r".*_test\.py$"],
     "javascript": [r"\.(test|spec)\.[jt]sx?$"],
     "go": [r"_test\.go$"],
-    "rust": [r"\.rs$"],
+    # Rust has no test-file naming convention: tests live in tests/ or in inline
+    # #[cfg(test)] modules. Matching *.rs would count every source file as a test.
+    "rust": [],
     "java": [r"Test[s]?\.(java|kt)$"],
     "cpp": [r"_test\.(cpp|cc|cxx)$", r"^test_.*\.(cpp|cc|cxx)$"],
     "php": [r"Test\.php$"],
@@ -170,8 +213,39 @@ def find_csproj(root):
     return None
 
 
-def detect(root):
+def nearest_marker(target):
+    """Walk up from target to the closest directory holding a marker file.
+
+    In a monorepo the answer depends on which package you are working in: a root
+    pyproject.toml alongside a nested Vitest package must not report pytest for a file
+    inside that package. The nearest enclosing marker wins.
+    """
+    names = [name for name, *_ in MARKERS]
+    current = os.path.abspath(target)
+    if os.path.isfile(current):
+        current = os.path.dirname(current)
+    while True:
+        for name in names:
+            if os.path.isfile(os.path.join(current, name)):
+                return current, name
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None, None
+        current = parent
+
+
+def detect(root, target=None):
     notes = []
+
+    if target:
+        package_dir, marker_name = nearest_marker(target)
+        if package_dir and os.path.abspath(package_dir) != os.path.abspath(root):
+            notes.append("scoped to the nearest enclosing package: %s"
+                         % os.path.relpath(package_dir, root))
+            result = detect(package_dir)
+            result["notes"] = notes + result["notes"]
+            return result
+
     markers = find_markers(root)
 
     csproj = find_csproj(root)
@@ -204,10 +278,25 @@ def detect(root):
             framework, runner, confidence = detect_python(path, notes)
         elif ecosystem == "cpp":
             framework, runner, confidence = detect_cpp(path, notes)
-        elif default_fw:
+        elif manifest_names_framework(ecosystem, path, default_fw):
             confidence = "high"
+        else:
+            # The default is a guess, not a detection. Saying "rspec" with high
+            # confidence for a Gemfile that declares minitest sends the skill to a
+            # runner that may not even be installed.
+            if ecosystem == "ruby":
+                lowered = read(path).lower()
+                if "minitest" in lowered:
+                    framework = "minitest"
+                    runner = RUBY_RUNNERS["minitest"]
+                    confidence = "high"
+            if confidence != "high":
+                notes.append("%s does not name a test framework; %r is a default, not a detection"
+                             % (os.path.basename(path), default_fw))
 
-        if not has_test_files(root, TEST_FILE_PATTERNS.get(ecosystem, [])):
+        found_tests = (has_rust_tests(root) if ecosystem == "rust"
+                       else has_test_files(root, TEST_FILE_PATTERNS.get(ecosystem, [])))
+        if not found_tests:
             notes.append("no test files found matching the %s convention" % ecosystem)
             if confidence == "high":
                 confidence = "low"
@@ -238,11 +327,18 @@ def detect(root):
 
 
 def main(argv):
-    root = argv[1] if len(argv) > 1 else "."
+    args = [a for a in argv[1:] if not a.startswith("-")]
+    root = args[0] if args else "."
+    target = args[1] if len(args) > 1 else None
+
     if not os.path.isdir(root):
         print(json.dumps({"error": "not a directory: %s" % root, "confidence": "none"}))
         return 1
-    result = detect(root)
+    if target and not os.path.exists(target):
+        print(json.dumps({"error": "no such target: %s" % target, "confidence": "none"}))
+        return 1
+
+    result = detect(root, target)
     print(json.dumps(result, indent=2))
     return 1 if result["confidence"] == "none" else 0
 

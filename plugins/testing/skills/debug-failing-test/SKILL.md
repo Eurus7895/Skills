@@ -1,6 +1,6 @@
 ---
 name: debug-failing-test
-description: Diagnose a failing test and decide whether the test or the production code is wrong before fixing either. Use whenever a test fails, errors, or breaks in CI — "this test is failing", "why is this red", "CI is broken", "the test passes locally but not in CI", "this assertion started failing after my change", a pasted stack trace or assertion diff, or a flaky test that fails intermittently. Also use when the user is tempted to delete or skip a failing test.
+description: Diagnose one failing or intermittently failing test and decide whether the test or the production code is wrong before fixing either. Use whenever a specific test fails, errors, or breaks in CI — "this test is failing", "why is this red", "CI is broken", "the test passes locally but not in CI", "this test fails intermittently", "this assertion started failing after my change", or a pasted stack trace or assertion diff. Also use when the user is tempted to delete or skip a failing test. For auditing a whole suite's quality rather than diagnosing one failure, use review-tests instead.
 ---
 
 # Debug a failing test
@@ -25,7 +25,9 @@ fix applied to the correct side, and a passing run.
 ## When not to use this skill
 
 - **Code has no tests and needs some** — use `write-tests`.
-- **The suite passes but you doubt it is meaningful** — use `review-tests`.
+- **The suite passes but you doubt it is meaningful**, or flakiness is suite-wide rather
+  than one test — use `review-tests`. This skill diagnoses a specific failure; that one
+  audits quality across the suite.
 - **The build or a compile step is broken**, not a test — that is ordinary debugging; do it directly.
 
 ## Steps

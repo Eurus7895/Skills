@@ -1,0 +1,13 @@
+# Shared sources materialized into this plugin.
+#   <path under shared/>  ->  <path under this plugin>
+#
+# Destinations are per-skill: a SKILL.md resolves bundled paths relative to its own
+# folder, so each skill needs its own copy.
+#
+# Regenerate with: python3 tools/materialize.py
+
+references/review-standard.md -> skills/review-code/references/review-standard.md
+scripts/detect_stack.py       -> skills/review-code/scripts/detect_stack.py
+
+references/review-standard.md -> skills/setup-review-rules/references/review-standard.md
+scripts/detect_stack.py       -> skills/setup-review-rules/scripts/detect_stack.py

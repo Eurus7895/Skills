@@ -11,7 +11,9 @@ repository already uses.
 
 Work top to bottom and stop at the first confident answer.
 
-1. **Run the detector.** `python3 scripts/detect_stack.py <repo-root>` prints JSON:
+1. **Run the detector.** `python3 scripts/detect_stack.py <repo-root> [target]` prints JSON. Pass the file or
+   directory you are working on as `target` — in a monorepo it selects the nearest enclosing package instead of
+   the first marker found repository-wide.
 
    ```json
    {"ecosystem": "python", "test_framework": "pytest", "runner_command": "pytest",
@@ -50,8 +52,8 @@ Work top to bottom and stop at the first confident answer.
 
 - **Never introduce a second framework** into a repo that already has one. If the existing choice is genuinely
   wrong for the task, say so and let the user decide — do not migrate as a side effect.
-- **Monorepos have more than one answer.** Detect per package, not per repository. The nearest marker file
-  walking up from the target file wins.
+- **Monorepos have more than one answer.** Detect per package, not per repository. Pass the target path as the
+  second argument so the nearest enclosing marker wins.
 - **A framework in `package.json` is not proof it is used.** Confirm that test files exist and match it;
   abandoned dependencies are common.
 - **Prefer the CI command over a locally convenient one.** If CI runs `npm test -- --run`, that is the command

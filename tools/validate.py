@@ -235,6 +235,35 @@ def check_repo_links():
                     fail(rel(path), "links to %r which does not exist" % link)
 
 
+def check_tracked():
+    """Every file the repo depends on must be committed, not just present locally.
+
+    A .gitignore rule once swallowed plugins/*/shared.manifest: the working tree looked
+    fine and every check passed, while a fresh clone had no manifests at all.
+    """
+    result = subprocess.run(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"],
+        cwd=REPO, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return  # not a git checkout; nothing to verify
+
+    ignored = set(result.stdout.split())
+    required = []
+    for name in plugin_names():
+        required.append("plugins/%s/shared.manifest" % name)
+    for dirpath, dirnames, filenames in os.walk(os.path.join(REPO, "shared")):
+        dirnames[:] = [d for d in dirnames if d != ".git"]
+        for fn in filenames:
+            required.append(rel(os.path.join(dirpath, fn)))
+
+    for path in required:
+        if not os.path.exists(os.path.join(REPO, path)):
+            continue
+        if path in ignored:
+            fail(path, "is matched by .gitignore -- it will be missing from a fresh clone")
+
+
 def check_materialized():
     result = subprocess.run(
         [sys.executable, os.path.join(REPO, "tools", "materialize.py"), "--check"],
@@ -260,6 +289,7 @@ def main():
     check_marketplace(manifests)
     check_readme(names)
     check_repo_links()
+    check_tracked()
     check_materialized()
 
     if FAILURES:

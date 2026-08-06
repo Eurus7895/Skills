@@ -70,11 +70,27 @@ def manifest_entries(plugin_dir):
     return entries
 
 
+def contained(root, *parts):
+    """Resolve root/parts and return it only if it stays inside root.
+
+    Manifests are checked-in text, but a bad entry -- `../../AGENTS.md`, or an absolute
+    path -- would otherwise make write mode clobber a file outside the plugin, or copy a
+    source from outside shared/. Refuse instead of trusting the path.
+    """
+    base = os.path.realpath(root)
+    target = os.path.realpath(os.path.join(base, *parts))
+    if target == base or target.startswith(base + os.sep):
+        return target
+    return None
+
+
 def render(rel):
     """The exact bytes the materialized copy should contain."""
     src = os.path.join(SHARED, rel)
     if not os.path.isfile(src):
         raise FileNotFoundError("shared/%s does not exist" % rel)
+    if contained(SHARED, rel) is None:
+        raise ValueError("source %r escapes shared/" % rel)
     body = read(src)
     if rel.endswith(".py") and body.startswith("#!"):
         shebang, _, remainder = body.partition("\n")
@@ -98,10 +114,14 @@ def run(check):
     for plugin_dir in plugin_dirs():
         plugin = os.path.basename(plugin_dir)
         for src_rel, dest_rel in manifest_entries(plugin_dir):
-            dest = os.path.join(plugin_dir, dest_rel)
+            dest = contained(plugin_dir, dest_rel)
+            if dest is None:
+                problems.append("%s: destination %r escapes the plugin directory"
+                                % (plugin, dest_rel))
+                continue
             try:
                 expected = render(src_rel)
-            except FileNotFoundError as exc:
+            except (FileNotFoundError, ValueError) as exc:
                 problems.append("%s: %s" % (plugin, exc))
                 continue
 

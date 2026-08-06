@@ -1,6 +1,6 @@
 ---
 name: review-tests
-description: Audit an existing test suite for weakness — assertions that cannot fail, missing edge cases, over-mocking that tests the mock instead of the code, order-dependence and flakiness, and tests that pass no matter what the code does. Use whenever the user asks "are these tests any good", "review my tests", "why didn't the tests catch this", "is this suite trustworthy", mentions flaky or intermittently failing tests, says coverage is high but bugs still ship, or asks whether a test is actually testing anything.
+description: Audit a whole test suite for systemic weakness — assertions that cannot fail, missing edge cases, over-mocking that tests the mock instead of the code, shared state and order-dependence, and tests that pass no matter what the code does. Use whenever the user asks "are these tests any good", "review my tests", "why didn't the tests catch this", "is this suite trustworthy", says coverage is high but bugs still ship, asks whether a test is actually testing anything, or wants the suite audited for flakiness generally. For one specific test that is failing or flaking right now, use debug-failing-test instead.
 ---
 
 # Review tests
@@ -17,13 +17,16 @@ This skill does not rewrite the suite. It tells you what is wrong and what the f
 
 - "Review my tests" / "are these tests good?"
 - A bug shipped despite passing tests, and the user wants to know why.
-- Tests are flaky, order-dependent, or fail only in CI.
+- The suite as a whole is unreliable — flakiness is widespread, or tests interfere with
+  each other — and the user wants the causes found.
 - Coverage numbers look healthy but confidence is low.
 
 ## When not to use this skill
 
 - **Code needs new tests** — use `write-tests`.
-- **A specific test is failing right now** — use `debug-failing-test`.
+- **One named test is failing or flaking right now** — use `debug-failing-test`. That skill
+  diagnoses a specific failure; this one audits the suite. "This test fails intermittently"
+  is a `debug-failing-test` job; "our suite is flaky, find out why" is this one.
 - **The production code is what needs reviewing**, not the tests — use the `review-code` skill from the
   `code-review` plugin.
 - **The user wants coverage measured** — run their coverage tool; that is ordinary work, not this skill.
