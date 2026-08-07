@@ -30,6 +30,14 @@ copilot plugin install large-context@CopilotBox
   languages by import regex), ranks modules by fan-in, describes each one with its real importers supplied,
   then cross-checks every dependency claim against the graph before writing `docs/ARCHITECTURE.md`. Fires on
   "document this repo", "explain how this fits together", "map the dependencies".
+- **`audit-codebase`** — sweeps a whole repository for one stated concern and reports every occurrence with
+  `file:line` and a verbatim quote, each machine-checked against the real file by `verify_findings.py`. Every
+  in-scope file emits a row even when clean, so coverage is provable rather than asserted. Fires on "audit this
+  repo for X", "find every place that Y", "is this migration finished".
+
+`audit-codebase` and the `code-review` plugin's `review-code` do not overlap: `review-code` reviews a
+**change** — a diff, pull request, or working tree — against a review standard. `audit-codebase` sweeps the
+**repository as it stands** for one concern, and its promise is completeness rather than judgement.
 
 ## Notes
 
@@ -45,9 +53,16 @@ copilot plugin install large-context@CopilotBox
 - **Import edges are not call edges.** `scan_repo.py` records imports; it builds no call graph. `document-
   codebase` verifies dependency claims against the graph and requires any "X calls Y" claim to cite a call site
   that was actually read, or be downgraded to the import claim the data supports.
+- **A citation is checked, not trusted.** `audit-codebase` re-reads every cited file and confirms the quoted
+  line is really there. A finding whose quote is absent is treated as fabricated and dropped, and the count of
+  dropped findings is reported.
 - Scripts are standard library only. They read the working tree and write their outputs (`rows.jsonl`,
-  `table.csv`, `structure.json`, `docs/ARCHITECTURE.md`) into the working directory. No network, no installs.
-  Symlinks resolving outside the scanned root are skipped and reported rather than followed.
+  `table.csv`, `structure.json`, `findings.jsonl`, `docs/ARCHITECTURE.md`) into the working directory. No
+  network, no installs. Symlinks resolving outside the scanned root are skipped and reported rather than
+  followed.
+- `scan_repo.py` and `assemble.py` are shared by more than one skill, so they are authored in `shared/scripts/`
+  and materialized into each skill folder. Edit the source and run `python3 tools/materialize.py`; never edit
+  the generated copies.
 - `document-codebase` parses Python exactly and approximates JavaScript, TypeScript, Go, Rust, Java, Ruby, C,
   and C++ by import regex. Approximate records are flagged `"exact": false` and any claim resting on them is
   marked in the output.

@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-# GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/scan_repo.py
-# Regenerate: python3 tools/materialize.py
 """Extract a repository's structure without an LLM: symbols, imports, dependency graph.
 
     python3 scripts/scan_repo.py --root . --out structure.json --summary

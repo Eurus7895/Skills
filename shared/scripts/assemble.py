@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-# GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/assemble.py
-# Regenerate: python3 tools/materialize.py
 """Validate extraction rows against a declared schema and report coverage gaps.
 
     python3 scripts/assemble.py \
