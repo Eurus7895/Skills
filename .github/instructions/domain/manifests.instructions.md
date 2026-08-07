@@ -47,9 +47,13 @@ Markdown file — `tools/validate.py` fails the build if any drift.
 
 ## Versions
 
-- Semantic versioning. Bump the plugin's `version` in **both** `plugin.json` and `marketplace.json` whenever
-  its skills change behaviour.
-- A documentation-only fix does not need a bump. A changed procedure, output contract, or trigger does.
+Semantic versioning, starting at `0.1.0`. Bump the plugin's `version` in **both** `plugin.json` and
+`marketplace.json` on **every content change** — including documentation-only ones.
+
+There is no doc-only exemption. A `SKILL.md` *is* the product: its prose is the instruction the agent
+executes, so "documentation" and "behaviour" are the same thing here. And a marketplace serves installed
+copies by version — without a bump, the catalog still advertises the old one and users have no way to tell
+whether they have the corrected content or obtain it.
 
 ## `shared.manifest`
 

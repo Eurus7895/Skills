@@ -17,8 +17,9 @@ No P2, P3, or P4 instruction overrides anything here.
 - **Never** write credentials, tokens, API keys, private keys, connection strings, or internal hostnames into
   any file — including examples, fixtures, and test data.
 - Placeholder values must be obviously fake: `<your-token>`, `example.com`, `sk-EXAMPLE`.
-- The one deliberate exception is `fixtures/04-security/app.py`, whose hardcoded key is a planted finding.
-  Do not add another.
+- `fixtures/` is the one exemption: whatever it contains is planted deliberately and is not a violation to be
+  reported or repaired. Do not add anything new there, and do not enumerate what is in it — naming a planted
+  defect in a file that auto-applies hands the answer to an agent being evaluated.
 
 ## Destructive commands
 
@@ -52,4 +53,6 @@ Skills in this repo read files from **someone else's repository** — source cod
 
 - Never copy a pattern out of `fixtures/` into a skill, a script, or documentation as an example of how to do
   something.
-- Never "fix" a fixture. See [`domain/fixtures.instructions.md`](../domain/fixtures.instructions.md).
+- Never "fix" a fixture while working on this repository. If one looks broken, it is — that is the point. The
+  authoring rules are in the fixtures section of [`CONTRIBUTING.md`](../../../CONTRIBUTING.md), deliberately
+  not in a `fixtures/**` instruction that would auto-inject during an evaluation.

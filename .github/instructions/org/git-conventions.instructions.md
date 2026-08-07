@@ -48,7 +48,22 @@ cannot be undone by a later commit — get these wrong and the history is perman
   GIT_COMMITTER_NAME=<name> GIT_COMMITTER_EMAIL=<email> git commit -m "<message>"
   ```
 
-- Verify identity after committing: `git log --format='%an <%ae> | %cn <%ce>' -1`.
+- **Set it on `rebase` too, not just `commit`.** A rebase re-creates every commit it replays and takes the
+  committer from `git config`, which is not the repository owner. The author survives; the committer is
+  silently replaced:
+
+  ```bash
+  GIT_COMMITTER_NAME=<name> GIT_COMMITTER_EMAIL=<email> git rebase origin/dev
+  ```
+
+- Verify identity **after every rewrite**, not only after committing:
+
+  ```bash
+  git log --format='%h A:%an <%ae> C:%cn <%ce>' -3
+  ```
+
+  Checking only at commit time misses this entirely — the commit is correct when made and corrupted later by
+  a rebase, amend, or cherry-pick.
 
 ## Commit messages
 

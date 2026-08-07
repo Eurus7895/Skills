@@ -25,9 +25,24 @@ disagree, `CONTRIBUTING.md` is authoritative and the instruction file is the bug
 | `org/git-conventions.instructions.md` | `**` |
 | `domain/skill-authoring.instructions.md` | `**/SKILL.md` |
 | `domain/manifests.instructions.md` | `**/plugin.json`, `**/marketplace.json`, `**/shared.manifest` |
-| `domain/scripts.instructions.md` | `**/*.py` |
-| `domain/fixtures.instructions.md` | `fixtures/**` |
+| `domain/scripts.instructions.md` | `tools/**/*.py`, `shared/**/*.py`, `plugins/**/*.py` |
 | `project/repo-layout.instructions.md` | `**` |
+
+## Why there is no `fixtures/**` instruction
+
+Deliberately absent. An instruction scoped to `fixtures/**` is injected automatically whenever anything under
+that path is touched — and that includes a session where an agent is **being evaluated** on a scenario. The
+glob cannot distinguish an author from a subject.
+
+Two concrete failures follow, and both are self-defeating:
+
+- Any rule that names what is planted in a scenario becomes a **partial answer key**, handed to the agent
+  before it starts looking.
+- "Never repair a fixture" is correct for a contributor and **wrong for the agent under test** — scenario 02
+  is passed by correcting the wrong test's expected value.
+
+Fixture rules therefore live in [`CONTRIBUTING.md`](../../CONTRIBUTING.md), which is read by authors and does
+not auto-inject.
 
 ## On `priority`
 
