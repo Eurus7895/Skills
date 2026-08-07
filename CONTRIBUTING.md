@@ -180,21 +180,94 @@ Rules of thumb:
 
 ## Progressive disclosure
 
-Skills load in three levels:
+**This is the standard. Decide which level every piece of content belongs to before you write it.**
 
-| Level | What | When |
-| ----- | ---- | ---- |
-| 1 | `name` + `description` | always in context |
-| 2 | `SKILL.md` body | when the skill triggers |
-| 3 | `references/`, `scripts/`, `assets/` | only when `SKILL.md` points at them |
+Skills load in three stages so that having many installed does not flood the context window. Each stage has a
+different trigger, a different cost, and — critically — a different **guarantee**.
 
-Budgets:
+| Level | What loads | When | Guaranteed? |
+| ----- | ---------- | ---- | ----------- |
+| 1 | `name` + `description` | Session start, every skill installed | **Yes** — mechanical |
+| 2 | The **whole** `SKILL.md` body | The skill activates | Activation is model judgment; the load is mechanical |
+| 3 | One file under `references/`, `scripts/`, `assets/` | The model chooses to open or run it | **No** — model judgment throughout |
+
+The single rule that follows from this table: **if it must always apply, it goes in Level 2.** A rule the model
+has to decide to go and read is not a rule.
+
+### Level 1 — metadata
+
+Always resident, for every installed skill, whether or not it is ever used. This is the **only** text seen on
+every request, and it is the sole input to skill selection — Level 1 *is* the router. See
+[Writing the description](#writing-the-description).
+
+Two separate limits apply, and the second is the one that bites first:
+
+- **Per skill:** `description` and `when_to_use` are concatenated and truncated at **1,536 characters**.
+  Silent — no error. Put the key use case and any *"use X instead"* disambiguation **first**, because the tail
+  is what gets cut.
+- **Per collection:** all descriptions share a listing budget of roughly **1% of the model's context window**.
+  On overflow, descriptions are dropped **starting with the least-invoked skills** — and a newly added skill
+  is by definition least-invoked. The skill's *name* survives; only its description disappears, so it stops
+  matching requests while still appearing installed.
+
+That second failure mode is invisible until someone asks why a new skill never fires. It is also the strongest
+argument for keeping plugins narrow and separately installable: a user who installs one plugin spends budget on
+its skills alone.
+
+Measure it rather than guessing — `/doctor` reports the listing's context cost and its biggest contributors,
+and `/context` shows the size after the budget is applied.
+
+### Level 2 — the `SKILL.md` body
+
+On activation the **entire** body loads. Not a summary, not the relevant sections — all of it. And it **stays
+in context for the rest of the session**, so every line is a recurring cost, not a one-time one. That is the
+real reason for the budget below.
 
 - Keep `SKILL.md` under **~500 lines**. Approaching that means the content belongs in `references/`.
-- When you move content out, leave an explicit pointer: *"For the full field reference, read
-  `references/fields.md`."* An unreferenced file is never read.
+- **Put what matters at the top.** After context compaction a skill is re-attached with only its **first
+  ~5,000 tokens** kept, so content at the end is what gets cut. Hard rules, safety constraints, and the output
+  contract go early; housekeeping conventions can trail.
+- State what to do, not how or why. Narration is pure recurring cost.
+
+### Level 3 — bundled resources
+
+Loaded only if the model opts in, one file at a time. Two kinds live here and they behave **completely
+differently**:
+
+- **`references/` are read** — opening one costs its full length in context. Real cost, paid on use. Only put
+  detail here that is needed *sometimes*: per-framework variants, API tables, format specs.
+- **`scripts/` are executed** — they never enter context at all. Only their output does. A 350-line script
+  costs whatever its output costs, and the model cannot misremember logic it never read. Prefer a script over
+  a reference whenever the work is deterministic.
+
+Rules:
+
+- **Always leave an explicit pointer.** An unreferenced file is never read. Say when to load it:
+  *"Step 1, always — before choosing any framework."*
+- For scripts, say so explicitly: *"Run it; you do not need to read it."* Otherwise the model may read the
+  source and pay for it needlessly.
 - Any reference file over ~300 lines gets a table of contents at the top.
-- Scripts can be arbitrarily large — they execute without being loaded into context.
+- Scripts can be arbitrarily large.
+
+### Choosing a level
+
+| The content is… | Level | Why |
+| --------------- | ----- | --- |
+| What the skill does and when to fire | 1 | It is the only thing available at selection time |
+| A rule that must always hold | 2, near the top | Level 3 is optional; the tail is truncated on compaction |
+| The output contract | 2 | The skill cannot honour a format it did not load |
+| Needed only in some branches | 3, `references/` | Keeps the recurring cost off every turn |
+| Deterministic and repetitive | 3, `scripts/` | Executes without entering context |
+
+### A caveat on the numbers
+
+The budgets above (1,536 characters, ~1% listing budget, ~5,000-token re-attachment) are Claude Code's
+documented behaviour and several are configurable. Other runtimes may differ, and GitHub does not publish
+equivalents. Treat them as the tightest known constraints and design to them — a skill that fits here fits
+everywhere.
+
+**Being in context is not the same as being obeyed.** No level guarantees compliance. A rule only counts as
+verified once a fixture in [`fixtures/`](fixtures/) fails when it is violated.
 
 ## Writing style
 
@@ -230,9 +303,13 @@ Before opening a PR:
 
 - [ ] `SKILL.md` exists at the skill folder root; frontmatter parses; `name` matches the folder name.
 - [ ] `description` states both what it does and when it triggers, and cannot collide with a sibling skill.
+- [ ] `description` under 1,536 characters, with the key use case and any disambiguation clause **first**.
 - [ ] "When not to use this" section is present and specific.
 - [ ] `SKILL.md` under ~500 lines; overflow moved to `references/` **and** pointed at from `SKILL.md`.
-- [ ] Every bundled file is referenced from somewhere; no orphans.
+- [ ] Hard rules and the output contract sit **near the top** of `SKILL.md`, not in the trailing sections.
+- [ ] Every piece of content is at the right [level](#progressive-disclosure): always-applies → Level 2;
+      sometimes-needed → `references/`; deterministic → `scripts/`.
+- [ ] Every bundled file is referenced from somewhere; no orphans. Scripts say *"run it, do not read it"*.
 - [ ] Skill listed in its plugin's `skills` array.
 - [ ] `plugin.json` and `marketplace.json` agree on `name`, `description`, `version`; version bumped.
 - [ ] Root `README.md` catalog row added or updated.
