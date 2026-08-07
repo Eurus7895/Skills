@@ -12,6 +12,7 @@ agent. Nothing in this repo uses Copilot-only syntax.
 | ------ | ------ | ------------- |
 | [`testing`](plugins/testing/) | `write-tests`, `review-tests`, `debug-failing-test` | Write, audit, and debug automated tests in whatever framework the repo already uses |
 | [`code-review`](plugins/code-review/) | `review-code`, `setup-review-rules` | Review code against Google's Standard of Code Review, and generate a repo's agent/review rules files |
+| [`large-context`](plugins/large-context/) | `synthesize-corpus`, `document-codebase` | Answer counting, ranking, and full-coverage questions over corpora larger than the context window, with coverage verified rather than assumed |
 
 > Adding a plugin means adding a row here **and** an entry in
 > [`.github/plugin/marketplace.json`](.github/plugin/marketplace.json).
