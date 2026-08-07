@@ -1,0 +1,22 @@
+{
+  "name": "large-context",
+  "description": "Answer counting, ranking, and exhaustive-coverage questions over corpora far larger than the context window — logs, tickets, contracts, papers, or a whole repository. Extracts every source unit into one fixed-schema table, verifies that none were dropped, and computes the answer by query rather than by reading.",
+  "version": "0.1.0",
+  "keywords": [
+    "large-context",
+    "corpus",
+    "aggregation",
+    "documentation",
+    "architecture",
+    "audit"
+  ],
+  "author": {
+    "name": "Eurus7895"
+  },
+  "repository": "https://github.com/Eurus7895/Skills",
+  "license": "MIT",
+  "skills": [
+    "./skills/synthesize-corpus/",
+    "./skills/document-codebase/"
+  ]
+}
