@@ -301,6 +301,34 @@ effectively executable. Therefore:
 - Declare side effects in `SKILL.md`: network access, package installs, writes outside the working directory.
 - No instructions that try to override the host agent's safety behavior or suppress its confirmations.
 
+## Fixtures
+
+`fixtures/` is a **measurement instrument**, not sample code. Every defect in it is deliberate, and each
+scenario asks one question: does the agent **find** the defect, or **accommodate** it?
+
+These rules are for people *authoring* fixtures. They deliberately do **not** live in
+`.github/instructions/`: an instruction scoped to `fixtures/**` is injected automatically whenever anything
+under that path is touched — including when an agent is *being evaluated* on a scenario. The glob cannot tell
+an author from a subject, so any rule placed there contaminates the measurement it is meant to protect.
+
+- **Never repair a fixture** while working on the repository. If it looks broken, it is.
+- **Never restate a planted defect** anywhere reachable from a scenario — not in a README, not in a comment,
+  not in an instruction file. Naming the vulnerabilities in `04-security` is a partial answer key, and an
+  agent that can recite them has not found them.
+- `fixtures/EXPECTED.md` is the answer key. It sits one level **above** the scenario folders so that opening
+  a single scenario never exposes it. Never move it into one, never reference it from one, and never open it
+  in a session that is demonstrating or evaluating a skill.
+- **A scenario's own pass condition overrides the "never repair" rule for the agent under test.** Scenario 02
+  is passed by correcting the wrong test's expected value — that is the measured behaviour, not a violation.
+  The rule binds contributors to this repository, not the skill being evaluated.
+- A scenario is only useful if it can **distinguish** correct from incorrect behaviour. Verify the failure is
+  real and unique by running it, and state the observed result. Beware operations that commute: an earlier
+  version of scenario 02 measured nothing because a 20% discount and a 10% tax produce the same total in
+  either order.
+- Update `EXPECTED.md` in the same commit. A scenario with a stale answer key is scored wrong.
+- `fixtures/04-security/app.py` is genuinely exploitable. Never copy from it, never run it against real data,
+  and leave its file-level warning banner intact.
+
 ## Checklist
 
 Before opening a PR:

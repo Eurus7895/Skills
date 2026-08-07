@@ -101,6 +101,7 @@ Visual Studio, and JetBrains IDEs.
 │   └── GENERAL.md                     # conventions every skill inlines
 ├── .github/
 │   ├── copilot-instructions.md
+│   ├── instructions/                  # path-scoped rules, applied automatically by glob
 │   └── plugin/
 │       └── marketplace.json           # the marketplace manifest
 ├── shared/                            # SOURCE for content used by more than one plugin
