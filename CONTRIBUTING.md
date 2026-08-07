@@ -92,6 +92,10 @@ It verifies: every JSON parses; `plugin.json` and skill frontmatter `name`s matc
 with each `plugin.json` on `description` and `version`; no dead or plugin-escaping links; skills stay under the
 500-line budget; every plugin has a README catalog row; and no materialized file has drifted.
 
+The same check runs in CI on every pull request
+([`.github/workflows/validate.yml`](.github/workflows/validate.yml)), against Python 3.9 and 3.13. CI is the
+gate — a pull request that fails it does not merge. Running it locally first is still expected.
+
 ### Sizing a plugin
 
 - Group by **the job the user is doing**, not by technology. `release-management` is a plugin;
