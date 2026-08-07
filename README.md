@@ -137,6 +137,10 @@ python3 tools/validate.py        # manifests, frontmatter, links, catalog, drift
 python3 tools/materialize.py     # regenerate copies after editing shared/
 ```
 
+Both run in CI on every pull request, against Python 3.9 and 3.13 — the floor proves the bundled scripts do
+not depend on newer syntax, since they run on a stranger's machine with no install step. Run them locally
+anyway; a red pull request is a slower way to learn the same thing.
+
 ## Fixtures
 
 [`fixtures/`](fixtures/) holds deliberately broken sample projects for demonstrating and evaluating the

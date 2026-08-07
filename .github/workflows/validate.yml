@@ -1,0 +1,43 @@
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # This repository ships standard-library-only Python that runs on a
+        # stranger's machine with no install step. The floor proves the scripts
+        # do not quietly depend on newer syntax; the ceiling catches deprecations.
+        python-version: ["3.9", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Every script compiles
+        run: python3 -m compileall -q tools shared plugins
+
+      - name: Structural validation
+        run: python3 tools/validate.py
+
+      - name: No drift between shared/ and its materialized copies
+        run: python3 tools/materialize.py --check
+
+      - name: Detection script runs and is scoped
+        run: |
+          # Bare invocation against a fixture must succeed; confidence must not
+          # be "none" for a scenario that plainly declares pytest.
+          python3 shared/scripts/detect_stack.py fixtures/02-wrong-test
