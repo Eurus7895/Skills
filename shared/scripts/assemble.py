@@ -32,6 +32,7 @@ legitimately sparse or skewed field must not deadlock a correct extraction.
 import argparse
 import csv
 import json
+import math
 import os
 import re
 import sys
@@ -45,6 +46,14 @@ EMPTY_FIELD_WARN = 0.30
 # output is often a model answering the prompt rather than reading the source -- but a
 # genuinely skewed category is also real, so this is a warning, never a failure.
 CONSTANT_FIELD_WARN = 0.95
+
+# With --rows-per-unit many, a unit that legitimately contains nothing emits no row and
+# is indistinguishable from a task that died. The extraction contract has to close that
+# gap, because this script cannot tell the two apart from the rows alone.
+SENTINEL_HINT = (
+    " -- with --rows-per-unit many, a unit holding nothing must still emit one sentinel"
+    " row, or an empty unit cannot be told apart from a failed one"
+)
 
 FIELD_RE = re.compile(r"""^\s*([A-Za-z_][\w-]*)\s*(?::\s*([a-z]+)\s*(\([^)]*\))?\s*)?(\?)?\s*$""")
 
@@ -147,6 +156,11 @@ def check_value(value, field):
             number = float(value)
         except (TypeError, ValueError):
             return "expected %s, got %r" % (kind, value)
+        # json.loads accepts NaN and Infinity, and float() accepts the strings too.
+        # Left in, a NaN turns every downstream sum into NaN silently, and int(NaN)
+        # raises rather than returning a wrong answer. Neither is a valid value.
+        if math.isnan(number) or math.isinf(number):
+            return "expected a finite %s, got %r" % (kind, value)
         if kind == "int" and number != int(number):
             return "expected int, got %r" % value
     elif kind == "enum":
@@ -298,12 +312,16 @@ def main():
         print("\nunits sent           %d" % args.units)
         print("units represented    %d" % len(counts))
         if len(counts) < args.units:
-            failures.append("%d unit(s) produced no row" % (args.units - len(counts)))
+            failures.append("%d unit(s) produced no row%s"
+                            % (args.units - len(counts), SENTINEL_HINT
+                               if args.rows_per_unit == "many" else ""))
         elif len(counts) > args.units:
             failures.append("%d more unit id(s) than were sent" % (len(counts) - args.units))
 
     if missing:
-        failures.append("%d named unit(s) missing from the table" % len(missing))
+        failures.append("%d named unit(s) missing from the table%s"
+                        % (len(missing), SENTINEL_HINT
+                           if args.rows_per_unit == "many" else ""))
         print("\nunits with no row:")
         for unit in missing[:20]:
             print("  %s" % unit)

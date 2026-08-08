@@ -72,6 +72,10 @@ python3 scripts/scan_repo.py --root . --out structure.json --summary --top 20
 Read the digest. It gives file and line totals, languages, exactly-parsed counts, skipped symlinks, and the
 fan-in ranking. Note the total file count — it is the denominator for coverage.
 
+If the digest reports `NOT SCANNED`, those files have no parser here and were never examined. Decide whether
+the concern could live in them; if it could, either grep them directly in step 3 or state the gap in
+**Coverage**. Never let an unparsed language sit behind a "no findings" result.
+
 ### 3. Discover how the concern is spelled, then narrow
 
 Open question first:
@@ -84,9 +88,13 @@ grep -rioE "md5|sha1|sha256|bcrypt|scrypt|argon2|pbkdf2" --include="*.py" . | \
 Now you know the vocabulary actually present. Narrow on it, and record the in-scope list:
 
 ```bash
-grep -rlE "md5|sha1|sha256" --include="*.py" . | sort > scope.txt
+grep -rliE "md5|sha1|sha256" --include="*.py" . | sort > scope.txt
 wc -l scope.txt
 ```
+
+**Keep `-i` on the narrowing command whenever the probe used it.** A probe that matches `MD5` while the
+narrowing does not silently drops the file, and the audit then reports complete coverage of a scope that was
+never complete. Every flag that widens the probe must widen the narrowing too.
 
 State how many files the filter removed and on what criterion. If the concern cannot be grepped — "error
 handling is missing" has no marker — skip narrowing and take the fan-in ranking's top files plus every entry
@@ -163,18 +171,37 @@ cites code that does not exist.
 Drop or correct every unverified finding. Report how many were dropped — a fabricated citation is worth
 stating, because it tells the reader how much to trust the rest.
 
-### 7. Rank and report
+### 7. Rebuild the table from what survived, then rank
 
-Only now compare across files. Count from the table, do not eyeball it:
+`findings.csv` was assembled **before** verification, so it still holds every row step 6 rejected. Ranking
+straight off it republishes the dropped findings. Rebuild from the verified set first:
+
+```bash
+python3 -c "
+import csv, json, collections
+verified = {(f['file'], f['line'], f['quote'])
+            for f in (json.loads(l) for l in open('cited.jsonl') if l.strip())}
+rows = [r for r in csv.DictReader(open('findings.csv')) if r['severity'] != 'none']
+kept = [r for r in rows if (r['file'], int(r['line']), r['quote']) in verified]
+print('assembled %d, verified %d, dropped %d' % (len(rows), len(kept), len(rows) - len(kept)))
+with open('verified.csv','w',newline='') as fh:
+    w = csv.DictWriter(fh, fieldnames=rows[0].keys()); w.writeheader(); w.writerows(kept)
+"
+```
+
+Regenerate `cited.jsonl` after removing the rejected findings, so it contains exactly the findings that
+verified. Then count from `verified.csv` — never from `findings.csv`, and never by eye:
 
 ```bash
 python3 -c "
 import csv, collections
-rows = [r for r in csv.DictReader(open('findings.csv')) if r['severity'] != 'none']
+rows = list(csv.DictReader(open('verified.csv')))
 print(collections.Counter(r['severity'] for r in rows))
 print(collections.Counter(r['category'] for r in rows).most_common())
 "
 ```
+
+The dropped count from the rebuild is what goes in the report's **Coverage** section.
 
 ## Output format
 
@@ -208,11 +235,13 @@ Produce exactly this, with no commentary around it:
 ## Coverage
 
 - files in repo:        412
+- not scanned (no parser for the extension): 0
 - narrowed to scope:    38 (contain one of md5|sha1|sha256, case-insensitive)
 - files examined:       38 of 38
 - files with findings:  12
 - files clean:          26
 - citations verified:   18 of 20; 2 dropped as unverifiable
+- figures computed from verified.csv, after the dropped findings were removed
 - validator warnings:   none
 - not examined:         none
 
