@@ -1,0 +1,14 @@
+# Shared sources materialized into this plugin.
+#   <path under shared/>  ->  <path under this plugin>
+#
+# Destinations are per-skill: a SKILL.md resolves bundled paths relative to its own
+# folder, so each skill needs its own copy.
+#
+# Regenerate with: python3 tools/materialize.py
+
+scripts/assemble.py  -> skills/synthesize-corpus/scripts/assemble.py
+
+scripts/scan_repo.py -> skills/document-codebase/scripts/scan_repo.py
+
+scripts/scan_repo.py -> skills/audit-codebase/scripts/scan_repo.py
+scripts/assemble.py  -> skills/audit-codebase/scripts/assemble.py

@@ -12,6 +12,7 @@ agent. Nothing in this repo uses Copilot-only syntax.
 | ------ | ------ | ------------- |
 | [`testing`](plugins/testing/) | `write-tests`, `review-tests`, `debug-failing-test` | Write, audit, and debug automated tests in whatever framework the repo already uses |
 | [`code-review`](plugins/code-review/) | `review-code`, `setup-review-rules` | Review code against Google's Standard of Code Review, and generate a repo's agent/review rules files |
+| [`large-context`](plugins/large-context/) | `synthesize-corpus`, `document-codebase`, `audit-codebase` | Answer counting, ranking, and full-coverage questions over corpora larger than the context window, with coverage verified rather than assumed |
 
 > Adding a plugin means adding a row here **and** an entry in
 > [`.github/plugin/marketplace.json`](.github/plugin/marketplace.json).
@@ -100,6 +101,7 @@ Visual Studio, and JetBrains IDEs.
 │   └── GENERAL.md                     # conventions every skill inlines
 ├── .github/
 │   ├── copilot-instructions.md
+│   ├── instructions/                  # path-scoped rules, applied automatically by glob
 │   └── plugin/
 │       └── marketplace.json           # the marketplace manifest
 ├── shared/                            # SOURCE for content used by more than one plugin
@@ -135,6 +137,10 @@ re-run the script.
 python3 tools/validate.py        # manifests, frontmatter, links, catalog, drift
 python3 tools/materialize.py     # regenerate copies after editing shared/
 ```
+
+Both run in CI on every pull request, against Python 3.9 and 3.13 — the floor proves the bundled scripts do
+not depend on newer syntax, since they run on a stranger's machine with no install step. Run them locally
+anyway; a red pull request is a slower way to learn the same thing.
 
 ## Fixtures
 

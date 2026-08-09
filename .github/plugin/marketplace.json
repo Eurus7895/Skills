@@ -19,6 +19,12 @@
       "source": "plugins/code-review",
       "description": "Review code against Google's Standard of Code Review, reporting findings with Conventional Comments labels and CWE-named security categories. Also generates a repository's agent and review rules files.",
       "version": "0.1.0"
+    },
+    {
+      "name": "large-context",
+      "source": "plugins/large-context",
+      "description": "Answer counting, ranking, and exhaustive-coverage questions over corpora far larger than the context window — logs, tickets, contracts, papers, or a whole repository. Extracts every source unit into one fixed-schema table, verifies that none were dropped, and computes the answer by query rather than by reading.",
+      "version": "0.2.0"
     }
   ]
 }
