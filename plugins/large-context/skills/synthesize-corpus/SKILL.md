@@ -123,12 +123,18 @@ defence against fabricated values.
 Cut the corpus with code first — it is free and exact:
 
 ```bash
-grep -rl "payment" corpus/ > candidates.txt
+grep -rli "payment" corpus/ | sort > candidates.txt
 wc -l candidates.txt
 ```
 
 Report how many units the filter removed and on what criterion. If the criterion could plausibly miss units,
-skip this step rather than narrowing on a guess.
+skip this step rather than narrowing on a guess. Carry every flag the step-2 probe used — a probe that matched
+case-insensitively and a filter that does not will drop units silently.
+
+**Once you narrow, `candidates.txt` becomes the coverage list.** Step 6 validates against the units actually
+sent for extraction, not the original corpus; validating a narrowed run against `units.txt` reports every
+deliberately excluded unit as missing and the validator can never pass. Keep both numbers — the original count
+belongs in the report, the narrowed list belongs in the validator.
 
 ### 5. Extract, one unit per row, in parallel
 
@@ -156,18 +162,27 @@ Append every task's output to one JSONL file. Keep raw output; do not clean it b
 
 Run the validator. **Run it; you do not need to read it.**
 
+Point `--unit-list` at the list you actually extracted from — `candidates.txt` when step 4 narrowed,
+`units.txt` when it did not — and set `--units` to that same list's length:
+
 ```bash
+SENT=candidates.txt          # or units.txt when nothing was narrowed
 python3 scripts/assemble.py \
   --input rows.jsonl \
   --schema "source:str, topic:enum(price|bug|support|missing-feature|other), severity:enum(low|medium|high), amount:num?, quote:str" \
-  --units 500 \
-  --unit-list units.txt \
+  --units "$(wc -l < $SENT)" \
+  --unit-list "$SENT" \
   --out table.csv
 ```
 
 Add `--rows-per-unit many` only when the extraction is genuinely one-to-many — "every transaction in this
 shard". The default rejects a repeated unit id, because a retried unit that emitted twice inflates every count
 while still looking like complete coverage.
+
+**One-to-many needs a sentinel row.** With `--rows-per-unit many`, a shard that legitimately contains no
+matching record emits nothing and is indistinguishable from a task that died. So require every unit to return
+at least one row: a real one, or one carrying an explicit "nothing here" marker in a schema field. Without
+that contract the validator cannot tell empty from failed, and it will report a complete run as incomplete.
 
 The report separates two things:
 
@@ -217,9 +232,9 @@ Evidence
 Coverage
 - unit definition: one support ticket = one row
 - units in corpus:  500
+- units sent for extraction: 500 (no narrowing applied)
 - units extracted:  500
 - units dropped:    0
-- narrowing applied: none
 - validator warnings: 1 -- `severity` is 96% "low"; checked 5 raw units, it is real
 
 Method
