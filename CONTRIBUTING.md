@@ -345,6 +345,6 @@ Before opening a PR:
 - [ ] Skill listed in its plugin's `skills` array.
 - [ ] `plugin.json` and `marketplace.json` agree on `name`, `description`, `version`; version bumped.
 - [ ] Root `README.md` catalog row added or updated.
-- [ ] Conventions from [`docs/GENERAL.md`](docs/GENERAL.md) inlined — not linked.
+- [ ] `## Conventions` states rules specific to **this** skill, not generic boilerplate.
 - [ ] No links escape the plugin folder; no absolute paths; all JSON parses.
 - [ ] Safety rules above hold.

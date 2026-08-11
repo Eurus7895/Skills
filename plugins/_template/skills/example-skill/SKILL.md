@@ -61,7 +61,9 @@ Every bundled file needs a row here and a pointer in the body. An unreferenced f
 
 ## Conventions
 
-<!-- Inlined from docs/GENERAL.md. Keep it inlined — a shipped skill cannot link back to the repo. -->
+<!-- Rules for THIS skill, stated here. A shipped skill cannot link back to the repo, and a file placed
+     beside it is only read if the agent chooses to. Keep this short: a line earns its place only if the
+     agent would do the wrong thing without it. Delete the ones that do not apply. -->
 
 - Reference bundled files by paths relative to this skill folder.
 - Report what was done and what was skipped; never claim success for something that was not verified.
