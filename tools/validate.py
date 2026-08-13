@@ -240,6 +240,24 @@ STOPWORDS = {
 }
 
 
+def strip_disambiguation(text, skill_names):
+    """Drop sentences that hand a case off to another skill.
+
+    A description saying "for a diff, use `review-code` instead" is doing the right
+    thing -- that clause is what stops the two competing. Counting its words as overlap
+    flags the authoring practice this warning exists to encourage, so the sentence is
+    removed before comparison rather than scored.
+    """
+    kept = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        if re.search(r"use\s+`?[a-z][a-z-]*`?\s+instead", sentence, re.I):
+            continue
+        if any("`%s`" % name in sentence for name in skill_names):
+            continue
+        kept.append(sentence)
+    return " ".join(kept)
+
+
 def significant_ngrams(text, n=3):
     """Content-bearing word n-grams, for comparing what two descriptions claim.
 
@@ -285,7 +303,9 @@ def check_skill_collisions():
     # Trigger similarity is a judgement call, so it only ever warns.
     # Keyed by path, not name: duplicate names would otherwise collapse into one entry
     # and the comparison would match a description against itself.
-    grams = {path: significant_ngrams(desc) for _, path, desc in skills}
+    names = {name for name, _, _ in skills}
+    grams = {path: significant_ngrams(strip_disambiguation(desc, names))
+             for _, path, desc in skills}
     for i, (name_a, path_a, _) in enumerate(skills):
         for name_b, path_b, _ in skills[i + 1:]:
             shared = grams[path_a] & grams[path_b]
