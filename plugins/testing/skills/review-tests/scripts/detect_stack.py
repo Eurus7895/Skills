@@ -7,7 +7,7 @@
 Reads the filesystem only. No network, no writes.
 
 Usage:
-    python3 detect_stack.py [REPO_ROOT] [TARGET]
+    python3 detect_stack.py [REPO_ROOT] [TARGET] [--check-env]
 
 TARGET is the file or directory being worked on. In a monorepo it selects the nearest
 enclosing package rather than the first marker found repository-wide.
@@ -21,12 +21,18 @@ Prints one JSON object to stdout:
 confidence is "high" (framework named in a manifest and test files match), "low" (a marker
 file exists but the framework is a guess), or "none" (nothing recognized).
 
-Exits 0 when confidence is high or low, 1 when none, so callers can branch on the exit code.
+--check-env adds one extra key, "env", saying whether the runner can actually be invoked
+and what it would take to make it invocable. The rest of the object is unchanged, so
+callers that do not pass the flag see exactly the output they saw before. See check_env().
+
+Exits 0 when confidence is high or low, 1 when none, 2 on a usage error, so callers can
+branch on the exit code.
 """
 
 import json
 import os
 import re
+import shutil
 import sys
 
 SKIP_DIRS = {
@@ -237,7 +243,181 @@ def nearest_marker(target):
         current = parent
 
 
-def detect(root, target=None):
+# ---------------------------------------------------------------------------
+# Environment check (--check-env)
+# ---------------------------------------------------------------------------
+
+# Toolchains that ship a test runner. Nothing to install, ever.
+BUILTIN_RUNNER = {"go", "rust", "swift"}
+
+# Ecosystems where "install the test framework" means hand-editing a build file
+# (pom.xml, build.gradle, CMakeLists.txt, a .csproj) or driving a package manager whose
+# failure modes are not worth guessing at. Reported as unknown rather than automated.
+MANUAL_INSTALL = {"java", "cpp", "php", "ruby", "csharp"}
+
+# lockfile -> package manager, most specific first
+PY_LOCKFILES = [("uv.lock", "uv"), ("poetry.lock", "poetry"), ("Pipfile.lock", "pipenv")]
+JS_LOCKFILES = [
+    ("pnpm-lock.yaml", "pnpm"),
+    ("yarn.lock", "yarn"),
+    ("bun.lockb", "bun"),
+    ("package-lock.json", "npm"),
+]
+
+# manager -> (sync command, add command template, files the add command rewrites)
+#
+# The sync commands are the frozen variants on purpose: they install exactly what the
+# lockfile already pins and never rewrite a manifest. That is what makes their `modifies`
+# list empty, and an empty list is what downgrades the required consent from ask to notify.
+MANAGERS = {
+    "uv":      ("uv sync",                        "uv add --dev %s",           ["pyproject.toml", "uv.lock"]),
+    "poetry":  ("poetry install",                 "poetry add --group dev %s", ["pyproject.toml", "poetry.lock"]),
+    "pipenv":  ("pipenv install --dev",           "pipenv install --dev %s",   ["Pipfile", "Pipfile.lock"]),
+    "pip":     ("pip install %s",                 "pip install %s",            []),
+    "npm":     ("npm ci",                         "npm install --save-dev %s", ["package.json", "package-lock.json"]),
+    "pnpm":    ("pnpm install --frozen-lockfile", "pnpm add -D %s",            ["package.json", "pnpm-lock.yaml"]),
+    "yarn":    ("yarn install --frozen-lockfile", "yarn add -D %s",            ["package.json", "yarn.lock"]),
+    "bun":     ("bun install --frozen-lockfile",  "bun add -d %s",             ["package.json", "bun.lockb"]),
+}
+
+# framework -> the executable it installs, where the two differ
+BINARIES = {"playwright": "playwright", "builtin": None, "testing": None}
+
+
+def package_manager(root, ecosystem):
+    table = PY_LOCKFILES if ecosystem == "python" else JS_LOCKFILES
+    for lockfile, manager in table:
+        if os.path.isfile(os.path.join(root, lockfile)):
+            return manager
+    # No lockfile. pip touches no tracked file, so it is the safe assumption for Python;
+    # npm is the JS default and its `ci` will fail loudly rather than write anything.
+    return "pip" if ecosystem == "python" else "npm"
+
+
+def is_declared(marker_path, ecosystem, framework):
+    """True when the project's own manifest asks for this framework.
+
+    Deliberately independent of `confidence`, which is downgraded whenever the repo has no
+    test files yet -- exactly the state write-tests is invoked in. Keying off confidence
+    would read "pytest in pyproject.toml, no tests written yet" as undeclared and propose
+    adding a dependency the project already has.
+    """
+    if not framework:
+        return False
+    haystack = read(marker_path)
+    if ecosystem == "javascript" and framework == "playwright":
+        return "@playwright/test" in haystack
+    return re.search(r"\b%s\b" % re.escape(framework), haystack) is not None
+
+
+# Managers that own a project-local environment. For these, a runner on PATH is not an
+# answer: a global pytest run against a uv project cannot see the project's dependencies
+# and dies on ImportError rather than on "command not found". Only the project's own
+# environment counts.
+ISOLATED_MANAGERS = {"uv", "poetry", "pipenv", "npm", "pnpm", "yarn", "bun"}
+
+
+def is_available(root, ecosystem, framework, manager):
+    """True when the runner can actually be invoked. Filesystem only -- nothing is run.
+
+    importlib is not used: it would report on the interpreter running this script, which
+    is usually not the project's.
+    """
+    binary = BINARIES.get(framework, framework)
+    if not binary:
+        return True
+    if ecosystem == "javascript":
+        return os.path.isfile(os.path.join(root, "node_modules", ".bin", binary))
+    for venv in (".venv", "venv"):
+        for sub, exe in (("bin", binary), ("Scripts", binary + ".exe")):
+            if os.path.isfile(os.path.join(root, venv, sub, exe)):
+                return True
+    if manager in ISOLATED_MANAGERS:
+        return False
+    return shutil.which(binary) is not None
+
+
+def check_env(root, ecosystem, framework, marker_path):
+    """Report whether the detected runner is installed, and what installing it would cost.
+
+    Three states, not two, because "declared but not installed" and "not declared" carry
+    very different risk:
+
+      declared + available    -> action none:    nothing to do
+      declared + missing      -> action sync:    install what the project already asks for
+      not declared + missing  -> action add:     write a new dependency into tracked files
+
+    `modifies` lists the git-tracked files the command rewrites, and `consent` is derived
+    from it: an empty list needs the user told, a non-empty list needs the user asked.
+    Callers must not re-derive that rule; it lives here so every skill applies it the same
+    way.
+    """
+    env = {
+        "package_manager": None,
+        "declared": False,
+        "available": False,
+        "action": "unknown",
+        "command": None,
+        "modifies": [],
+        "consent": "ask",
+        "notes": [],
+    }
+
+    if ecosystem in BUILTIN_RUNNER:
+        env.update(available=True, declared=True, action="none", consent="none")
+        env["notes"].append("the %s toolchain ships its test runner; nothing to install"
+                            % ecosystem)
+        return env
+
+    if ecosystem in MANUAL_INSTALL:
+        env["notes"].append(
+            "installing a test framework for %s means editing %s by hand; do that with the "
+            "user rather than automatically" % (ecosystem, os.path.basename(marker_path)))
+        return env
+
+    if ecosystem not in ("python", "javascript"):
+        env["notes"].append("no environment check implemented for %s" % ecosystem)
+        return env
+
+    if not framework:
+        env["notes"].append("no test framework was detected, so there is nothing to check "
+                            "for; resolve the framework first")
+        return env
+
+    manager = package_manager(root, ecosystem)
+    sync_cmd, add_cmd, add_modifies = MANAGERS[manager]
+    env["package_manager"] = manager
+    env["declared"] = is_declared(marker_path, ecosystem, framework)
+    env["available"] = is_available(root, ecosystem, framework, manager)
+
+    if env["available"]:
+        env["action"] = "none"
+        env["consent"] = "none"
+        if not env["declared"]:
+            env["notes"].append(
+                "%s is installed but not named in %s; the tests will run here and fail on a "
+                "clean checkout" % (framework, os.path.basename(marker_path)))
+        return env
+
+    if env["declared"]:
+        env["action"] = "sync"
+        env["command"] = sync_cmd % framework if "%s" in sync_cmd else sync_cmd
+        env["notes"].append("%s is named in %s but is not installed"
+                            % (framework, os.path.basename(marker_path)))
+    else:
+        env["action"] = "add"
+        env["command"] = add_cmd % framework
+        # Listed unconditionally: a lockfile the add command would create is as much a
+        # change to the working tree as one it would rewrite.
+        env["modifies"] = list(add_modifies)
+        env["notes"].append("%s is not named in %s and is not installed"
+                            % (framework, os.path.basename(marker_path)))
+
+    env["consent"] = "ask" if env["modifies"] else "notify"
+    return env
+
+
+def detect(root, target=None, with_env=False):
     notes = []
 
     if target:
@@ -245,7 +425,10 @@ def detect(root, target=None):
         if package_dir and os.path.abspath(package_dir) != os.path.abspath(root):
             notes.append("scoped to the nearest enclosing package: %s"
                          % os.path.relpath(package_dir, root))
-            result = detect(package_dir)
+            # Recursing with the package dir as root is what makes --check-env look for
+            # node_modules/ and .venv/ beside the package's own manifest, not beside the
+            # repository root's.
+            result = detect(package_dir, with_env=with_env)
             result["notes"] = notes + result["notes"]
             return result
 
@@ -259,7 +442,7 @@ def detect(root, target=None):
             if name in content:
                 framework = name
                 break
-        return {
+        result = {
             "ecosystem": "csharp",
             "test_framework": framework,
             "runner_command": "dotnet test",
@@ -268,6 +451,9 @@ def detect(root, target=None):
             "marker": os.path.relpath(csproj, root),
             "notes": notes,
         }
+        if with_env:
+            result["env"] = check_env(root, "csharp", framework, csproj)
+        return result
 
     for name, ecosystem, default_fw, default_runner, glob in MARKERS:
         if name not in markers:
@@ -308,7 +494,7 @@ def detect(root, target=None):
             others = sorted(k for k in markers if k != name)
             notes.append("other ecosystem markers present: %s" % ", ".join(others))
 
-        return {
+        result = {
             "ecosystem": ecosystem,
             "test_framework": framework,
             "runner_command": runner,
@@ -317,8 +503,11 @@ def detect(root, target=None):
             "marker": os.path.relpath(path, root),
             "notes": notes,
         }
+        if with_env:
+            result["env"] = check_env(root, ecosystem, framework, path)
+        return result
 
-    return {
+    result = {
         "ecosystem": None,
         "test_framework": None,
         "runner_command": None,
@@ -327,10 +516,42 @@ def detect(root, target=None):
         "marker": None,
         "notes": ["no recognized ecosystem marker found"],
     }
+    if with_env:
+        result["env"] = {
+            "package_manager": None, "declared": False, "available": False,
+            "action": "unknown", "command": None, "modifies": [], "consent": "ask",
+            "notes": ["no ecosystem was detected, so no environment can be checked"],
+        }
+    return result
+
+
+FLAGS = {"--check-env"}
 
 
 def main(argv):
-    args = [a for a in argv[1:] if not a.startswith("-")]
+    # Unknown flags are refused rather than dropped. Skipping them silently means a typo
+    # like --check-eng produces a normal-looking result with no "env" key, which a caller
+    # reads as "the environment is fine" -- the one wrong answer that leads to running a
+    # test suite against a runner that is not installed.
+    flags = set()
+    args = []
+    for arg in argv[1:]:
+        if arg.startswith("-"):
+            if arg not in FLAGS:
+                print(json.dumps({"error": "unknown option: %s" % arg,
+                                  "usage": "detect_stack.py [REPO_ROOT] [TARGET] [%s]"
+                                           % " ".join(sorted(FLAGS)),
+                                  "confidence": "none"}))
+                return 2
+            flags.add(arg)
+        else:
+            args.append(arg)
+
+    if len(args) > 2:
+        print(json.dumps({"error": "expected at most REPO_ROOT and TARGET, got %d arguments"
+                                   % len(args), "confidence": "none"}))
+        return 2
+
     root = args[0] if args else "."
     target = args[1] if len(args) > 1 else None
 
@@ -341,7 +562,7 @@ def main(argv):
         print(json.dumps({"error": "no such target: %s" % target, "confidence": "none"}))
         return 1
 
-    result = detect(root, target)
+    result = detect(root, target, with_env="--check-env" in flags)
     print(json.dumps(result, indent=2))
     return 1 if result["confidence"] == "none" else 0
 
