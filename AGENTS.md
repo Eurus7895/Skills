@@ -90,14 +90,15 @@ documentation nit.
 - A skill's frontmatter `name` **must** equal its folder name. Same for a plugin.
 - Every skill folder must be listed in its plugin's `skills` array. An unlisted skill silently does not install.
 - **A `SKILL.md` may never link outside its own plugin folder.** Plugins install standalone onto a user's
-  machine, so a link to a repo-level file becomes a dead path. Shared conventions live in
-  [`docs/GENERAL.md`](docs/GENERAL.md) and are **inlined** into each skill, not linked.
+  machine, so a link to a repo-level file becomes a dead path. Each skill states **its own** rules in its own
+  body — there is no shared conventions file to inline, because anything a skill needs at runtime has to be
+  in the skill.
 - Use relative paths only. No absolute paths, no `/home/...`, no machine-specific anything.
 - No secrets, tokens, or credentials — not in docs, not in scripts, not in examples.
 - If a bundled script makes network calls, installs packages, or writes outside the working directory, say so
   explicitly in the `SKILL.md`. Silent side effects are not acceptable.
-- Do not edit `docs/GENERAL.md` as part of adding a single skill. It is cross-cutting; changing it changes every
-  skill, so it gets its own commit and its own reason.
+- Write a skill's rules for **that skill**. Do not add generic boilerplate to fill a section — a rule earns
+  its place in a `SKILL.md` only if the agent would do the wrong thing without it.
 - Do not create a pull request unless you were asked to.
 
 ## Definition of done

@@ -18,11 +18,35 @@ MARKETPLACE = os.path.join(REPO, ".github", "plugin", "marketplace.json")
 README = os.path.join(REPO, "README.md")
 SKILL_LINE_BUDGET = 500
 
+# Frontmatter `description` + `when_to_use` are concatenated and truncated, silently.
+# Sourced from the Claude Code skills reference; GitHub publishes no equivalent for
+# Copilot, so treat these as the tightest known bound rather than the platform's.
+DESC_WARN = 1024
+DESC_LIMIT = 1536
+
+# Anything outside this set makes packaging and upload fail with a hard error rather
+# than ignoring the field. `applyTo` belongs to .github/instructions, not to skills --
+# instructions bind by path glob, skills bind by description matching.
+ALLOWED_FRONTMATTER = {
+    "name", "description", "when_to_use", "license",
+    "compatibility", "metadata", "allowed-tools",
+}
+
 FAILURES = []
+WARNINGS = []
 
 
 def fail(where, message):
     FAILURES.append("%s: %s" % (where, message))
+
+
+def warn(where, message):
+    """Advisory only -- never affects the exit code.
+
+    Reserved for heuristics. A check that can be wrong must not be able to block a
+    pull request, or the first false positive gets the whole validator disabled.
+    """
+    WARNINGS.append("%s: %s" % (where, message))
 
 
 def rel(path):
@@ -138,6 +162,24 @@ def check_skill(plugin, skill_dir, skill_md):
     if not fields.get("description"):
         fail(where, "frontmatter has no description")
 
+    unexpected = sorted(set(fields) - ALLOWED_FRONTMATTER)
+    if unexpected:
+        fail(where, "frontmatter has unsupported key(s) %s -- packaging fails hard on "
+                    "these rather than ignoring them. Allowed: %s"
+             % (", ".join(repr(k) for k in unexpected),
+                ", ".join(sorted(ALLOWED_FRONTMATTER))))
+
+    # The description is the only text seen before the skill is selected, and the
+    # tail is what gets cut -- which is where the "for X, use Y instead" clause lives.
+    desc_len = len(fields.get("description", "")) + len(fields.get("when_to_use", ""))
+    if desc_len > DESC_LIMIT:
+        fail(where, "description is %d chars, over the %d-char limit -- the tail is "
+                    "truncated silently, taking any disambiguation clause with it"
+             % (desc_len, DESC_LIMIT))
+    elif desc_len > DESC_WARN:
+        warn(where, "description is %d chars, past %d -- put the key use case and any "
+                    "\"use X instead\" clause first" % (desc_len, DESC_WARN))
+
     lines = len(text.splitlines())
     if lines > SKILL_LINE_BUDGET:
         fail(where, "is %d lines, over the %d-line budget -- move detail to references/"
@@ -187,6 +229,91 @@ def bundled_refs(text):
         if span.startswith(BUNDLED_DIRS) and "/" in span and " " not in span:
             refs.add(span)
     return sorted(refs)
+
+
+STOPWORDS = {
+    "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "that", "this",
+    "it", "its", "is", "are", "was", "be", "been", "when", "whenever", "use", "uses",
+    "user", "users", "says", "asks", "ask", "what", "which", "not", "no", "any", "all",
+    "code", "repository", "repo", "file", "files", "instead", "rather", "than", "them",
+    "they", "their", "you", "your", "from", "by", "at", "as", "so", "if", "one", "each",
+}
+
+
+def strip_disambiguation(text, skill_names):
+    """Drop sentences that hand a case off to another skill.
+
+    A description saying "for a diff, use `review-code` instead" is doing the right
+    thing -- that clause is what stops the two competing. Counting its words as overlap
+    flags the authoring practice this warning exists to encourage, so the sentence is
+    removed before comparison rather than scored.
+    """
+    kept = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        if re.search(r"use\s+`?[a-z][a-z-]*`?\s+instead", sentence, re.I):
+            continue
+        if any("`%s`" % name in sentence for name in skill_names):
+            continue
+        kept.append(sentence)
+    return " ".join(kept)
+
+
+def significant_ngrams(text, n=3):
+    """Content-bearing word n-grams, for comparing what two descriptions claim.
+
+    Quoted-phrase comparison was tried first and is not good enough: review-tests and
+    debug-failing-test once both claimed flaky tests in unquoted prose, and a quoted
+    scan reported no overlap at all.
+    """
+    words = [w for w in re.findall(r"[a-z]+", text.lower()) if w not in STOPWORDS]
+    return {" ".join(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+
+def collect_skills():
+    """(name, path, description) for every skill in a real plugin."""
+    found = []
+    for plugin in plugin_names():
+        skills_dir = os.path.join(PLUGINS, plugin, "skills")
+        if not os.path.isdir(skills_dir):
+            continue
+        for entry in sorted(os.listdir(skills_dir)):
+            skill_md = os.path.join(skills_dir, entry, "SKILL.md")
+            if not os.path.isfile(skill_md):
+                continue
+            fields = parse_frontmatter(read(skill_md)) or {}
+            found.append((fields.get("name") or entry, rel(skill_md),
+                          fields.get("description", "")))
+    return found
+
+
+def check_skill_collisions():
+    """Two skills must not share a name, and should not compete for one request."""
+    skills = collect_skills()
+
+    # Exact match, no judgement involved -- a hard failure.
+    by_name = {}
+    for name, path, _ in skills:
+        by_name.setdefault(name, []).append(path)
+    for name, paths in sorted(by_name.items()):
+        if len(paths) > 1:
+            fail("plugins/", "skill name %r is defined in %d places (%s) -- names are "
+                             "global once installed, so both entries compete and cost "
+                             "listing budget twice" % (name, len(paths), ", ".join(paths)))
+
+    # Trigger similarity is a judgement call, so it only ever warns.
+    # Keyed by path, not name: duplicate names would otherwise collapse into one entry
+    # and the comparison would match a description against itself.
+    names = {name for name, _, _ in skills}
+    grams = {path: significant_ngrams(strip_disambiguation(desc, names))
+             for _, path, desc in skills}
+    for i, (name_a, path_a, _) in enumerate(skills):
+        for name_b, path_b, _ in skills[i + 1:]:
+            shared = grams[path_a] & grams[path_b]
+            if len(shared) >= 2:
+                sample = ", ".join(repr(s) for s in sorted(shared)[:3])
+                warn(path_a, "description overlaps %r on %d phrase(s): %s -- if both "
+                             "could match one request, add a \"for X, use Y instead\" "
+                             "clause to each" % (name_b, len(shared), sample))
 
 
 def check_marketplace(manifests):
@@ -316,10 +443,16 @@ def main():
 
     check_marketplace(manifests)
     check_marketplace_name()
+    check_skill_collisions()
     check_readme(names)
     check_repo_links()
     check_tracked()
     check_materialized()
+
+    for line in WARNINGS:
+        print("WARN %s" % line)
+    if WARNINGS:
+        print("")
 
     if FAILURES:
         for line in FAILURES:
@@ -327,8 +460,10 @@ def main():
         print("\n%d problem(s)." % len(FAILURES))
         return 1
 
-    print("OK %d plugin(s), %d skill(s) -- all checks passed"
-          % (len(manifests), sum(len(m.get("skills") or []) for m in manifests.values())))
+    print("OK %d plugin(s), %d skill(s) -- all checks passed%s"
+          % (len(manifests),
+             sum(len(m.get("skills") or []) for m in manifests.values()),
+             " (%d warning(s))" % len(WARNINGS) if WARNINGS else ""))
     return 0
 
 

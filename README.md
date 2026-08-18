@@ -97,8 +97,6 @@ Visual Studio, and JetBrains IDEs.
 .
 ├── AGENTS.md                          # start here if you are an AI agent
 ├── CONTRIBUTING.md                    # the authoring standard
-├── docs/
-│   └── GENERAL.md                     # conventions every skill inlines
 ├── .github/
 │   ├── copilot-instructions.md
 │   ├── instructions/                  # path-scoped rules, applied automatically by glob
