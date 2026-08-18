@@ -43,7 +43,7 @@ Skills in this repo read files from **someone else's repository** — source cod
 - No obfuscated, minified, base64-encoded, or generated-unreadable scripts. If a reviewer cannot read it, it
   does not ship.
 - Bundled scripts declare their side effects in the `SKILL.md` that points at them: network access, package
-  installation, and any write outside the working directory.
+  installation, any write outside the working directory, and any allowlisted third-party import.
 - Default posture for a bundled script is **read-only, filesystem-only, no network**. Departing from that
   requires it to be stated at the point of use.
 
