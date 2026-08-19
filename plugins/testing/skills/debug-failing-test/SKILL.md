@@ -87,6 +87,9 @@ takes. **Read `consent`; do not re-derive it** from `action` or `modifies`.
   that starts the suite, nothing else. Changing a dependency version until the assertion goes green is the
   same defect as weakening the assertion, hidden one level down — if you believe a dependency is the cause,
   say so and let the user decide.
+- **Run `env.command` in `env.working_directory`.** In a workspace that is the member, not the
+  repository root; an install run from the wrong directory edits the wrong manifest, and the files
+  you quoted are then not the files that changed.
 - **Prefer `env.invocation` over `runner_command`.** A project virtualenv that is not active holds a working
   runner the bare command will not reach, and "command not found" is not a test failure.
 - If the environment had to be prepared, say so in the report. A reader needs to know whether the test they are

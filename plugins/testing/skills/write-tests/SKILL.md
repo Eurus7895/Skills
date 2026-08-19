@@ -83,6 +83,9 @@ writing no file at all, and that still needs asking.
   with no one watching.
 - **Install only what `env.command` says.** Not a framework you prefer, not a global install to sidestep a
   refusal, not an upgrade of something already there.
+- **Run `env.command` in `env.working_directory`.** In a workspace that is the member, not the
+  repository root; an install run from the wrong directory edits the wrong manifest, and the files
+  you quoted are then not the files that changed.
 - **Prefer `env.invocation` over `runner_command`.** A project virtualenv that is not active holds a working
   `pytest` the bare command will not reach.
 - If the install fails, report its real output and stop. A second framework in a repo that already has one is

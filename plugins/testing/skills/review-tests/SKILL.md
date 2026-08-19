@@ -105,6 +105,9 @@ repository: you are installing only to be able to observe. `env.consent` says ho
 - **A review is not a licence to change the project.** When consent is `ask`, declining is a normal outcome:
   report the audit you could do by reading, and say plainly that the suite was never executed. A review that
   states its own limits is worth more than one that quietly changed the repository to finish.
+- **Run `env.command` in `env.working_directory`.** In a workspace that is the member, not the
+  repository root; an install run from the wrong directory edits the wrong manifest, and the files
+  you quoted are then not the files that changed.
 - **Prefer `env.invocation` over `runner_command`.** A project virtualenv that is not active holds a working
   runner the bare command will not reach.
 - Never install a framework the repository does not use in order to run tests written for another one.

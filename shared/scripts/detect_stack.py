@@ -219,21 +219,28 @@ def find_csproj(root):
     return None
 
 
-def nearest_marker(target):
+def nearest_marker(target, boundary=None):
     """Walk up from target to the closest directory holding a marker file.
 
     In a monorepo the answer depends on which package you are working in: a root
     pyproject.toml alongside a nested Vitest package must not report pytest for a file
     inside that package. The nearest enclosing marker wins.
+
+    `boundary` stops the walk. Without it a repository containing no marker but nested
+    inside another project would resolve to the parent, and --check-env would then report
+    an install command for dependencies and files outside the directory the caller named.
     """
     names = [name for name, *_ in MARKERS]
     current = os.path.abspath(target)
     if os.path.isfile(current):
         current = os.path.dirname(current)
+    stop = os.path.abspath(boundary) if boundary else None
     while True:
         for name in names:
             if os.path.isfile(os.path.join(current, name)):
                 return current, name
+        if stop is not None and current == stop:
+            return None, None
         parent = os.path.dirname(current)
         if parent == current:
             return None, None
@@ -255,9 +262,11 @@ BUILTIN_TOOLCHAIN = {"go": "go", "rust": "cargo", "swift": "swift"}
 # abandoned in 2007.
 STDLIB_FRAMEWORKS = {"unittest"}
 
-# Ecosystems where "install the test framework" means hand-editing a build file
-# (pom.xml, build.gradle, CMakeLists.txt, a .csproj) or driving a package manager whose
-# failure modes are not worth guessing at. Reported as unknown rather than automated.
+# Ecosystems where installing a test framework means hand-editing a build file (pom.xml,
+# build.gradle, CMakeLists.txt, a .csproj) or driving a package manager whose failure
+# modes are not worth guessing at. No install is ever proposed for these -- but the runner
+# they already have still has to be looked for, because a caller that gates on
+# `available` would otherwise treat every working Maven project as unusable.
 MANUAL_INSTALL = {"java", "cpp", "php", "ruby", "csharp"}
 
 # lockfile -> package manager, most specific first. bun.lock is the text lockfile written
@@ -273,12 +282,16 @@ JS_LOCKFILES = [
 
 # manager -> how to install from a lockfile, how to install without one, and how to add.
 #
-# `sync` is the variant that provably writes nothing: it either installs exactly what the
-# lockfile pins or refuses. That is what lets the sync action carry an empty `modifies`
-# list, which is what keeps its consent at notify rather than ask.
+# `sync` is the variant that provably writes no tracked file: it either installs exactly
+# what the lockfile pins or refuses. That is what lets the sync action carry an empty
+# `modifies` list, which is what keeps its consent at notify rather than ask.
 #
-#   uv sync --locked        asserts uv.lock will remain unchanged (bare `uv sync` may
-#                           rewrite it when the manifest has drifted)
+#   uv sync --locked --inexact
+#                           --locked asserts uv.lock will remain unchanged (bare
+#                           `uv sync` may rewrite it when the manifest has drifted);
+#                           --inexact stops it removing packages that are in the
+#                           environment but not the lockfile. Without it a "nothing is
+#                           rewritten" sync can still uninstall someone's work.
 #   poetry install          refuses with "pyproject.toml changed significantly" rather
 #                           than regenerating poetry.lock
 #   npm ci / --frozen-lockfile
@@ -289,7 +302,8 @@ JS_LOCKFILES = [
 MANAGERS = {
     "uv": {
         "lockfile": "uv.lock", "manifest": "pyproject.toml",
-        "sync": "uv sync --locked", "create": "uv sync", "add": "uv add --dev %s",
+        "sync": "uv sync --locked --inexact", "create": "uv sync",
+        "add": "uv add --dev %s",
     },
     "poetry": {
         "lockfile": "poetry.lock", "manifest": "pyproject.toml",
@@ -336,6 +350,61 @@ BINARIES = {"playwright": "playwright"}
 ISOLATED_MANAGERS = {"uv", "poetry", "pipenv", "npm", "pnpm", "yarn", "bun"}
 
 
+def executable(path):
+    return os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def manual_runner(root, ecosystem, marker_path):
+    """Find the runner of an ecosystem no package manager here will install for.
+
+    A wrapper checked into the repository wins over PATH: `./gradlew` is the version the
+    project pins, and a globally installed gradle may not be it.
+    """
+    marker = os.path.basename(marker_path)
+    local, names = [], []
+    if ecosystem == "java":
+        if marker.startswith("build.gradle"):
+            local, names = ["gradlew", "gradlew.bat"], ["gradle"]
+        else:
+            local, names = ["mvnw", "mvnw.cmd"], ["mvn"]
+    elif ecosystem == "csharp":
+        names = ["dotnet"]
+    elif ecosystem == "ruby":
+        names = ["bundle", "bundler"]
+    elif ecosystem == "php":
+        local, names = [os.path.join("vendor", "bin", "phpunit")], ["phpunit"]
+    elif ecosystem == "cpp":
+        names = ["ctest"]
+    for rel in local:
+        if executable(os.path.join(root, rel)):
+            return os.path.join(".", rel)
+    for name in names:
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def declared_manager(root):
+    """The manager named by package.json's "packageManager" field, if any.
+
+    Corepack treats that field as authoritative. Ignoring it and defaulting to npm turns a
+    lockfile-less pnpm project into `npm install`, which writes a package-lock.json that
+    conflicts with the manager the project actually uses.
+    """
+    path = os.path.join(root, "package.json")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            spec = json.load(fh).get("packageManager")
+    except (OSError, ValueError):
+        return None
+    if isinstance(spec, str):
+        name = spec.split("@", 1)[0].strip().lower()
+        if name in MANAGERS:
+            return name
+    return None
+
+
 def package_manager(package_root, repo_root, ecosystem):
     """Return (manager, lockfile_dir, lockfile_name), searching up to repo_root.
 
@@ -355,6 +424,10 @@ def package_manager(package_root, repo_root, ecosystem):
         if current == stop or parent == current or not current.startswith(stop + os.sep):
             break
         current = parent
+    if ecosystem == "javascript":
+        named = declared_manager(package_root)
+        if named:
+            return named, None, None
     # No lockfile anywhere up to the repository root.
     return ("pip" if ecosystem == "python" else "npm"), None, None
 
@@ -362,26 +435,34 @@ def package_manager(package_root, repo_root, ecosystem):
 # TOML tables whose entries are dependencies. Anything else -- [tool.pytest.ini_options],
 # [build-system], a comment, the project name -- is configuration, not a declaration that
 # the package will be installed.
-PY_DEP_SECTION = re.compile(
-    r"^(project\.optional-dependencies"
-    r"|dependency-groups"
-    r"|tool\.poetry\.(dev-)?dependencies"
-    r"|tool\.poetry\.group\.[^.\]]+\.dependencies"
-    r"|tool\.pdm\.dev-dependencies"
-    r"|tool\.uv\.dev-dependencies"
-    r"|tool\.hatch\.envs\.[^.\]]+)$", re.I)
+#
+# The captured group is what the sync command has to select. `uv sync` installs the main
+# dependencies and the default dependency group; an extra or a non-default group is not
+# installed unless it is named, so a declaration found in one of those tables produces a
+# sync that completes without installing anything.
+PY_DEP_TABLES = [
+    (re.compile(r"^project\.optional-dependencies$", re.I), "extra"),
+    (re.compile(r"^dependency-groups$", re.I), "group"),
+    (re.compile(r"^tool\.poetry\.(?:dev-)?dependencies$", re.I), None),
+    (re.compile(r"^tool\.poetry\.group\.([^.\]]+)\.dependencies$", re.I), "poetry-group"),
+    (re.compile(r"^tool\.pdm\.dev-dependencies$", re.I), "group"),
+    (re.compile(r"^tool\.uv\.dev-dependencies$", re.I), None),
+    (re.compile(r"^tool\.hatch\.envs\.[^.\]]+$", re.I), None),
+]
 
 
 def declared_in_toml(text, framework):
-    """True when `framework` appears inside a dependency table, not merely in the file.
+    """Where `framework` is declared, or None.
 
-    A pyproject.toml that only carries [tool.pytest.ini_options] configures pytest without
-    asking for it to be installed. Reading that as declared sends the caller to a sync
-    command that cannot install the runner, because it was never in the lockfile.
+    Returns (selector_kind, selector_name) so the caller can build a command that actually
+    installs it. A pyproject.toml that only carries [tool.pytest.ini_options] configures
+    pytest without asking for it to be installed, and reading that as a declaration sends
+    the caller to a sync command that cannot install the runner.
     """
     pattern = re.compile(r"\b%s\b" % re.escape(framework), re.I)
     section = ""
     in_project_deps = False
+    key = None
     for raw in text.splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
@@ -389,6 +470,7 @@ def declared_in_toml(text, framework):
         if line.startswith("[") and line.endswith("]"):
             section = line.strip("[]").strip()
             in_project_deps = False
+            key = None
             continue
         if section.lower() == "project":
             # [project] holds dependencies = [...] among unrelated keys, so track whether
@@ -397,13 +479,36 @@ def declared_in_toml(text, framework):
                 in_project_deps = True
             elif re.match(r"[A-Za-z0-9_.\"'-]+\s*=", line):
                 in_project_deps = False
-            if not in_project_deps:
-                continue
-        elif not PY_DEP_SECTION.match(section):
+            if in_project_deps and pattern.search(line):
+                return (None, None)
             continue
+
+        kind = None
+        matched = False
+        for expr, sel in PY_DEP_TABLES:
+            hit = expr.match(section)
+            if hit:
+                matched = True
+                kind = sel
+                if sel == "poetry-group":
+                    key = hit.group(1)
+                break
+        if not matched:
+            continue
+
+        # Inside a table keyed by extra or group name, the key on the left of `=` is that
+        # name: `test = ["pytest"]`.
+        if kind in ("extra", "group"):
+            assignment = re.match(r"([A-Za-z0-9_.\"'-]+)\s*=", line)
+            if assignment:
+                key = assignment.group(1).strip("\"'")
         if pattern.search(line):
-            return True
-    return False
+            if kind == "poetry-group":
+                return ("poetry-group", key)
+            if kind in ("extra", "group"):
+                return (kind, key)
+            return (None, None)
+    return None
 
 
 def declared_in_package_json(path, framework):
@@ -422,39 +527,30 @@ def declared_in_package_json(path, framework):
     return framework in names
 
 
-def is_declared(root, marker_path, ecosystem, framework):
-    """True when the project's own manifest asks for this framework to be installed.
+def requirements_declaring(root, framework):
+    """The requirements file that names `framework`, or None.
 
-    Deliberately independent of `confidence`, which is downgraded whenever the repo has no
-    test files yet -- exactly the state write-tests is invoked in. Keying off confidence
-    would read "pytest in pyproject.toml, no tests written yet" as undeclared and propose
-    adding a dependency the project already has.
+    The file matters, not just the fact: it usually pins a version, and installing a bare
+    `pytest` against a project that asks for `pytest<8` produces test results from an
+    environment the project never described.
     """
-    if not framework:
-        return False
-    if ecosystem == "javascript":
-        return declared_in_package_json(marker_path, framework)
-    if marker_path.endswith(".toml"):
-        if declared_in_toml(read(marker_path), framework):
-            return True
-    elif re.search(r"\b%s\b" % re.escape(framework), read(marker_path)):
-        return True
-    # requirements files are the other place a pip project states its test dependency.
-    for name in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+    if not os.path.isdir(root):
+        return None
+    for name in sorted(os.listdir(root)):
         if name.startswith("requirements") and name.endswith(".txt"):
             if re.search(r"^\s*%s\b" % re.escape(framework),
                          read(os.path.join(root, name)), re.M | re.I):
-                return True
-    return False
+                return name
+    return None
 
 
 def find_runner(root, ecosystem, framework, manager):
-    """Return the path the runner can be invoked by, or None if it is not installed.
+    """Return the command that invokes the runner, or None if it is not installed.
 
     Filesystem only -- nothing is executed. importlib is not used: it would report on the
     interpreter running this script, which is usually not the project's.
 
-    The returned path matters as much as the boolean. A project virtualenv that is not
+    The returned value matters as much as the boolean. A project virtualenv that is not
     activated holds a perfectly good pytest that the bare command `pytest` will not reach,
     so the caller needs the qualified path rather than `runner_command`.
     """
@@ -462,17 +558,18 @@ def find_runner(root, ecosystem, framework, manager):
     if not binary:
         return None
 
-    def usable(path):
-        return os.path.isfile(path) and os.access(path, os.X_OK)
-
     if ecosystem == "javascript":
-        local = os.path.join(root, "node_modules", ".bin", binary)
-        return local if usable(local) else None
+        # Windows package managers write .cmd shims beside (or instead of) the POSIX ones.
+        for name in (binary, binary + ".cmd"):
+            local = os.path.join(root, "node_modules", ".bin", name)
+            if executable(local):
+                return local
+        return None
 
     for venv in (".venv", "venv"):
         for sub, exe in (("bin", binary), ("Scripts", binary + ".exe")):
             local = os.path.join(root, venv, sub, exe)
-            if usable(local):
+            if executable(local):
                 return local
     if manager in ISOLATED_MANAGERS:
         return None
@@ -485,12 +582,43 @@ def new_env():
         "declared": False,
         "available": False,
         "invocation": None,
+        "working_directory": ".",
         "action": "unknown",
         "command": None,
         "modifies": [],
         "consent": "ask",
         "notes": [],
     }
+
+
+def sync_command(manager, spec, framework, declaration, root):
+    """Build the command that installs an already-declared runner.
+
+    The declaration's location is part of the command, not a detail: `uv sync` skips
+    extras and non-default groups, and `pip install pytest` throws away the version a
+    requirements file pinned.
+    """
+    notes = []
+    if manager == "pip":
+        req = declaration[1] if declaration and declaration[0] == "requirements" else None
+        if req:
+            return "pip install -r %s" % req, notes
+        notes.append("installing %s without the constraint the manifest states -- pip "
+                     "cannot read it here, so check the version if it matters" % framework)
+        return "pip install %s" % framework, notes
+
+    command = spec["sync"]
+    if declaration:
+        kind, name = declaration
+        if manager == "uv" and kind == "extra" and name:
+            command += " --extra %s" % name
+        elif manager == "uv" and kind == "group" and name:
+            command += " --group %s" % name
+        elif manager == "poetry" and kind == "poetry-group" and name:
+            command += " --with %s" % name
+    if "%s" in command:
+        command = command % framework
+    return command, notes
 
 
 def check_env(root, repo_root, ecosystem, framework, marker_path):
@@ -512,11 +640,24 @@ def check_env(root, repo_root, ecosystem, framework, marker_path):
                          command happens to write no file, as with plain pip
       unknown -> ask     the script could not work out a safe command
 
-    `modifies` lists the tracked files the command rewrites. It is reported for the user's
-    benefit; it is no longer the sole input to the consent decision, because pip can add a
-    package while touching no file at all and that still needs asking.
+    `modifies` lists the tracked files the command rewrites, relative to the repository
+    root, and `working_directory` is where the command must run. Both matter in a
+    workspace: `uv add` run from the wrong directory edits the root manifest instead of
+    the package's, and consent would then have covered the wrong file.
     """
     env = new_env()
+    workdir = os.path.relpath(root, repo_root)
+    env["working_directory"] = "." if workdir == os.curdir else workdir
+
+    def tracked(name, directory=None):
+        """A path relative to the repository root, so consent covers the real file.
+
+        `directory` defaults to the package, but a workspace lockfile lives at the root
+        while the manifest being edited lives in the member -- reporting both under the
+        member names a lockfile that does not exist.
+        """
+        where = directory if directory is not None else env["working_directory"]
+        return name if where == "." else "%s/%s" % (where.replace(os.sep, "/"), name)
 
     if ecosystem in BUILTIN_TOOLCHAIN:
         tool = BUILTIN_TOOLCHAIN[ecosystem]
@@ -535,15 +676,24 @@ def check_env(root, repo_root, ecosystem, framework, marker_path):
 
     if framework in STDLIB_FRAMEWORKS:
         env.update(declared=True, available=True, action="none", consent="none",
-                   invocation=sys.executable)
+                   invocation="%s -m %s" % (sys.executable, framework))
         env["notes"].append("%s is part of the Python standard library; there is nothing to "
                             "install" % framework)
         return env
 
     if ecosystem in MANUAL_INSTALL:
-        env["notes"].append(
-            "installing a test framework for %s means editing %s by hand; do that with the "
-            "user rather than automatically" % (ecosystem, os.path.basename(marker_path)))
+        runner = manual_runner(root, ecosystem, marker_path)
+        env["declared"] = True
+        if runner:
+            env.update(available=True, invocation=runner, action="none", consent="none")
+            env["notes"].append(
+                "%s drives its tests through %s, which is present. Whether every dependency "
+                "is fetched is decided by that tool, not here." % (ecosystem, runner))
+        else:
+            env["notes"].append(
+                "no build tool for %s was found, and installing a test framework here means "
+                "editing %s by hand; do that with the user rather than automatically"
+                % (ecosystem, os.path.basename(marker_path)))
         return env
 
     if ecosystem not in ("python", "javascript"):
@@ -558,7 +708,18 @@ def check_env(root, repo_root, ecosystem, framework, marker_path):
     manager, lock_dir, lockfile = package_manager(root, repo_root, ecosystem)
     spec = MANAGERS[manager]
     env["package_manager"] = manager
-    env["declared"] = is_declared(root, marker_path, ecosystem, framework)
+
+    declaration = None
+    if ecosystem == "javascript":
+        if declared_in_package_json(marker_path, framework):
+            declaration = (None, None)
+    else:
+        if marker_path.endswith(".toml"):
+            declaration = declared_in_toml(read(marker_path), framework)
+        req = requirements_declaring(root, framework)
+        if declaration is None and req:
+            declaration = ("requirements", req)
+    env["declared"] = declaration is not None
 
     runner = find_runner(root, ecosystem, framework, manager)
     env["available"] = runner is not None
@@ -580,18 +741,22 @@ def check_env(root, repo_root, ecosystem, framework, marker_path):
 
     if env["declared"]:
         env["action"] = "sync"
-        if lockfile:
-            env["command"] = spec["sync"] % framework if "%s" in spec["sync"] else spec["sync"]
+        if lockfile or manager == "pip":
+            command, notes = sync_command(manager, spec, framework, declaration, root)
+            env["command"] = command
             env["consent"] = "notify"
-            env["notes"].append("%s is declared in %s but not installed; the lockfile already "
-                                "pins it" % (framework, os.path.basename(marker_path)))
+            env["notes"].extend(notes)
+            env["notes"].append("%s is declared in %s but not installed"
+                                % (framework, os.path.basename(marker_path)))
         else:
             # Without a lockfile the frozen command has nothing to install from -- `npm ci`
             # exits EUSAGE rather than doing the obvious thing -- so the install has to
             # create one, and creating a tracked file is not a notify-and-proceed change.
             env["command"] = (spec["create"] % framework
                               if "%s" in spec["create"] else spec["create"])
-            env["modifies"] = [spec["lockfile"]] if spec["lockfile"] else []
+            env["modifies"] = [tracked(spec["lockfile"])] if spec["lockfile"] else []
+            # No lockfile was found anywhere, so the one being created lands beside the
+            # manifest -- the package directory, not some ancestor.
             env["consent"] = "ask" if env["modifies"] else "notify"
             if spec["lockfile"]:
                 env["notes"].append("no %s exists, so the install will create one"
@@ -604,7 +769,12 @@ def check_env(root, repo_root, ecosystem, framework, marker_path):
     if spec["manifest"]:
         # Listed unconditionally: a lockfile the add command would create is as much a
         # change to the working tree as one it would rewrite.
-        env["modifies"] = [spec["manifest"]] + ([spec["lockfile"]] if spec["lockfile"] else [])
+        env["modifies"] = [tracked(spec["manifest"])]
+        if spec["lockfile"]:
+            lock_at = (os.path.relpath(lock_dir, repo_root) if lock_dir
+                       else env["working_directory"])
+            env["modifies"].append(tracked(spec["lockfile"],
+                                           "." if lock_at == os.curdir else lock_at))
         env["notes"].append("%s is not declared in %s and is not installed"
                             % (framework, os.path.basename(marker_path)))
     else:
@@ -626,7 +796,7 @@ def detect(root, target=None, with_env=False, repo_root=None):
     notes = []
 
     if target:
-        package_dir, marker_name = nearest_marker(target)
+        package_dir, marker_name = nearest_marker(target, boundary=root)
         if package_dir and os.path.abspath(package_dir) != os.path.abspath(root):
             notes.append("scoped to the nearest enclosing package: %s"
                          % os.path.relpath(package_dir, root))

@@ -56,11 +56,12 @@ the flag the output is unchanged.
 | Field | Means |
 | ----- | ----- |
 | `available` | the runner exists **and** is executable. False means nothing can be run yet. |
-| `invocation` | the path that runs it. Prefer this over `runner_command`: an inactive project virtualenv holds a working runner that the bare command will not reach. |
+| `invocation` | the command that runs it. Prefer this over `runner_command`: an inactive project virtualenv holds a working runner that the bare command will not reach. |
+| `working_directory` | where `command` must be run, relative to the root you passed. In a workspace this is the member, not the root — running an add from the wrong directory edits the wrong manifest. |
 | `declared` | the project's own manifest depends on this runner. Read from dependency tables and requirements files only — configuring a tool is not depending on it. |
 | `action` | `none`, `sync` (install what the lockfile already pins), `add` (introduce a dependency the project lacks), or `unknown` (no safe command could be worked out). |
 | `command` | the exact command. Run this or nothing. |
-| `modifies` | tracked files the command rewrites. |
+| `modifies` | tracked files the command rewrites, relative to the root you passed. A workspace lockfile is reported where it actually lives, which is not always beside the manifest. |
 | `consent` | how much agreement the command needs: `none`, `notify`, or `ask`. |
 | `notes` | what the check concluded and why. Worth reading before acting. |
 
