@@ -1,7 +1,7 @@
 ---
 applyTo: "tools/**/*.py,shared/**/*.py,plugins/**/*.py"
 priority: P3
-description: Rules for Python in this repository — standard library only, no network, no writes outside the working directory, JSON on stdout, meaningful exit codes, and the requirement to fail loudly rather than guess.
+description: Rules for Python in this repository — standard library by default with a named allowlist for optional accelerators, no network, no writes outside the working directory, JSON on stdout, meaningful exit codes, and the requirement to fail loudly rather than guess.
 ---
 
 # Scripts — Domain Standard (P3)
@@ -16,10 +16,48 @@ a written exemption is read the text is already in context. Fixture rules live i
 
 ## Hard constraints
 
-- **Python 3, standard library only.** No third-party imports, ever. A bundled script runs on a stranger's
-  machine with no install step; an `import requests` is a broken skill.
+- **Python 3, standard library by default.** A bundled script runs on a stranger's machine with no install
+  step, so the stdlib path must always work end to end. A top-level `import requests` is a broken skill.
 - Scripts must be readable. No obfuscation, no minification, no code generation that produces unreadable
   output.
+
+## Third-party imports — allowlisted, optional, and declared
+
+A package outside the standard library may be used **only as an accelerator**, never as a requirement. All
+three conditions hold at once, or the import does not ship:
+
+1. **It is named in the allowlist below.** Anything absent is forbidden. Adding a row is a pull request that
+   edits this table, with the fallback filled in — not a judgement call made while writing a script.
+2. **The import is optional and the script still works without it.** Import inside a `try`/`except
+   ImportError` and fall back to the stdlib path. Exiting because the package is missing is not an option —
+   that turns the accelerator into a requirement, which is the thing this section forbids. A script with no
+   usable stdlib fallback does not get the import at all. A module-level import that raises on a clean machine
+   is the defect this rule exists to prevent.
+3. **The `SKILL.md` pointing at the script declares it**, at the point of use, the same way network access and
+   package installation are declared.
+
+### Allowlist
+
+| Import | PyPI | Why it earns an exception | Fallback when absent |
+| ------ | ---- | ------------------------- | -------------------- |
+| `tree_sitter`, `tree_sitter_languages` | `tree-sitter`, `tree-sitter-languages` | Exact parsing for languages the stdlib cannot parse. `ast` covers Python only, and regex cannot see C++ templates, TS generics, or Go interfaces. | Regex scan, with every record it produces flagged `"exact": false` |
+
+Forbidden regardless of the allowlist: any package that reaches the network on import, and any package used to
+do what the stdlib already does.
+
+### Reporting which path ran
+
+A script whose accuracy depends on whether the accelerator was present **must say so in its output** —
+`"parser": "tree-sitter"` versus `"parser": "regex"`, and the existing `exact` flag per record. A caller that
+cannot tell an exact parse from a guess will present a guess as a fact, which is the failure the whole
+verification discipline exists to catch.
+
+**Taking the parser path is not the same as parsing successfully.** A grammar-based parser returns a tree for
+input it could not parse, with error and missing nodes standing in for the parts it failed on — a malformed
+file, or syntax newer than the bundled grammar. Check the tree for those nodes before marking a record
+`"exact": true`; a tree carrying them is inexact, and the record either says so or falls back to the regex
+path. `ast.parse` needs no such check: it raises `SyntaxError` rather than returning a partial tree, which is
+why `scan_repo.py` can treat a returned tree as exact.
 
 ## Side effects — default off, permitted when disclosed
 
