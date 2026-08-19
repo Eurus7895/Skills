@@ -1,17 +1,16 @@
 ---
 name: document-codebase
-description: Generate architecture documentation for a repository too large to read into context, by parsing
-  its structure with a scanner first — symbols, imports, dependency graph, fan-in ranking — then describing
-  each module with its real neighbours supplied, and cross-checking every dependency claim against the graph so
-  the document cannot assert an import the code does not have. Produces docs/ARCHITECTURE.md with file:line
+description: Generate architecture documentation for a repository of any size by parsing its structure with a
+  scanner first — symbols, imports, classes, dependency graph, fan-in ranking — then describing each module
+  with its real neighbours supplied, and cross-checking every dependency claim against the graph so the
+  document cannot assert an import the code does not have. Produces docs/ARCHITECTURE.md with file:line
   citations. Use for "document this repo", "write architecture docs", "explain how this codebase fits
-  together", "what calls what", "onboard someone to this project", "map the dependencies", or when a large or
-  unfamiliar repository needs a written overview. For non-code corpora — logs, tickets, contracts, papers —
-  use `synthesize-corpus` instead. Do not use to explain a single file or to generate API reference from
-  docstrings.
+  together", "what calls what", "onboard someone to this project", "map the dependencies", or when an
+  unfamiliar repository needs a written overview. Do not use to explain a single file, to generate API
+  reference from docstrings, or on anything that is not source code.
 ---
 
-# Document a codebase larger than the context window
+# Document a codebase from its dependency graph
 
 Get the structure from a parser, not from the model. Describe each module with its real callers and
 dependencies in hand. Synthesize the architecture from those descriptions, then verify every structural claim
@@ -19,18 +18,21 @@ against the graph before writing `docs/ARCHITECTURE.md`.
 
 ## When to use this skill
 
-- The repository is too large to read in full — roughly 50k lines or more, or hundreds of source files.
 - The user wants an **architecture overview**: layers, data flow, entry points, what depends on what.
 - An unfamiliar repository needs an onboarding document.
 - Existing docs have drifted and need regenerating against current code.
 
+**Repository size does not gate this skill.** A small repository runs the same steps as a large one — there
+are simply fewer per-module tasks. There is no shortened path that skips the graph, because the cross-check
+against it is the whole reason a claim here can be trusted, and a second code path would have to be tested
+separately to prove it still is.
+
 ## When not to use this skill
 
-- **The repo fits in context** (under ~50k lines). Read it and write the document directly — this pipeline's
-  overhead buys nothing.
 - **A single file or function needs explaining.** Read it and answer.
 - **API reference from docstrings** is wanted. That is a documentation-generator job, not this.
-- **The corpus is not code** — logs, tickets, contracts, transcripts. Use `synthesize-corpus`.
+- **The corpus is not code** — logs, tickets, contracts, transcripts. This skill reads source files and their
+  import graph; neither exists for prose.
 
 ## Hard rules
 
