@@ -21,6 +21,26 @@ copilot plugin install testing@CopilotBox
 - **`debug-failing-test`** — decide whether the test or the code is wrong, then fix the correct side. Fires on
   any failing test, CI breakage, or "passes locally but not in CI".
 
+## Installing packages
+
+These skills can install **one thing**: the test runner your project already needs. A suite that cannot start
+makes all three skills useless, so this is the whole licence — not a linter, not a convenience package, not an
+upgrade of something already there.
+
+The detector reports what an install would cost, and the required agreement follows from that:
+
+| Situation | What happens |
+| --------- | ------------ |
+| The runner is installed | nothing |
+| Your manifest already depends on it and the lockfile pins it | you are told what is being run, then it runs — no file of yours is rewritten |
+| It is not declared, or there is no lockfile to install from | **you are asked first**, and told exactly which files would change |
+
+**Nothing is ever installed unattended.** With no one to ask — CI, a coding agent, `-p` mode, a subagent — the
+skill reports what is missing and stops.
+
+The bundled scripts themselves never install anything. `detect_stack.py` only reads the filesystem and reports;
+the install command, if any, is run by the agent after the agreement above.
+
 ## Notes
 
 - Bundled scripts are Python 3, stdlib only. They read the filesystem; no network, no writes.

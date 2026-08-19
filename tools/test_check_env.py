@@ -336,6 +336,32 @@ def main():
               out["env"]["package_manager"] == "pnpm" and out["ecosystem"] == "javascript",
               "got %r / %r" % (out["env"]["package_manager"], out["ecosystem"]))
 
+        # Every SKILL.md tells the user that a `notify` command "rewrites nothing". That
+        # sentence is only true if the script guarantees it, so the guarantee is asserted
+        # here rather than trusted. A notify that touches a tracked file would have the
+        # skills making a promise on the repository's behalf that the code does not keep.
+        for case in sorted(roots):
+            _, out = run(roots[case], "--check-env")
+            env = out.get("env", {})
+            check("%s -> consent is one of the three documented values" % case,
+                  env.get("consent") in ("none", "notify", "ask"),
+                  "got %r" % env.get("consent"))
+            check("%s -> action is one of the four documented values" % case,
+                  env.get("action") in ("none", "sync", "add", "unknown"),
+                  "got %r" % env.get("action"))
+            check("%s -> notify never rewrites a tracked file" % case,
+                  env.get("consent") != "notify" or env.get("modifies") == [],
+                  "consent notify with modifies %r" % (env.get("modifies"),))
+            check("%s -> an add always asks" % case,
+                  env.get("action") != "add" or env.get("consent") == "ask",
+                  "action add with consent %r" % env.get("consent"))
+            check("%s -> nothing to do means no command to run" % case,
+                  env.get("action") != "none" or env.get("command") is None,
+                  "action none with command %r" % env.get("command"))
+            check("%s -> a command to run always carries a consent level" % case,
+                  env.get("command") is None or env.get("consent") in ("notify", "ask"),
+                  "command %r with consent %r" % (env.get("command"), env.get("consent")))
+
         # Without the flag the output must carry no env key at all. Callers written
         # against the previous shape read anything extra as a schema change.
         for case in ("uv-declared-missing", "go", "empty"):

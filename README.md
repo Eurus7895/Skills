@@ -10,7 +10,7 @@ agent. Nothing in this repo uses Copilot-only syntax.
 
 | Plugin | Skills | What it's for |
 | ------ | ------ | ------------- |
-| [`testing`](plugins/testing/) | `write-tests`, `review-tests`, `debug-failing-test` | Write, audit, and debug automated tests in whatever framework the repo already uses |
+| [`testing`](plugins/testing/) | `write-tests`, `review-tests`, `debug-failing-test` | Write, audit, and debug automated tests in whatever framework the repo already uses. **Can install your project's test runner** — with your agreement, never unattended |
 | [`code-review`](plugins/code-review/) | `review-code`, `setup-review-rules` | Review code against Google's Standard of Code Review, and generate a repo's agent/review rules files |
 | [`large-context`](plugins/large-context/) | `synthesize-corpus`, `document-codebase`, `audit-codebase` | Answer counting, ranking, and full-coverage questions over corpora larger than the context window, with coverage verified rather than assumed |
 
@@ -161,3 +161,13 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md). If you are an AI agent, read [`AGENTS
 Skills are injected directly into an agent's context and are **not verified by GitHub**. Treat every line of a
 `SKILL.md` and every bundled script as executable instruction, and review anything you install from any
 marketplace — including this one.
+
+**Bundled scripts never install packages.** They read the filesystem, print JSON, and exit. That holds for
+every plugin here, and it is what makes them auditable by reading.
+
+**One plugin runs an install command.** `testing` can install the test runner your project already needs,
+because a suite that cannot start makes the skill useless. It installs nothing else, it tells you before
+running a command that rewrites nothing of yours, it asks before one that does, and it stops rather than
+install where there is no one to ask — CI, a coding agent, `-p` mode, a subagent. The terms are in
+[`plugins/testing/README.md`](plugins/testing/README.md#installing-packages) and in each skill's
+`Side effects` section.

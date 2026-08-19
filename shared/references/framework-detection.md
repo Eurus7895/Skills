@@ -44,6 +44,30 @@ Work top to bottom and stop at the first confident answer.
 | PHP | `composer.json` | PHPUnit, Pest | `vendor/bin/phpunit` | `tests/*Test.php` |
 | Swift | `Package.swift` | XCTest, swift-testing | `swift test` | `Tests/**/*Tests.swift` |
 
+## The `env` object (`--check-env`)
+
+Passing `--check-env` adds one key, `env`, saying whether the detected runner can actually be invoked. Without
+the flag the output is unchanged.
+
+| Field | Means |
+| ----- | ----- |
+| `available` | the runner exists **and** is executable. False means nothing can be run yet. |
+| `invocation` | the path that runs it. Prefer this over `runner_command`: an inactive project virtualenv holds a working runner that the bare command will not reach. |
+| `declared` | the project's own manifest depends on this runner. Read from dependency tables and requirements files only — configuring a tool is not depending on it. |
+| `action` | `none`, `sync` (install what the lockfile already pins), `add` (introduce a dependency the project lacks), or `unknown` (no safe command could be worked out). |
+| `command` | the exact command. Run this or nothing. |
+| `modifies` | tracked files the command rewrites. |
+| `consent` | how much agreement the command needs: `none`, `notify`, or `ask`. |
+| `notes` | what the check concluded and why. Worth reading before acting. |
+
+**`consent` is the authority.** It is derived here so that every skill applies the same rule; re-deriving it
+from `action` or `modifies` gets it wrong, because plain `pip install` adds a dependency while writing no file
+at all and still needs asking. The full rules for acting on it live in each `SKILL.md`, because they are
+safety rules and a rule a model must decide to go and read is not a rule.
+
+A `sync` is not always harmless: with no lockfile to install from, the command has to create one, and
+`consent` is raised to `ask` accordingly. Read the field, not the shape of the situation.
+
 ## Rules
 
 - **Never introduce a second framework** into a repo that already has one. If the existing choice is genuinely
