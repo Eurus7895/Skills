@@ -47,6 +47,25 @@ Skills in this repo read files from **someone else's repository** — source cod
 - Default posture for a bundled script is **read-only, filesystem-only, no network**. Departing from that
   requires it to be stated at the point of use.
 
+## Skills that install packages
+
+A bundled script never installs anything. A **skill** may, and only under these terms. The distinction is
+load-bearing: a script is a fixed artifact a reviewer can read once, while a skill runs a command chosen at
+runtime against someone else's repository.
+
+- **Only what the skill cannot work without.** The `testing` plugin installs the project's own test runner
+  because a suite that cannot start makes the skill useless. That is the whole licence. Not a convenience
+  package, not an upgrade, not a linter.
+- **Never unattended.** If there is no one to ask — CI, a coding agent, `-p` mode, a subagent — the skill
+  reports what is missing and stops. A skill that installs because nobody objected is worse than one that
+  refuses, because it does it exactly where no one is watching.
+- **The consent level is computed, not judged.** `detect_stack.py --check-env` returns `env.consent`; the skill
+  reads it and does not re-derive it. Two skills reasoning independently about the same install will disagree,
+  and the disagreement will be silent.
+- **Declared where a user decides.** Install behaviour belongs in the skill's `Side effects` section, in the
+  plugin `README`, and in the plugin `description` in both manifests — the description is what someone reads
+  *before* installing. Discovering it from a rewritten `pyproject.toml` is not disclosure.
+
 ## Fixtures
 
 `fixtures/` contains intentionally vulnerable and intentionally broken code. It is a measurement target.

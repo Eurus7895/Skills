@@ -32,10 +32,13 @@ The deliverable is test files written to disk, plus the command that runs them a
 
 ## Steps
 
-1. **Detect the framework.** Read `references/framework-detection.md` and follow it. Run
-   `python3 scripts/detect_stack.py <repo-root>` to get the ecosystem, framework, runner, and test-file
-   convention. If `confidence` is `none`, or the result conflicts with what you see, stop and ask — do not
-   pick a framework for the user.
+1. **Detect the framework and check the environment.** Read `references/framework-detection.md` and follow it.
+   Run `python3 scripts/detect_stack.py <repo-root> --check-env` to get the ecosystem, framework, runner,
+   test-file convention, and whether that runner can actually be invoked. If `confidence` is `none`, or the
+   result conflicts with what you see, stop and ask — do not pick a framework for the user.
+
+   If `env.available` is false, settle it here under **Preparing the environment** below. Step 6 runs the suite;
+   discovering a missing runner there means the tests were written blind.
 
 2. **Read the code under test.** Identify for each unit: the inputs and their valid ranges, the return values,
    the error conditions and how they surface, the side effects, and the dependencies that will need doubles.
@@ -62,6 +65,33 @@ The deliverable is test files written to disk, plus the command that runs them a
 
 8. **Report.** State the files written, the command, the pass count, and anything you deliberately did not
    cover with the reason.
+
+## Preparing the environment
+
+You may install the project's test runner, and nothing else. `env.consent` says how much agreement that
+takes. **Read `consent`; do not re-derive it** from `action` or `modifies` — pip can add a dependency while
+writing no file at all, and that still needs asking.
+
+| `env.consent` | Situation | What to do |
+| ------------- | --------- | ---------- |
+| `none` | the runner is installed | proceed |
+| `notify` | the project already depends on this runner and the lockfile pins it; the command installs it and rewrites nothing | say what you are running and why, run `env.command`, continue |
+| `ask` | the command introduces a dependency or writes a tracked file — `env.modifies` names them | quote the command and those files, ask, and wait for a yes |
+
+- **Never install unattended.** If there is no one to ask — CI, a coding agent, `-p` mode, a subagent — report
+  what is missing and stop. Nobody objecting is not consent, and an install in CI lands in someone's pipeline
+  with no one watching.
+- **Install only what `env.command` says.** Not a framework you prefer, not a global install to sidestep a
+  refusal, not an upgrade of something already there.
+- **Run `env.command` in `env.working_directory`.** In a workspace that is the member, not the
+  repository root; an install run from the wrong directory edits the wrong manifest, and the files
+  you quoted are then not the files that changed.
+- **Prefer `env.invocation` over `runner_command`.** A project virtualenv that is not active holds a working
+  `pytest` the bare command will not reach.
+- If the install fails, report its real output and stop. A second framework in a repo that already has one is
+  worse than no tests.
+- When `env.action` is `unknown` the script could not work out a safe command — say what is missing and let the
+  user install it.
 
 ## Hard rules
 
@@ -101,13 +131,19 @@ $ pytest tests/test_config.py
 | Path | Load when |
 | ---- | --------- |
 | `references/framework-detection.md` | Step 1, always — before choosing any framework or runner. |
-| `scripts/detect_stack.py` | Step 1. Run it; you do not need to read it. Filesystem only, no network, no writes. |
+| `scripts/detect_stack.py` | Step 1, with `--check-env`. Run it; you do not need to read it. Filesystem only, no network, no writes — it reports what an install would cost, it never installs. |
+
+## Side effects
+
+Writes test files to the repository. May run the project's package manager to install its test runner, under
+the consent rules in **Preparing the environment** — that command can reach the network and, when consent is
+`ask`, rewrite the files listed in `env.modifies`. Nothing else is installed.
 
 ## Conventions
 
 - Reference bundled files by paths relative to this skill folder.
 - Report what was done and what was skipped; never claim a test passes without running it.
 - Confirm before anything destructive or irreversible — overwriting an existing test file needs a look first.
-- Assume no network access and no package installation. If a test framework is genuinely missing, say so
-  rather than installing it.
+- Installing the project's test runner is the one exception to "no network, no package installation", and only
+  under **Preparing the environment** above. Nothing else may be installed.
 - Produce exactly the output format above, with no commentary wrapped around it.

@@ -1,7 +1,7 @@
 {
   "name": "testing",
-  "description": "Write, review, and debug automated tests in whatever framework a repository already uses. Detects the stack at runtime rather than imposing a framework.",
-  "version": "0.1.0",
+  "description": "Write, review, and debug automated tests in whatever framework a repository already uses. Detects the stack at runtime rather than imposing a framework. With your agreement, will install the project's own test runner when it is missing \u2014 never anything else, and never unattended.",
+  "version": "0.2.0",
   "keywords": [
     "testing",
     "unit-tests",

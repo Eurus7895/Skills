@@ -33,12 +33,18 @@ This skill does not rewrite the suite. It tells you what is wrong and what the f
 
 ## Steps
 
-1. **Detect the framework.** Read `references/framework-detection.md` and run
-   `python3 scripts/detect_stack.py <repo-root>`. You need the framework's idioms to judge whether a pattern is
-   a smell or the house style.
+1. **Detect the framework and check the environment.** Read `references/framework-detection.md` and run
+   `python3 scripts/detect_stack.py <repo-root> --check-env`. You need the framework's idioms to judge whether
+   a pattern is a smell or the house style, and steps 2 and 3 cannot run without the runner.
+
+   If `env.available` is false, settle it under **Preparing the environment** below before step 2.
 
 2. **Run the suite.** Record the pass/fail counts and the runtime. If it does not pass on a clean checkout,
    that is the first finding.
+
+   **`env.action` of `sync` is itself a finding.** The runner is declared and the lockfile pins it, yet the
+   environment did not have it — that is a suite nobody can run without a setup step, and the review says so
+   whether or not you then install it.
 
 3. **Check for order-dependence.** Run the suite in a different order or in isolation if the framework supports
    it (`pytest -p no:randomly` vs `-p randomly`, `--shuffle`, running a single file alone). Tests that pass
@@ -82,6 +88,30 @@ This skill does not rewrite the suite. It tells you what is wrong and what the f
 - Assertions on incidental output — log text, key order, exact whitespace — that break on harmless changes.
 - Disabled tests: `skip`, `xfail`, `it.only`, `t.Skip`, commented-out blocks. Each is a silent coverage hole.
 
+## Preparing the environment
+
+This skill reports rather than edits, so the bar is higher here than for a skill whose job is to change the
+repository: you are installing only to be able to observe. `env.consent` says how much agreement that takes.
+**Read `consent`; do not re-derive it** from `action` or `modifies`.
+
+| `env.consent` | Situation | What to do |
+| ------------- | --------- | ---------- |
+| `none` | the runner is installed | proceed |
+| `notify` | the project already depends on this runner and the lockfile pins it; the command installs it and rewrites nothing | say what you are running and why, run `env.command`, continue |
+| `ask` | the command introduces a dependency or writes a tracked file — `env.modifies` names them | quote the command and those files, ask, and wait for a yes |
+
+- **Never install unattended.** If there is no one to ask — CI, a coding agent, `-p` mode, a subagent — report
+  what is missing and stop. Nobody objecting is not consent.
+- **A review is not a licence to change the project.** When consent is `ask`, declining is a normal outcome:
+  report the audit you could do by reading, and say plainly that the suite was never executed. A review that
+  states its own limits is worth more than one that quietly changed the repository to finish.
+- **Run `env.command` in `env.working_directory`.** In a workspace that is the member, not the
+  repository root; an install run from the wrong directory edits the wrong manifest, and the files
+  you quoted are then not the files that changed.
+- **Prefer `env.invocation` over `runner_command`.** A project virtualenv that is not active holds a working
+  runner the bare command will not reach.
+- Never install a framework the repository does not use in order to run tests written for another one.
+
 ## Severity
 
 | Severity | Means |
@@ -123,7 +153,13 @@ the author to ignore reviews.
 | Path | Load when |
 | ---- | --------- |
 | `references/framework-detection.md` | Step 1, always — you need the framework's idioms to judge smells. |
-| `scripts/detect_stack.py` | Step 1. Run it; you do not need to read it. Filesystem only, no network, no writes. |
+| `scripts/detect_stack.py` | Step 1, with `--check-env`. Run it; you do not need to read it. Filesystem only, no network, no writes — it reports what an install would cost, it never installs. |
+
+## Side effects
+
+Writes nothing to the repository. May run the project's package manager to install its test runner so the
+suite can be executed, under the consent rules in **Preparing the environment** — that command can reach the
+network and, when consent is `ask`, rewrite the files listed in `env.modifies`. Nothing else is installed.
 
 ## Conventions
 
@@ -132,5 +168,6 @@ the author to ignore reviews.
   acted on.
 - Report what was reviewed and what was skipped; never imply coverage you did not check.
 - This skill reports; it does not rewrite. Ask before changing any test file.
-- Assume no network access and no package installation.
+- Installing the project's test runner is the one exception to "no network, no package installation", and only
+  under **Preparing the environment** above. Nothing else may be installed.
 - Produce exactly the output format above, with no commentary wrapped around it.

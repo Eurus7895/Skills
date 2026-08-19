@@ -41,3 +41,6 @@ jobs:
           # Bare invocation against a fixture must succeed; confidence must not
           # be "none" for a scenario that plainly declares pytest.
           python3 shared/scripts/detect_stack.py fixtures/02-wrong-test
+
+      - name: Environment check reports the right action and consent
+        run: python3 tools/test_check_env.py

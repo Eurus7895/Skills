@@ -11,14 +11,14 @@
     {
       "name": "testing",
       "source": "plugins/testing",
-      "description": "Write, review, and debug automated tests in whatever framework a repository already uses. Detects the stack at runtime rather than imposing a framework.",
-      "version": "0.1.0"
+      "description": "Write, review, and debug automated tests in whatever framework a repository already uses. Detects the stack at runtime rather than imposing a framework. With your agreement, will install the project's own test runner when it is missing \u2014 never anything else, and never unattended.",
+      "version": "0.2.0"
     },
     {
       "name": "code-review",
       "source": "plugins/code-review",
       "description": "Review code against Google's Standard of Code Review, reporting findings with Conventional Comments labels and CWE-named security categories. Also generates a repository's agent and review rules files.",
-      "version": "0.1.0"
+      "version": "0.1.1"
     },
     {
       "name": "large-context",

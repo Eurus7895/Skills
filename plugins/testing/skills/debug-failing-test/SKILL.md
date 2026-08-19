@@ -33,9 +33,14 @@ fix applied to the correct side, and a passing run.
 ## Steps
 
 1. **Reproduce.** Detect the runner via `references/framework-detection.md` and
-   `python3 scripts/detect_stack.py <repo-root>`, then run the single failing test. If it does not fail, do not
-   proceed on assumption — find the condition that makes it fail (ordering, environment, seed, parallelism)
-   before going further.
+   `python3 scripts/detect_stack.py <repo-root> --check-env`, then run the single failing test. If it does not
+   fail, do not proceed on assumption — find the condition that makes it fail (ordering, environment, seed,
+   parallelism) before going further.
+
+   If `env.available` is false, **that may be the whole bug.** A suite that cannot start does not have a
+   failing test; it has a missing runner, and the report says so. Settle the environment under **Preparing the
+   environment** below, and never treat a collection or import error caused by a missing runner as evidence
+   about the code.
 
 2. **Read the actual failure.** The assertion diff, the exception type, the line. Not the test name, not a
    guess from the summary. Quote it in your report.
@@ -64,6 +69,31 @@ fix applied to the correct side, and a passing run.
 7. **Re-run** the single test, then the full suite. Both must pass. Confirm you have not broken a neighbour.
 
 8. **Report** the verdict, the evidence, the change, and the run output.
+
+## Preparing the environment
+
+You may install the project's test runner, and nothing else. `env.consent` says how much agreement that
+takes. **Read `consent`; do not re-derive it** from `action` or `modifies`.
+
+| `env.consent` | Situation | What to do |
+| ------------- | --------- | ---------- |
+| `none` | the runner is installed | proceed |
+| `notify` | the project already depends on this runner and the lockfile pins it; the command installs it and rewrites nothing | say what you are running and why, run `env.command`, continue |
+| `ask` | the command introduces a dependency or writes a tracked file — `env.modifies` names them | quote the command and those files, ask, and wait for a yes |
+
+- **Never install unattended.** If there is no one to ask — CI, a coding agent, `-p` mode, a subagent — report
+  what is missing and stop. Nobody objecting is not consent.
+- **Never install or upgrade a package to make a failing test pass.** The permission here covers the runner
+  that starts the suite, nothing else. Changing a dependency version until the assertion goes green is the
+  same defect as weakening the assertion, hidden one level down — if you believe a dependency is the cause,
+  say so and let the user decide.
+- **Run `env.command` in `env.working_directory`.** In a workspace that is the member, not the
+  repository root; an install run from the wrong directory edits the wrong manifest, and the files
+  you quoted are then not the files that changed.
+- **Prefer `env.invocation` over `runner_command`.** A project virtualenv that is not active holds a working
+  runner the bare command will not reach, and "command not found" is not a test failure.
+- If the environment had to be prepared, say so in the report. A reader needs to know whether the test they are
+  told about ran in the project's environment or in one you assembled.
 
 ## Hard rules
 
@@ -106,7 +136,14 @@ $ <command>
 | Path | Load when |
 | ---- | --------- |
 | `references/framework-detection.md` | Step 1, to find the runner command and how to run one test in isolation. |
-| `scripts/detect_stack.py` | Step 1. Run it; you do not need to read it. Filesystem only, no network, no writes. |
+| `scripts/detect_stack.py` | Step 1, with `--check-env`. Run it; you do not need to read it. Filesystem only, no network, no writes -- it reports what an install would cost, it never installs. |
+
+## Side effects
+
+Edits the code or the test under diagnosis, as the verdict directs. May run the project's package manager to
+install its test runner so the suite can start, under the consent rules in **Preparing the environment** --
+that command can reach the network and, when consent is `ask`, rewrite the files listed in `env.modifies`.
+Nothing else is installed.
 
 ## Conventions
 
@@ -114,5 +151,6 @@ $ <command>
 - Report the verdict before the fix, always. A fix without a stated verdict hides which side was judged wrong.
 - Never claim a test passes without running it; quote the real output.
 - Confirm before disabling, deleting, or weakening any test.
-- Assume no network access and no package installation.
+- Installing the project's test runner is the one exception to "no network, no package installation", and only
+  under **Preparing the environment** above. Nothing else may be installed.
 - Produce exactly the output format above, with no commentary wrapped around it.
