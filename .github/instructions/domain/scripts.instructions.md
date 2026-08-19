@@ -29,9 +29,10 @@ three conditions hold at once, or the import does not ship:
 1. **It is named in the allowlist below.** Anything absent is forbidden. Adding a row is a pull request that
    edits this table, with the fallback filled in — not a judgement call made while writing a script.
 2. **The import is optional and the script still works without it.** Import inside a `try`/`except
-   ImportError` and fall back to the stdlib path, or exit non-zero naming the missing package and the exact
-   install command. A module-level import that raises on a clean machine is the defect this rule exists to
-   prevent.
+   ImportError` and fall back to the stdlib path. Exiting because the package is missing is not an option —
+   that turns the accelerator into a requirement, which is the thing this section forbids. A script with no
+   usable stdlib fallback does not get the import at all. A module-level import that raises on a clean machine
+   is the defect this rule exists to prevent.
 3. **The `SKILL.md` pointing at the script declares it**, at the point of use, the same way network access and
    package installation are declared.
 
@@ -50,6 +51,13 @@ A script whose accuracy depends on whether the accelerator was present **must sa
 `"parser": "tree-sitter"` versus `"parser": "regex"`, and the existing `exact` flag per record. A caller that
 cannot tell an exact parse from a guess will present a guess as a fact, which is the failure the whole
 verification discipline exists to catch.
+
+**Taking the parser path is not the same as parsing successfully.** A grammar-based parser returns a tree for
+input it could not parse, with error and missing nodes standing in for the parts it failed on — a malformed
+file, or syntax newer than the bundled grammar. Check the tree for those nodes before marking a record
+`"exact": true`; a tree carrying them is inexact, and the record either says so or falls back to the regex
+path. `ast.parse` needs no such check: it raises `SyntaxError` rather than returning a partial tree, which is
+why `scan_repo.py` can treat a returned tree as exact.
 
 ## Side effects — default off, permitted when disclosed
 
