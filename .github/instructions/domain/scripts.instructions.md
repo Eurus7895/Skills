@@ -37,10 +37,16 @@ three conditions hold at once, or the import does not ship:
    **Importing is not the same as working.** A package can import cleanly and then fail when it is set up or
    used — a grammar that will not load, a version whose API moved, a language the installed build does not
    carry. `except ImportError` never fires for any of those, and the script dies where it was supposed to fall
-   back. Guard the whole accelerator path, from import through first successful use, and fall back on any
-   failure to obtain a working accelerator. Keep the guard to that path: a `TypeError` in your own code is a
-   bug to fix, not a reason to silently take the slower route. Say in the output which path ran, so a
-   fallback that happens for the wrong reason is visible rather than merely quieter.
+   back.
+
+   Guard **every** call into the accelerator, not just the import and not just the first success. Succeeding
+   once proves nothing about the next input: a scan that parses Python fine can hit a Go file the installed
+   grammar does not carry, and a guard that stopped at first use lets that kill the run. Each unit of work
+   falls back on its own, and the record it produces is marked inexact accordingly.
+
+   Keep the guard to the accelerator path. A `TypeError` in your own code is a bug to fix, not a reason to
+   take the slower route quietly. Say in the output which path ran, so a fallback that happens for the wrong
+   reason is visible rather than merely silent.
 3. **The `SKILL.md` pointing at the script declares it**, at the point of use, the same way network access and
    package installation are declared. Every shipped sentence claiming the script is standard library only has
    to change in the same pull request — today that is the `Side effects` and `Conventions` sections of the
@@ -79,11 +85,14 @@ when the side effect is **declared in the `SKILL.md` that points at the script**
 - Network access
 - Package installation
 - Writes outside the working directory
-- Any third-party import, allowlisted or not — condition 3 of the section above is this rule, not a separate
-  one
+- An allowlisted third-party import — condition 3 of the section above is this rule, not a separate one
 
 An undeclared side effect is the defect, not the side effect itself. A script that writes an output file the
 skill documents is fine; one that quietly reaches the network is not.
+
+**Disclosure is not a way around the allowlist.** An import absent from that table is forbidden whether or not
+it is declared; declaring it changes nothing. The two rules are sequential, not alternatives — the allowlist
+decides what may be imported at all, and this section decides what must then be said about it.
 
 ## Behaviour
 
