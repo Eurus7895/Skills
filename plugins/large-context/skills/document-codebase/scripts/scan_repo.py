@@ -182,6 +182,19 @@ def dotted(node):
     return ".".join(reversed(parts))
 
 
+def base_name(node):
+    """The written name of a base class, seeing through a subscript.
+
+    `class Repo(Generic[T])` parses the base as a Subscript, so a plain dotted() call
+    returns None and the base vanishes from the record entirely -- a class that reads
+    as having no parent at all. Dropping the parameters keeps the name, which is what a
+    reader and a diagram need; the parameters themselves are not a dependency.
+    """
+    if isinstance(node, ast.Subscript):
+        node = node.value
+    return dotted(node)
+
+
 def decorator_name(node):
     return dotted(node.func) if isinstance(node, ast.Call) else dotted(node)
 
@@ -193,14 +206,42 @@ def visibility(name):
 
 
 def params_of(func):
+    """Parameter names, keeping the markers that say how each may be passed.
+
+    `*` and `/` are part of the signature, not decoration: without the bare `*` a
+    keyword-only argument reads as positional, and documentation built from that list
+    would advertise a call the function rejects.
+    """
     args = func.args
-    names = [a.arg for a in list(args.posonlyargs) + list(args.args)]
+    names = [a.arg for a in args.posonlyargs]
+    if args.posonlyargs:
+        names.append("/")
+    names.extend(a.arg for a in args.args)
     if args.vararg:
         names.append("*" + args.vararg.arg)
+    elif args.kwonlyargs:
+        names.append("*")
     names.extend(a.arg for a in args.kwonlyargs)
     if args.kwarg:
         names.append("**" + args.kwarg.arg)
     return names
+
+
+def self_targets(node):
+    """`self.x` inside an assignment target, unwrapping tuple and list unpacking.
+
+    `self.x, self.y = point` binds both attributes; a check that only accepts a bare
+    Attribute node records neither.
+    """
+    if isinstance(node, (ast.Tuple, ast.List)):
+        found = []
+        for element in node.elts:
+            found.extend(self_targets(element))
+        return found
+    if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+            and node.value.id == "self"):
+        return [{"name": node.attr, "line": node.lineno}]
+    return []
 
 
 def self_attributes(func):
@@ -213,9 +254,7 @@ def self_attributes(func):
         elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
             targets = [node.target]
         for target in targets:
-            if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
-                    and target.value.id == "self"):
-                found.append({"name": target.attr, "line": target.lineno})
+            found.extend(self_targets(target))
     return found
 
 
@@ -270,7 +309,7 @@ def detail_python(tree):
                 "name": node.name,
                 "line": node.lineno,
                 "bases": [{"name": b, "resolved": None, "line": None}
-                          for b in map(dotted, node.bases) if b],
+                          for b in map(base_name, node.bases) if b],
                 "decorators": [d for d in map(decorator_name, node.decorator_list) if d],
                 "methods": methods,
                 "attributes": attributes,
@@ -280,25 +319,40 @@ def detail_python(tree):
 
 
 def python_aliases(tree):
-    """Local name -> the import entry that introduced it.
+    """Local name -> every module-level import that bound it, oldest first.
 
-    `import a.b` binds `a`; `from a import b as c` binds `c` and points at module `a`.
-    Without this map a base class written as `Base` cannot be traced to the file that
-    defines it.
+    `import a.b` binds `a`; `from a import b as c` binds `c`, points at module `a`, and
+    remembers that the thing imported is really called `b` -- the target file defines
+    `b`, not `c`, so dropping the original name loses the class.
+
+    Only module-level imports are collected. Walking the whole tree would let an import
+    inside a function overwrite the binding that was in force where a class was defined,
+    and emit exactly the confidently wrong link this resolver exists to avoid. A name
+    bound more than once keeps every binding, because which one applies depends on where
+    the class sits in the file.
     """
-    aliases = {}
-    for node in ast.walk(tree):
+    aliases = defaultdict(list)
+    for node in tree.body:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 local = alias.asname or alias.name.split(".")[0]
-                aliases[local] = {"name": alias.name, "line": node.lineno, "level": 0}
+                aliases[local].append({"name": alias.name, "line": node.lineno,
+                                       "level": 0, "symbol": None})
         elif isinstance(node, ast.ImportFrom):
             level = node.level or 0
             for alias in node.names:
                 local = alias.asname or alias.name
                 target = node.module if node.module else alias.name
-                aliases[local] = {"name": target, "line": node.lineno, "level": level}
-    return aliases
+                symbol = alias.name if node.module else None
+                aliases[local].append({"name": target, "line": node.lineno,
+                                       "level": level, "symbol": symbol})
+    return dict(aliases)
+
+
+def binding_before(bindings, line):
+    """The import in force at `line` -- the latest one above it, or None."""
+    candidates = [b for b in bindings if b["line"] < line]
+    return max(candidates, key=lambda b: b["line"]) if candidates else None
 
 
 def scan_generic(text):
@@ -457,16 +511,20 @@ def resolve_bases(records, aliases_by_path, by_module, by_suffix, by_stem):
                     base["resolved"], base["line"] = path, local[base["name"]]
                     continue
 
-                entry = aliases.get(head)
+                entry = binding_before(aliases.get(head, ()), cls["line"])
                 if entry is None:
                     continue
                 target = resolve_one(entry, path, by_module, by_suffix, by_stem)
                 if target is None:
                     continue
 
+                # `from pkg import Base as Parent` defines `Base` in the target file,
+                # not `Parent`, so the written name is the wrong thing to look up.
+                wanted_name = entry["symbol"] if head == base["name"] and entry["symbol"] else leaf
+
                 # The import resolved, but only a matching class name proves this is
                 # where the base is defined -- the module may merely re-export it.
-                line = classes_by_path.get(target, {}).get(leaf)
+                line = classes_by_path.get(target, {}).get(wanted_name)
                 if line is not None:
                     base["resolved"], base["line"] = target, line
 
@@ -561,6 +619,7 @@ def build(root, detail=False, detail_match=None):
     return {
         "root": root_real,
         "edges_are": "imports, not calls -- an edge does not prove an invocation",
+        "detail_requested": detail,
         "files": records,
         "edges": edges,
         "fan_in": dict(fan_in),
@@ -593,7 +652,9 @@ def digest(data, top):
     lines.append("exact (ast-parsed): %d of %d files; unresolved imports: %d" % (
         totals["exact_files"], totals["files"], data["unresolved_imports"]))
 
-    if totals["detailed_files"]:
+    # Reported whenever detail was asked for, including the zero case: a mistyped glob
+    # otherwise produces a silent digest that looks like a repository with no classes.
+    if data.get("detail_requested"):
         bases = [b for r in data["files"] for c in r.get("classes", ()) for b in c["bases"]]
         linked = sum(1 for b in bases if b["resolved"])
         skipped = totals["files"] - totals["detailed_files"]
@@ -601,7 +662,10 @@ def digest(data, top):
                      "base classes linked to a defining file: %d of %d" % (
                          totals["detailed_files"], totals["classes"], totals["methods"],
                          linked, len(bases)))
-        if skipped:
+        if not totals["detailed_files"]:
+            lines.append("  NO FILE PRODUCED DETAIL -- check --detail-match, or the "
+                         "repository has no parseable Python")
+        elif skipped:
             lines.append("  %d file(s) carry no detail -- not Python, unparseable, or "
                          "outside --detail-match; they have no class records at all" % skipped)
 
