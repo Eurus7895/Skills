@@ -298,7 +298,12 @@ effectively executable. Therefore:
 - No destructive commands (`rm -rf`, force-push, `DROP`, bulk delete) without an explicit confirmation step
   written into the instructions.
 - No obfuscated, minified, or encoded scripts. If a reviewer cannot read it, it does not ship.
-- Declare side effects in `SKILL.md`: network access, package installs, writes outside the working directory.
+- Declare side effects in `SKILL.md`: network access, package installs, writes outside the working directory,
+  and any third-party import a bundled script uses.
+- **Bundled scripts are standard library by default.** A third-party import ships only as an optional
+  accelerator with a working stdlib fallback, and only if it is named in the allowlist in
+  [`.github/instructions/domain/scripts.instructions.md`](.github/instructions/domain/scripts.instructions.md).
+  A script that cannot run on a clean machine is a broken skill — there is no install step on the user's side.
 - No instructions that try to override the host agent's safety behavior or suppress its confirmations.
 
 ## Fixtures

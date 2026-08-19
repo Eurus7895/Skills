@@ -33,8 +33,20 @@ three conditions hold at once, or the import does not ship:
    that turns the accelerator into a requirement, which is the thing this section forbids. A script with no
    usable stdlib fallback does not get the import at all. A module-level import that raises on a clean machine
    is the defect this rule exists to prevent.
+
+   **Importing is not the same as working.** A package can import cleanly and then fail when it is set up or
+   used — a grammar that will not load, a version whose API moved, a language the installed build does not
+   carry. `except ImportError` never fires for any of those, and the script dies where it was supposed to fall
+   back. Guard the whole accelerator path, from import through first successful use, and fall back on any
+   failure to obtain a working accelerator. Keep the guard to that path: a `TypeError` in your own code is a
+   bug to fix, not a reason to silently take the slower route. Say in the output which path ran, so a
+   fallback that happens for the wrong reason is visible rather than merely quieter.
 3. **The `SKILL.md` pointing at the script declares it**, at the point of use, the same way network access and
-   package installation are declared.
+   package installation are declared. Every shipped sentence claiming the script is standard library only has
+   to change in the same pull request — today that is the `Side effects` and `Conventions` sections of the
+   skills, and the `Notes` section of each plugin `README`. Those statements are true right now because no
+   script uses this exception; the first one that does makes them false, and a plugin whose README misdescribes
+   what it runs is the disclosure failure this rule was written to prevent.
 
 ### Allowlist
 
@@ -67,6 +79,8 @@ when the side effect is **declared in the `SKILL.md` that points at the script**
 - Network access
 - Package installation
 - Writes outside the working directory
+- Any third-party import, allowlisted or not — condition 3 of the section above is this rule, not a separate
+  one
 
 An undeclared side effect is the defect, not the side effect itself. A script that writes an output file the
 skill documents is fine; one that quietly reaches the network is not.
@@ -76,6 +90,12 @@ skill documents is fine; one that quietly reaches the network is not.
 - **Fail loudly rather than guess.** When a script cannot determine something, it says so and exits non-zero.
   `detect_stack.py` emits `{"confidence": "none"}` and exits 1 rather than reporting a plausible guess, so
   the calling skill can branch instead of acting on a fabrication.
+- **An approximation that labels itself is a result, not a failure.** Not knowing and knowing roughly are
+  different states and get different exit codes. A regex scan that flags every record `"exact": false` has
+  answered the question and says how well — that exits `0`, and `scan_repo.py` is the example. Exit non-zero
+  when the caller cannot act on the output at all, not when the output is honest about being approximate.
+  Otherwise the fallback the allowlist section *requires* would be unusable by construction: it would produce
+  the labelled records that rule demands and then report them as untrustworthy.
 - Report confidence honestly. Do not mark a result `high` when the evidence is a filename that could mean
   several things — check the manifest before claiming a framework.
 - Guard path traversal anywhere a path is composed from input. `os.path.join` does **not** constrain the
@@ -96,8 +116,9 @@ the script already has; do not convert one kind into another.
 
 Universal to all three:
 
-- Exit `0` on success, non-zero when the caller must not trust the output. A gate exits non-zero on any
-  failure; that exit code is what CI reads.
+- Exit `0` on success, non-zero when the caller cannot act on the output — not merely when the output is
+  approximate, which a labelled result reports in the payload rather than in the exit code. A gate exits
+  non-zero on any failure; that exit code is what CI reads.
 - Diagnostics go to stderr.
 - Accept an optional target path. Defaulting to the repository root silently gives the wrong answer in a
   monorepo, and in this repo it picks up `fixtures/` and reports Python/pytest for a repository that has

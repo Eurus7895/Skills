@@ -12,7 +12,10 @@ A **plugin marketplace**. It ships plugins; each plugin bundles one or more Agen
 
 There is no application here — no build, no test suite, no runtime, no dependencies to install. Do not look
 for a `package.json` to run, and do not add a toolchain unless explicitly asked. The deliverable is always
-Markdown and JSON, plus standard-library Python.
+Markdown and JSON, plus Python that is standard library by default. A third-party import is possible but
+narrow: optional, with a working stdlib fallback, and named in the allowlist in
+[`scripts.instructions.md`](../domain/scripts.instructions.md). Nothing here may *require* a package to be
+installed before it runs.
 
 Agent Skills are an open standard. Nothing here may use syntax specific to one vendor.
 
