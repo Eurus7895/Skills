@@ -6,7 +6,9 @@ description: Generate architecture documentation for a repository of any size by
   document cannot assert an import the code does not have. Produces docs/ARCHITECTURE.md with file:line
   citations. Use for "document this repo", "write architecture docs", "explain how this codebase fits
   together", "what calls what", "onboard someone to this project", "map the dependencies", or when an
-  unfamiliar repository needs a written overview. Do not use to explain a single file, to generate API
+  unfamiliar repository needs a written overview. The scanner reads Python, JavaScript, TypeScript, Go, Rust,
+  Java, Ruby, C and C++; a repository written entirely in another language — C#, PHP, Kotlin, Swift, shell —
+  yields no graph and this skill cannot document it. Do not use to explain a single file, to generate API
   reference from docstrings, or on anything that is not source code.
 ---
 
