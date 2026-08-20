@@ -6,9 +6,5 @@
 #
 # Regenerate with: python3 tools/materialize.py
 
-scripts/assemble.py  -> skills/synthesize-corpus/scripts/assemble.py
-
 scripts/scan_repo.py -> skills/document-codebase/scripts/scan_repo.py
-
-scripts/scan_repo.py -> skills/audit-codebase/scripts/scan_repo.py
-scripts/assemble.py  -> skills/audit-codebase/scripts/assemble.py
+scripts/assemble.py  -> skills/document-codebase/scripts/assemble.py

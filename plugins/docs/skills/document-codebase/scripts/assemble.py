@@ -216,7 +216,13 @@ def field_stats(rows, schema):
 
 
 def unit_coverage(rows, unit_field, expected_list, rows_per_unit):
-    """Returns (per_unit_counts, duplicates, missing_named)."""
+    """Returns (per_unit_counts, duplicates, missing_named, unexpected_named).
+
+    A named list proves two things, not one: that every unit sent came back, and that
+    nothing else did. A row whose id is outside the list -- left over from an earlier
+    run, or invented -- would otherwise ride along into the table while the coverage
+    report still called it complete.
+    """
     counts = defaultdict(int)
     for row in rows:
         value = row.get(unit_field)
@@ -227,10 +233,12 @@ def unit_coverage(rows, unit_field, expected_list, rows_per_unit):
     if rows_per_unit == "one":
         duplicates = sorted((u, n) for u, n in counts.items() if n > 1)
 
-    missing = None
+    missing = unexpected = None
     if expected_list is not None:
-        missing = sorted(set(map(str, expected_list)) - set(counts))
-    return counts, duplicates, missing
+        expected = set(map(str, expected_list))
+        missing = sorted(expected - set(counts))
+        unexpected = sorted(set(counts) - expected)
+    return counts, duplicates, missing, unexpected
 
 
 def write_csv(rows, names, out_path):
@@ -276,8 +284,8 @@ def main():
         with open(args.unit_list, encoding="utf-8") as fh:
             expected_list = [ln.strip() for ln in fh if ln.strip()]
 
-    counts, duplicates, missing = unit_coverage(good, args.unit_field, expected_list,
-                                                args.rows_per_unit)
+    counts, duplicates, missing, unexpected = unit_coverage(
+        good, args.unit_field, expected_list, args.rows_per_unit)
     stats = field_stats(good, schema)
 
     failures, warnings = [], []
@@ -330,6 +338,15 @@ def main():
             print("  %s" % unit)
         if len(missing) > 20:
             print("  ... %d more" % (len(missing) - 20))
+
+    if unexpected:
+        failures.append("%d unit id(s) not in the declared list -- the table covers a "
+                        "different scope than was asked for" % len(unexpected))
+        print("\nunit ids outside --unit-list:")
+        for unit in unexpected[:20]:
+            print("  %s" % unit)
+        if len(unexpected) > 20:
+            print("  ... %d more" % (len(unexpected) - 20))
 
     print("\nfield                type        empty   top-value share")
     for field in schema:

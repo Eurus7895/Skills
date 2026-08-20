@@ -1,0 +1,20 @@
+{
+  "name": "docs",
+  "description": "Generate architecture documentation for a repository from a parsed dependency graph rather than from memory: symbols, imports, classes and base classes come from a scanner, every module is described with its real neighbours supplied, and each structural claim is checked against the graph before it ships. Produces docs/ with file:line citations.",
+  "version": "0.1.0",
+  "keywords": [
+    "documentation",
+    "architecture",
+    "onboarding",
+    "dependency-graph",
+    "sphinx"
+  ],
+  "author": {
+    "name": "Eurus7895"
+  },
+  "repository": "https://github.com/Eurus7895/Skills",
+  "license": "MIT",
+  "skills": [
+    "./skills/document-codebase/"
+  ]
+}
