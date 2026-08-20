@@ -74,10 +74,15 @@ IMPORT_PATTERNS = [
     re.compile(r"""require_relative\s+['"]([^'"]+)['"]"""),           # ruby
     re.compile(r"""^\s*require\s+['"]([^'"]+)['"]"""),                # ruby
     re.compile(r"""require\(\s*['"]([^'"]+)['"]\s*\)"""),             # cjs
-    re.compile(r"""^\s*#include\s*[<"]([^>"]+)[>"]"""),               # c/cpp
+    re.compile(r"""^\s*#include\s*<([^>]+)>"""),                      # c/cpp, angle form
     re.compile(r"""^\s*use\s+([A-Za-z_][\w:]*)"""),                   # rust
     re.compile(r"""^\s*import\s+(?:static\s+)?([A-Za-z_][\w.]*)"""),  # java, single-line go
 ]
+
+# `#include "foo.h"` conventionally searches the including file's directory first, and
+# the angle form does not. Kept separate so that preference can be honoured rather than
+# both collapsing into one repository-wide stem search.
+QUOTED_INCLUDE = re.compile(r"""^\s*#include\s*"([^"]+)\"""")
 
 SYMBOL_PATTERNS = [
     ("function", re.compile(r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_]\w*)")),
@@ -373,6 +378,12 @@ def scan_generic(text):
             in_go_block = True
             continue
 
+        quoted = QUOTED_INCLUDE.match(line)
+        if quoted:
+            imports.append({"name": quoted.group(1), "line": lineno, "level": 0,
+                            "quoted": True})
+            continue
+
         for pattern in IMPORT_PATTERNS:
             match = pattern.search(line)
             if match:
@@ -395,8 +406,8 @@ def module_key(path):
 
 
 def build_indexes(records):
-    """Three lookups. Ambiguous keys are dropped, so they can never make an edge."""
-    by_module, suffix_hits, stem_hits = {}, defaultdict(set), defaultdict(set)
+    """Four lookups. Ambiguous keys are dropped, so they can never make an edge."""
+    by_module, suffix_hits, stem_hits, path_hits = {}, defaultdict(set), defaultdict(set), defaultdict(set)
 
     for record in records:
         path = record["path"]
@@ -409,9 +420,15 @@ def build_indexes(records):
 
         stem_hits[os.path.splitext(os.path.basename(path))[0]].add(path)
 
+        # Keyed on the path with its extension dropped, because `./util` is written
+        # without one. Both spellings are kept: `a/b.h` is included as "a/b.h" too.
+        path_hits[os.path.splitext(path)[0]].add(path)
+        path_hits[path].add(path)
+
     by_suffix = {k: next(iter(v)) for k, v in suffix_hits.items() if len(v) == 1}
     by_stem = {k: next(iter(v)) for k, v in stem_hits.items() if len(v) == 1}
-    return by_module, by_suffix, by_stem
+    by_path = {k: next(iter(v)) for k, v in path_hits.items() if len(v) == 1}
+    return by_module, by_suffix, by_stem, by_path
 
 
 def stem_candidates(name):
@@ -444,10 +461,40 @@ def resolve_relative(importer, name, level):
     return ".".join(parts) if parts else None
 
 
-def resolve_one(entry, importer, by_module, by_suffix, by_stem):
+def resolve_path_relative(importer, name, by_path):
+    """`./helper` in src/main.ts -> src/helper.ts, or None.
+
+    A specifier written `./x` or `../x` names a file next to the importer and nowhere
+    else. Falling through to a repository-wide stem search would happily bind it to
+    `test/helper.ts` -- a confident edge that is simply wrong, and one that then feeds
+    the fan-in ranking the document is built from.
+    """
+    joined = os.path.normpath(os.path.join(os.path.dirname(importer), name))
+    joined = joined.replace(os.sep, "/")
+    if joined.startswith("../"):
+        return None
+    # `./util` may be util.ts, and `./util/` may be util/index.ts; both are written
+    # without the extension, so the index is keyed on the extension-stripped path.
+    return by_path.get(joined) or by_path.get(joined + "/index")
+
+
+def resolve_one(entry, importer, by_module, by_suffix, by_stem, by_path=None):
     """Map one import onto a repo file, or None when unknown or ambiguous."""
     name = entry["name"]
     level = entry.get("level", 0)
+
+    # An explicitly relative specifier resolves against the importing file or not at
+    # all. No global fallback: a missing edge is recoverable, a wrong one is not.
+    if not level and by_path is not None and name.startswith(("./", "../")):
+        return resolve_path_relative(importer, name, by_path)
+
+    # A quoted include conventionally searches the including file's directory first;
+    # unlike ./ it may also be written against a project root, so the usual chain
+    # still runs when that fails.
+    if not level and by_path is not None and entry.get("quoted"):
+        hit = resolve_path_relative(importer, name, by_path)
+        if hit is not None:
+            return hit
 
     if level:
         key = resolve_relative(importer, name, level)
@@ -483,7 +530,7 @@ def wanted(path, patterns):
     return not patterns or any(fnmatch.fnmatch(path, p) for p in patterns)
 
 
-def resolve_bases(records, aliases_by_path, by_module, by_suffix, by_stem):
+def resolve_bases(records, aliases_by_path, by_module, by_suffix, by_stem, by_path):
     """Point each base class at the file that defines it, or leave it unresolved.
 
     Two steps, because a name alone is not an answer: find the file the base name was
@@ -511,7 +558,7 @@ def resolve_bases(records, aliases_by_path, by_module, by_suffix, by_stem):
                 entry = binding_before(aliases.get(head, ()), cls["line"])
                 if entry is None:
                     continue
-                target = resolve_one(entry, path, by_module, by_suffix, by_stem)
+                target = resolve_one(entry, path, by_module, by_suffix, by_stem, by_path)
                 if target is None:
                     continue
 
@@ -588,15 +635,15 @@ def build(root, detail=False, detail_match=None):
 
         records.append(record)
 
-    by_module, by_suffix, by_stem = build_indexes(records)
+    by_module, by_suffix, by_stem, by_path = build_indexes(records)
     if detail:
-        resolve_bases(records, aliases_by_path, by_module, by_suffix, by_stem)
+        resolve_bases(records, aliases_by_path, by_module, by_suffix, by_stem, by_path)
 
     edges, unresolved_total = [], 0
     for record in records:
         seen_targets = set()
         for entry in record["imports"]:
-            target = resolve_one(entry, record["path"], by_module, by_suffix, by_stem)
+            target = resolve_one(entry, record["path"], by_module, by_suffix, by_stem, by_path)
             if target is None:
                 unresolved_total += 1
                 continue
