@@ -171,6 +171,43 @@ def main():
         second = json.dumps(scan(root)[1], sort_keys=True)
         check("rescanning an unchanged tree is deterministic", first == second)
 
+        # Attribute types are what a composition edge is drawn from. The resolver must
+        # keep the class inside a container, drop names this repository does not define,
+        # and still see a type written as a string.
+        typed = tree(tmp, "typed")
+        write(typed, "base.py", "class Engine:\n    pass\n\n\nclass Wheel:\n    pass\n")
+        write(typed, "car.py",
+              "from __future__ import annotations\n\nfrom typing import Optional\n\n"
+              "from base import Engine, Wheel\n\n\nclass Car:\n    spare: Wheel\n"
+              "    label: str = 'x'\n\n    def __init__(self, engine: Engine):\n"
+              "        self.engine: Engine = engine\n"
+              "        self.wheels: list[Wheel] = []\n"
+              "        self.owner: Optional[str] = None\n"
+              "        self.untyped = 1\n"
+              "        self.late: 'Engine' = engine\n")
+        code, data = scan(typed, "--detail")
+        car = next(c for r in data["files"] if r["path"] == "car.py"
+                   for c in r.get("classes", ()) if c["name"] == "Car")
+        attrs = {a["name"]: a for a in car["attributes"]}
+
+        def resolved(name):
+            return [(t["name"], t["resolved"]) for t in attrs[name].get("types", ())]
+
+        check("a class-body annotation resolves to the defining file",
+              resolved("spare") == [("Wheel", "base.py")], "%r" % resolved("spare"))
+        check("a self-assignment annotation resolves too",
+              resolved("engine") == [("Engine", "base.py")], "%r" % resolved("engine"))
+        check("the class inside a container is kept, the container is not",
+              resolved("wheels") == [("Wheel", "base.py")], "%r" % resolved("wheels"))
+        check("a type this repository does not define resolves to nothing",
+              resolved("label") == [] and resolved("owner") == [],
+              "%r %r" % (resolved("label"), resolved("owner")))
+        check("an unannotated attribute claims no type",
+              "type_names" not in attrs["untyped"] and "types" not in attrs["untyped"],
+              "%r" % attrs["untyped"])
+        check("a string annotation is not invisible",
+              resolved("late") == [("Engine", "base.py")], "%r" % resolved("late"))
+
         empty = tree(tmp, "empty")
         write(empty, "README.md", "# nothing here\n")
         code, data = scan(empty)

@@ -372,17 +372,55 @@ def self_targets(node):
     return []
 
 
+def annotation_names(node):
+    """Every dotted name written inside a type annotation, outermost first.
+
+    `Order` gives ['Order']; `Optional[Order]` gives ['Optional', 'Order']; `dict[str,
+    Order]` gives ['dict', 'str', 'Order']. The container is kept alongside what it
+    contains because neither can be assumed to be the interesting one -- a later pass
+    keeps whichever resolves to a class in this repository and discards the rest.
+
+    A string annotation is re-parsed, so `x: "Order"` under `from __future__ import
+    annotations` is not silently invisible.
+    """
+    found = []
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        try:
+            node = ast.parse(node.value, mode="eval").body
+        except (SyntaxError, ValueError):
+            return found
+
+    if isinstance(node, (ast.Name, ast.Attribute)):
+        name = dotted(node)
+        if name:
+            found.append(name)
+    elif isinstance(node, ast.Subscript):
+        found.extend(annotation_names(node.value))
+        found.extend(annotation_names(node.slice))
+    elif isinstance(node, (ast.Tuple, ast.List)):
+        for element in node.elts:
+            found.extend(annotation_names(element))
+    elif isinstance(node, ast.BinOp):
+        # `Order | None`, the 3.10 union spelling.
+        found.extend(annotation_names(node.left))
+        found.extend(annotation_names(node.right))
+    return found
+
+
 def self_attributes(func):
-    """`self.x = ...` inside one method, in source order."""
+    """`self.x = ...` inside one method, in source order, with any written type."""
     found = []
     for node in ast.walk(func):
-        targets = []
+        targets, annotation = [], None
         if isinstance(node, ast.Assign):
             targets = node.targets
         elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
             targets = [node.target]
+            annotation = getattr(node, "annotation", None)
+        types = annotation_names(annotation) if annotation is not None else []
         for target in targets:
-            found.extend(self_targets(target))
+            for attr in self_targets(target):
+                found.append(dict(attr, type_names=types) if types else attr)
     return found
 
 
@@ -407,16 +445,21 @@ def detail_python(tree):
             methods, attributes, seen_attrs = [], [], set()
 
             for stmt in node.body:
-                targets = []
+                targets, annotation = [], None
                 if isinstance(stmt, ast.Assign):
                     targets = stmt.targets
                 elif isinstance(stmt, ast.AnnAssign):
                     targets = [stmt.target]
+                    annotation = stmt.annotation
+                types = annotation_names(annotation) if annotation is not None else []
                 for target in targets:
                     if isinstance(target, ast.Name) and target.id not in seen_attrs:
                         seen_attrs.add(target.id)
-                        attributes.append({"name": target.id, "line": target.lineno,
-                                           "from": "class-body"})
+                        record = {"name": target.id, "line": target.lineno,
+                                  "from": "class-body"}
+                        if types:
+                            record["type_names"] = types
+                        attributes.append(record)
 
             for stmt in node.body:
                 if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -656,6 +699,49 @@ def wanted(path, patterns):
     return not patterns or any(fnmatch.fnmatch(path, p) for p in patterns)
 
 
+def resolve_attribute_types(records, aliases_by_path, by_module, by_suffix, by_stem,
+                            by_path):
+    """Point an attribute's written type at the file defining that class, or drop it.
+
+    Same two steps as `resolve_bases`, and the same refusal to guess: a type name that
+    does not resolve to a file defining a class by that name leaves no link at all. Most
+    annotations are `str`, `int`, `Optional` and other names this repository does not
+    define, and every one of those must resolve to nothing rather than to something
+    plausible.
+
+    Only attributes are resolved. A parameter type says a function is passed something;
+    an attribute type says the class holds one, which is what composition means.
+    """
+    classes_by_path = {r["path"]: {c["name"] for c in r.get("classes", [])}
+                       for r in records if "classes" in r}
+
+    for record in records:
+        path = record["path"]
+        local = classes_by_path.get(path, set())
+        aliases = aliases_by_path.get(path, {})
+
+        for cls in record.get("classes", []):
+            for attribute in cls.get("attributes", []):
+                resolved = []
+                for name in attribute.get("type_names", ()):
+                    head, leaf = name.split(".")[0], name.split(".")[-1]
+                    if name in local:
+                        resolved.append({"name": name, "resolved": path})
+                        continue
+                    entry = binding_before(aliases.get(head, ()), cls["line"])
+                    if entry is None:
+                        continue
+                    target = resolve_one(entry, path, by_module, by_suffix, by_stem,
+                                         by_path)
+                    if target is None:
+                        continue
+                    wanted = entry["symbol"] if head == name and entry["symbol"] else leaf
+                    if wanted in classes_by_path.get(target, set()):
+                        resolved.append({"name": wanted, "resolved": target})
+                if resolved:
+                    attribute["types"] = resolved
+
+
 def resolve_bases(records, aliases_by_path, by_module, by_suffix, by_stem, by_path):
     """Point each base class at the file that defines it, or leave it unresolved.
 
@@ -769,6 +855,8 @@ def build(root, detail=False, detail_match=None):
     by_module, by_suffix, by_stem, by_path = build_indexes(records)
     if detail:
         resolve_bases(records, aliases_by_path, by_module, by_suffix, by_stem, by_path)
+        resolve_attribute_types(records, aliases_by_path, by_module, by_suffix, by_stem,
+                                by_path)
 
     edges, unresolved_total = [], 0
     for record in records:
