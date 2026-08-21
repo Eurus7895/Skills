@@ -115,7 +115,8 @@ def usage_coverage(record):
         bindings = entry.get("bindings") or ()
         total += len(bindings)
         usage = entry.get("usage") or {}
-        annotated += sum(1 for b in bindings if usage.get(b) not in (None, "unknown"))
+        annotated += sum(1 for b in bindings
+                         if (usage.get(b) or {}).get("status") not in (None, "unknown"))
     if not total or not annotated:
         return "absent"
     return "complete" if annotated == total else "partial"
@@ -145,7 +146,10 @@ def describe_edge(edge, record, direction):
         usage = {}
         for entry in record.get("imports", ()):
             if entry.get("line") == edge["line"]:
-                usage.update(entry.get("usage") or {})
+                # The status alone here: the packet is bounded context, and it already
+                # states the path and line the diagnostic would repeat back.
+                for binding, verdict in (entry.get("usage") or {}).items():
+                    usage[binding] = (verdict or {}).get("status")
         if usage:
             # Advisory, and named so at the point of use: a binding nothing reads is
             # still an import the file contains.

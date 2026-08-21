@@ -213,8 +213,9 @@ def main():
         docs = os.path.join(root, "docs")
         pages = sorted(n for n in os.listdir(docs) if n.endswith(".rst"))
         check("the document has an index and every preset page",
-              pages == ["architecture.rst", "entry-points.rst", "index.rst",
-                        "limitations.rst", "modules.rst", "overview.rst"], "%r" % pages)
+              pages == ["architecture.rst", "entry-points.rst", "flows.rst", "index.rst",
+                        "limitations.rst", "modules.rst", "navigation.rst",
+                        "overview.rst"], "%r" % pages)
 
         text = {}
         for name in pages:
@@ -231,6 +232,13 @@ def main():
               or "app.py:2" in text["architecture.rst"], text["architecture.rst"])
         check("coverage is stated from the scan, not asserted",
               "files scanned" in text["limitations.rst"], text["limitations.rst"])
+        # The flow page must be built from the verified call, not from the import edge
+        # that merely proves the two files reference each other.
+        check("the verified call became a flow row",
+              "app.py:8" in text["flows.rst"] and "lookup" in text["flows.rst"],
+              text["flows.rst"])
+        check("the navigation page groups by directory",
+              "store" in text["navigation.rst"], text["navigation.rst"])
         check("the unused-import caveat is present and hedged",
               "logging" not in text["limitations.rst"]
               and "not evidence" in text["limitations.rst"], text["limitations.rst"])

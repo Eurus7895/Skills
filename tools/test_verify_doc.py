@@ -62,6 +62,10 @@ def write(root, rel, body=""):
 # 16 (blank)
 # 17 def shadow():
 # 18     return 0
+# 19 (blank)
+# 20 (blank)
+# 21 def dispatch(table, key):
+# 22     return table[key]()
 API = """\
 from service import handle
 import helpers
@@ -81,6 +85,10 @@ def local():
 
 def shadow():
     return 0
+
+
+def dispatch(table, key):
+    return table[key]()
 """
 
 SERVICE = "def handle():\n    return 1\n\n\ndef retire():\n    return 0\n"
@@ -180,6 +188,8 @@ def main():
                   "api.py", 3),
             claim("c:calls-go", "calls", "module:notes.go", "symbol:helpers.py:assist",
                   "notes.go", 5),
+            claim("c:calls-computed", "calls", "module:api.py",
+                  "symbol:service.py:handle", "api.py", 22),
             claim("c:role", "responsibility", "module:api.py", None),
             claim("c:noevidence", "imports", "module:api.py", "module:service.py"),
             claim("c:badline", "imports", "module:api.py", "module:service.py", "api.py", 900),
@@ -227,6 +237,15 @@ def main():
               "%r" % status.get("c:calls-noline"))
         check("a call in a language with no tree stays a candidate, not a fact",
               status.get("c:calls-go") == "candidate", "%r" % status.get("c:calls-go"))
+        # `table[key]()` is a real call whose target is chosen at run time. Reporting
+        # "there is no call at that line" would be false; retrying would never help.
+        check("a call through a computed target is unsupported, not rejected",
+              status.get("c:calls-computed") == "unsupported",
+              "%r" % status.get("c:calls-computed"))
+        check("and it is not offered for retry",
+              not any(f["retryable"] for f in findings
+                      if f["claim_id"] == "c:calls-computed"),
+              "%r" % [f for f in findings if f["claim_id"] == "c:calls-computed"])
 
         check("a responsibility is an inference, never verified",
               status.get("c:role") == "supported_inference", "%r" % status.get("c:role"))

@@ -13,12 +13,21 @@ side effect, a re-export, a registration hook, framework discovery, or backwards
 compatibility. Removing one is a source change with its own review, its own tests and
 its own rescan; this script never proposes it and never runs Ruff with `--fix`.
 
-Statuses written per binding:
+Each binding gets a record, not a bare word -- a verdict is only meaningful next to the
+tool and the line that produced it:
+
+    {"status": "unused_binding", "source": "ruff:F401",
+     "diagnostic_path": "src/api.py", "diagnostic_line": 5, "auto_fix": false}
+
+Statuses:
 
     used            Ruff parsed the file and did not report this binding
     unused_binding  Ruff reported it as imported but unused
     suppressed      the import line carries a `noqa` for it
     unknown         Ruff did not cover the file, or no bindings were recorded
+
+`auto_fix` is always false and is written rather than implied: this script never passes
+`--fix`, and every reader of the annotation can see that without trusting a docstring.
 
 Policy for a missing `ruff` executable:
 
@@ -109,6 +118,18 @@ def match_binding(entries, reported):
     return bindings[0] if len(bindings) == 1 else (None, None)
 
 
+def usage_record(status, source=None, path=None, line=None):
+    """One binding's verdict, with where it came from.
+
+    The status alone would not survive review: "unused" is only meaningful next to the
+    tool and the line that said so, and `auto_fix` is recorded as data rather than left
+    as a promise in a docstring -- this script never passes `--fix`, and the annotation
+    says so wherever it is read.
+    """
+    return {"status": status, "source": source, "diagnostic_path": path,
+            "diagnostic_line": line, "auto_fix": False}
+
+
 def annotate(index, root, diagnostics):
     """Write `usage` onto import records. Returns the report."""
     # (path, line) -> entries, so a diagnostic finds its statement in one lookup.
@@ -137,7 +158,8 @@ def annotate(index, root, diagnostics):
                               "message": item.get("message", ""),
                               "reason": "no import record binds this name at this line"})
             continue
-        entry.setdefault("usage", {})[binding] = "unused_binding"
+        entry.setdefault("usage", {})[binding] = usage_record(
+            "unused_binding", "ruff:F401", path, line)
         reported.add((path, line, binding))
         matched += 1
 
@@ -153,7 +175,8 @@ def annotate(index, root, diagnostics):
                 continue
             if not covered:
                 for binding in bindings:
-                    entry.setdefault("usage", {})[binding] = "unknown"
+                    entry.setdefault("usage", {})[binding] = usage_record(
+                        "unknown", "ruff:F401")
                     counts["unknown"] += 1
                 continue
             silenced = suppressed_codes(source_line(root, path, entry.get("line", 0)))
@@ -162,7 +185,12 @@ def annotate(index, root, diagnostics):
                     continue
                 status = "suppressed" if silenced is not None and (
                     not silenced or "F401" in silenced) else "used"
-                entry.setdefault("usage", {})[binding] = status
+                # A suppressed binding has a location worth keeping -- the noqa itself.
+                # A used one has nothing to point at; Ruff simply said nothing.
+                entry.setdefault("usage", {})[binding] = usage_record(
+                    status, "ruff:F401",
+                    path if status == "suppressed" else None,
+                    entry.get("line") if status == "suppressed" else None)
                 counts[status] += 1
 
     return {"tool": "ruff", "rule": "F401", "mode": "report_only", "available": True,
@@ -176,7 +204,8 @@ def unknown_everywhere(index, reason):
     for record in index.get("files", []):
         for entry in record.get("imports", []):
             for binding in entry.get("bindings", ()) or ():
-                entry.setdefault("usage", {})[binding] = "unknown"
+                # No tool ran, so no tool is named as the source of this verdict.
+                entry.setdefault("usage", {})[binding] = usage_record("unknown")
                 counts["unknown"] += 1
     return {"tool": "ruff", "rule": "F401", "mode": "report_only", "available": False,
             "matched": 0, "unmatched": 0, "source_modified": False, "counts": counts,

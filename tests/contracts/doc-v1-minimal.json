@@ -1,0 +1,56 @@
+{
+  "claims": [
+    {
+      "evidence": [
+        {
+          "line_end": 1,
+          "line_start": 1,
+          "path": "app.py"
+        }
+      ],
+      "id": "claim:app-imports-store",
+      "kind": "imports",
+      "object": "module:pkg/store.py",
+      "status": "verified",
+      "subject": "module:app.py"
+    }
+  ],
+  "coverage": {
+    "detail_requested": true,
+    "files_approximate": 0,
+    "files_exact": 3,
+    "files_hashed": 3,
+    "files_scanned": 3,
+    "files_unscanned": 0,
+    "files_with_detail": 3,
+    "languages": {
+      "python": 3
+    },
+    "skipped_symlinks": 0,
+    "unresolved_imports": 0,
+    "unscanned_extensions": {}
+  },
+  "format_version": 1,
+  "generator_version": "0.2.0-dev",
+  "pages": [
+    {
+      "blocks": [
+        {
+          "claim_refs": [
+            "claim:app-imports-store"
+          ],
+          "id": "block:overview-scope",
+          "text": "One page, one paragraph, one citation.",
+          "type": "prose"
+        }
+      ],
+      "id": "overview",
+      "mandatory": true,
+      "order": 1,
+      "title": "Overview"
+    }
+  ],
+  "preset": "onboarding",
+  "source_dirty": true,
+  "source_revision": null
+}

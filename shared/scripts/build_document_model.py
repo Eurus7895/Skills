@@ -16,6 +16,7 @@ What may appear where, and why:
     verified             a fact, stated plainly
     supported_inference  a reading of the code, labelled as one
     candidate            named in Limitations only, never in prose
+    unsupported          named in Limitations only -- undecidable in principle
     needs_context        named in Limitations only, never in prose
     rejected             never rendered at all; its presence fails the build
 
@@ -38,7 +39,7 @@ GENERATOR_VERSION = "0.2.0-dev"
 SUPPORTED_SCHEMA = {2}
 
 PROSE_STATUSES = ("verified", "supported_inference")
-LIMITATION_STATUSES = ("candidate", "needs_context")
+LIMITATION_STATUSES = ("candidate", "unsupported", "needs_context")
 
 # A preset fixes the skeleton: which pages exist, in what order, and which of them may
 # not be dropped. It says nothing about what is true -- that comes from the claims.
@@ -47,14 +48,19 @@ PRESETS = {
         ("overview", "Overview", True),
         ("entry-points", "Entry points", True),
         ("architecture", "Architecture", True),
+        ("flows", "Important flows", True),
         ("modules", "Module reference", True),
+        ("navigation", "Finding your way around", True),
         ("limitations", "Coverage and limitations", True),
     ],
+    # No module reference here by design: this preset is for a reader who already knows
+    # the domain and wants the shape, not the inventory.
     "architecture": [
         ("overview", "Architecture overview", True),
         ("architecture", "Components and boundaries", True),
         ("dependencies", "Dependency graph", True),
-        ("modules", "Module reference", True),
+        ("class-views", "Classes and inheritance", True),
+        ("flows", "Cross-component flows", True),
         ("limitations", "Coverage and limitations", True),
     ],
 }
@@ -200,6 +206,99 @@ def modules_page(index, fragments, claims_by_id):
     ]
 
 
+def flows_page(index, claims_by_id):
+    """Call chains, built only from calls that were verified at their call site.
+
+    An import edge would give a much fuller-looking picture and would be a different,
+    weaker claim. A flow assembled from imports says "these files reference each other",
+    which is not what a reader takes "the request passes through here" to mean.
+    """
+    calls = [c for c in claims_by_id.values()
+             if c.get("kind") == "calls" and c.get("status") == "verified"
+             and isinstance(c.get("subject"), str) and isinstance(c.get("object"), str)]
+    if not calls:
+        return [prose("block:flows-none",
+                      "No call was verified at its call site, so no flow is described "
+                      "here. Import relationships appear under Architecture; they show "
+                      "which modules reference each other, not what calls what.")]
+
+    rows, refs = [], set()
+    for claim in sorted(calls, key=lambda c: c["id"]):
+        caller = claim["subject"].split(":", 1)[1]
+        target = claim["object"]
+        evidence = (claim.get("evidence") or [{}])[0]
+        where = evidence.get("path"), evidence.get("line_start")
+        rows.append((caller, target.split(":", 1)[1],
+                     cite(where[0], where[1]) if where[0] and where[1] else "-"))
+        refs.add(claim["id"])
+    return [
+        prose("block:flows-intro",
+              "Each row is a call read at the line cited, not inferred from an import. "
+              "Anything the verifier could not confirm at its call site is listed under "
+              "Coverage and limitations instead."),
+        table("block:flows", ("From", "Calls", "At"), rows, refs),
+    ]
+
+
+def navigation_page(index):
+    """Where to start reading, from the directory grouping and the entry points."""
+    grouped = {}
+    for record in index.get("files", ()):
+        grouped.setdefault(os.path.dirname(record["path"]) or ".", []).append(record)
+
+    fan_in = index.get("fan_in", {})
+    rows = []
+    for directory, records in sorted(grouped.items()):
+        busiest = max(records, key=lambda r: fan_in.get(r["path"], 0))
+        rows.append((directory, str(len(records)),
+                     busiest["path"] if fan_in.get(busiest["path"]) else "-"))
+
+    blocks = [
+        prose("block:navigation-intro",
+              "The repository grouped by directory. The third column is the file in each "
+              "directory that the most other modules import -- usually the one to read "
+              "first."),
+        table("block:navigation-clusters",
+              ("Directory", "Files", "Most depended upon"), rows),
+    ]
+    entries = index.get("entry_points", ())
+    if entries:
+        blocks.append(prose(
+            "block:navigation-start",
+            "To follow the code from the outside in, start at: %s."
+            % ", ".join(e["path"] for e in entries[:5])))
+    return blocks
+
+
+def class_views_page(index):
+    """The inheritance forest, for the files where class detail was extracted."""
+    if not index.get("coverage", {}).get("detail_requested"):
+        return [prose("block:class-views-none",
+                      "The scan did not extract class detail, so no inheritance is "
+                      "described here. Rerun the scanner with --detail.")]
+
+    rows = []
+    for record in sorted(index.get("files", ()), key=lambda r: r["path"]):
+        for cls in record.get("classes", ()):
+            for base in cls.get("bases", ()):
+                # An unresolved base is a name, not a link. Saying where it came from
+                # would be a guess, so the row says plainly that it is unresolved.
+                target = ("%s (%s)" % (base["name"], base["resolved"])
+                          if base.get("resolved") else
+                          "%s (not resolved to a file in this repository)" % base["name"])
+                rows.append((cls["name"], target, cite(record["path"], cls["line"])))
+    if not rows:
+        return [prose("block:class-views-none",
+                      "Class detail was extracted, but no class in this repository "
+                      "inherits from another.")]
+    return [
+        prose("block:class-views-intro",
+              "Every class that names a base. A base links to a file only when the "
+              "import resolved and that file really defines a class by that name."),
+        table("block:class-views", ("Class", "Inherits", "Defined at"), rows),
+    ]
+
+
 def limitations_page(index, fragments, claims):
     coverage = index.get("coverage", {})
     rows = [
@@ -264,6 +363,9 @@ BUILDERS = {
     "architecture": lambda index, fragments, claims, by_id: architecture_page(index, by_id),
     "dependencies": lambda index, fragments, claims, by_id: dependencies_page(index),
     "modules": lambda index, fragments, claims, by_id: modules_page(index, fragments, by_id),
+    "flows": lambda index, fragments, claims, by_id: flows_page(index, by_id),
+    "navigation": lambda index, fragments, claims, by_id: navigation_page(index),
+    "class-views": lambda index, fragments, claims, by_id: class_views_page(index),
     "limitations": lambda index, fragments, claims, by_id: limitations_page(
         index, fragments, claims),
 }

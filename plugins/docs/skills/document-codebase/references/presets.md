@@ -15,20 +15,27 @@ For someone who has not seen the repository before.
 | `overview` | What was scanned, at which revision, and the most depended-upon modules with their roles | yes |
 | `entry-points` | Files nothing imports that carry a main guard or a conventional launcher name | yes |
 | `architecture` | Import edges that cross a directory boundary, each with the line that proves it | yes |
+| `flows` | Calls verified at their call site, never chains assembled from import edges | yes |
 | `modules` | One row per module whose description survived verification | yes |
+| `navigation` | Directory groupings, the busiest file in each, and where to start reading | yes |
 | `limitations` | Coverage counts, unresolved claims, scanner diagnostics, import-usage caveat | yes |
 
 ## `architecture`
 
-Denser, and assumes the reader already knows the domain. Drops the entry-point tour and adds a fan-in ranking.
+Denser, and assumes the reader already knows the domain. Drops the entry-point tour and the module
+inventory, and adds a fan-in ranking and the inheritance forest.
 
 | Page | Contains | Mandatory |
 | --- | --- | --- |
 | `overview` | As above | yes |
 | `architecture` | Components and the boundaries between them | yes |
 | `dependencies` | The top 25 files by fan-in | yes |
-| `modules` | As above | yes |
+| `class-views` | Every class that names a base, with the base linked only where it resolved | yes |
+| `flows` | As above | yes |
 | `limitations` | As above | yes |
+
+**`architecture` has no module reference on purpose.** A reader who already knows the domain wants the shape,
+not the inventory; someone who wants a file-by-file list should generate `onboarding` instead.
 
 ## What the model may and may not decide
 

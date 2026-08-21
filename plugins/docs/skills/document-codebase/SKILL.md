@@ -48,8 +48,8 @@ separately to prove it still is.
 4. **Give every per-module task its neighbours.** `query_graph.py --packet` does this; do not hand-assemble a
    prompt from the file alone. A module described without knowing who imports it gets described as a bag of
    functions instead of as a role in the system.
-5. **Only `verified` and `supported_inference` claims may appear in prose.** `candidate` and `needs_context`
-   belong in the limitations section, labelled. `rejected` never ships at all —
+5. **Only `verified` and `supported_inference` claims may appear in prose.** `candidate`, `unsupported` and
+   `needs_context` belong in the limitations section, labelled. `rejected` never ships at all —
    `build_document_model.py` refuses to build while one is present.
 6. **Label approximate data.** Records with `"exact": false` had their imports guessed by regex, not parsed.
    Any claim resting on them is marked *(approximate)*.
@@ -216,6 +216,7 @@ finding explaining anything that is not the first two.
 | `needs_context` naming an entity | Fetch it with `query_graph.py --include`, revise **only that fragment**, verify again |
 | `rejected` — the graph has no such edge | Drop the claim. There is nothing to retry |
 | `rejected` — the cited line calls something else | Read the line again; either cite correctly or drop it |
+| `V014` `unsupported` — the call target is computed at run time | Nothing. Do not retry; it will appear in the limitations |
 | `V005` stale evidence | Rerun from step 1. The tree changed under you |
 | `V020` the same finding twice | Stop. Report it unresolved; the loop is not converging |
 | Anything unresolved after two attempts | Leave it `candidate` and let it appear in the limitations |

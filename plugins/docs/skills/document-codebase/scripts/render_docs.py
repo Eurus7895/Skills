@@ -86,8 +86,15 @@ def render_block(block, titles):
         return ".. figure:: %s\n   :alt: %s\n" % (
             block["src"], escape_inline(block.get("alt", "")))
     if kind == "ref":
-        return "Next: :doc:`%s <%s>`\n" % (
-            escape_inline(titles.get(block["target"], block["target"])), block["target"])
+        target = block["target"]
+        if target not in titles:
+            # Rendering it anyway produces `:doc:` pointing at nothing -- a link that
+            # looks right in the source and 404s for the reader. The model is supposed
+            # to have resolved this; a renderer that papers over it hides the defect
+            # until someone clicks.
+            raise ValueError("block %r references page %r, which is not in this document"
+                             % (block["id"], target))
+        return "Next: :doc:`%s <%s>`\n" % (escape_inline(titles[target]), target)
     raise ValueError("unknown block type %r in %r" % (kind, block["id"]))
 
 

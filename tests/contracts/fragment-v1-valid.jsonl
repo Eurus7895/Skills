@@ -1,0 +1,2 @@
+{"fragment_id": "fragment:app.py", "source": "app.py", "role": "Entry module: resolves a value through the store package.", "claim_ids": ["claim:app-imports-store", "claim:app-role"], "status": "candidate"}
+{"fragment_id": "fragment:pkg/store.py", "source": "pkg/store.py", "role": "Defines the Record base, the Row subclass, and the module-level save helper.", "claim_ids": ["claim:store-defines-save"], "status": "candidate"}

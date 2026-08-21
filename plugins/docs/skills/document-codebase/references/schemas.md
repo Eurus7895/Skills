@@ -123,16 +123,22 @@ finding `V005`, and the fix is to rescan.
 
 ### Statuses
 
-| Status | Means | May appear in prose |
-| --- | --- | --- |
-| `verified` | the source says so | yes |
-| `supported_inference` | a reading of the code, not a structural fact | yes, labelled |
-| `candidate` | not decidable here — for example a call in a language with no parser | limitations only |
-| `needs_context` | could not be decided from what was supplied; retryable | limitations only |
-| `rejected` | the source contradicts it | never; it fails the build |
+| Status | Means | Retryable | May appear in prose |
+| --- | --- | --- | --- |
+| `verified` | the source says so | — | yes |
+| `supported_inference` | a reading of the code, not a structural fact | — | yes, labelled |
+| `candidate` | not decidable here — for example a call in a language with no parser | no | limitations only |
+| `unsupported` | not decidable in principle — a call target computed at run time | no | limitations only |
+| `needs_context` | could not be decided from what was supplied | yes | limitations only |
+| `rejected` | the source contradicts it | no | never; it fails the build |
 
-`rejected` and `needs_context` are deliberately not the same. Collapsing them either discards true claims or
-retries false ones forever.
+The three negative statuses are deliberately distinct, because each implies a different next move.
+`needs_context` asks for another packet. `unsupported` asks for nothing — `table[key]()` will still be
+`table[key]()` after any amount of extra context, so retrying it only spends budget. `rejected` says the claim
+is false. Collapsing any pair of them either discards true claims or retries hopeless ones forever.
+
+Only `rejected` and `needs_context` make `verify_doc.py` exit `1`. A run whose worst outcome is `unsupported`
+has finished: the claim is recorded, labelled, and reported in the limitations.
 
 ## `doc.json` — format_version 1
 

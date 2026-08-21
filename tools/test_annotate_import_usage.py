@@ -153,11 +153,20 @@ def main():
               "diff in %r" % [k for k in annotated
                               if strip_usage(annotated).get(k) != before_index.get(k)])
 
-        usage = {}
+        usage, records = {}, {}
         for record in annotated["files"]:
             for entry in record["imports"]:
-                for binding, status in (entry.get("usage") or {}).items():
-                    usage[(record["path"], entry["line"], binding)] = status
+                for binding, verdict in (entry.get("usage") or {}).items():
+                    key = (record["path"], entry["line"], binding)
+                    usage[key] = verdict["status"]
+                    records[key] = verdict
+
+        check("every verdict carries the full record, not a bare status",
+              all(set(v) == {"status", "source", "diagnostic_path", "diagnostic_line",
+                             "auto_fix"} for v in records.values()),
+              "%r" % list(records.values())[:1])
+        check("no verdict ever claims an automatic fix",
+              all(v["auto_fix"] is False for v in records.values()))
 
         if HAVE_RUFF:
             check("an unused plain import is unused_binding",
@@ -175,6 +184,18 @@ def main():
                   usage.get(("api.py", 5, "registry")) == "suppressed", "got %r" % usage)
             check("a conditional import that is used reads as used",
                   usage.get(("api.py", 8, "late")) == "used", "got %r" % usage)
+            # A verdict has to be traceable back to the diagnostic that produced it.
+            check("an unused binding records where the diagnostic was raised",
+                  records[("api.py", 1, "os")]["source"] == "ruff:F401"
+                  and records[("api.py", 1, "os")]["diagnostic_path"] == "api.py"
+                  and records[("api.py", 1, "os")]["diagnostic_line"] == 1,
+                  "got %r" % records.get(("api.py", 1, "os")))
+            check("a suppressed binding points at the noqa line",
+                  records[("api.py", 4, "helper")]["diagnostic_line"] == 4,
+                  "got %r" % records.get(("api.py", 4, "helper")))
+            check("a used binding has no diagnostic to point at",
+                  records[("api.py", 3, "handle")]["diagnostic_path"] is None,
+                  "got %r" % records.get(("api.py", 3, "handle")))
             # A re-export is the case this script must not turn into an accusation.
             check("an __all__ re-export is not reported unused",
                   usage.get(("pkg/__init__.py", 1, "handle")) != "unused_binding",
@@ -198,10 +219,15 @@ def main():
         check("--policy disabled succeeds", code == 0, "exit %d" % code)
         disabled = load(off)
         check("--policy disabled leaves every binding unknown",
-              all(status == "unknown"
+              all(verdict["status"] == "unknown"
                   for record in disabled["files"] for entry in record["imports"]
-                  for status in (entry.get("usage") or {}).values()),
+                  for verdict in (entry.get("usage") or {}).values()),
               "got a non-unknown status")
+        check("--policy disabled names no tool as the source",
+              all(verdict["source"] is None
+                  for record in disabled["files"] for entry in record["imports"]
+                  for verdict in (entry.get("usage") or {}).values()),
+              "a verdict claimed a source when no tool ran")
         check("--policy disabled records that the tool was not available",
               disabled["coverage"]["import_usage"]["tool_available"] is False)
         check("--policy disabled is still reversible",

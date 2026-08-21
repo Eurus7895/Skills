@@ -60,6 +60,12 @@ def build_fixture(tmp):
                           "    serve()\n")
     write(root, "pkg/__init__.py")
     write(root, "pkg/service.py", "def handle():\n    return 1\n")
+    # One base that resolves inside the repository and one that cannot: the class view
+    # has to tell them apart rather than presenting both as links.
+    write(root, "pkg/base.py", "class Record:\n    pass\n")
+    write(root, "pkg/models.py",
+          "from pkg.base import Record\n\n\nclass Order(Record):\n    pass\n\n\n"
+          "class Failure(Exception):\n    pass\n")
     index = os.path.join(tmp, "structure.json")
     proc = subprocess.run([sys.executable, SCANNER, "--root", root, "--out", index,
                            "--detail"], capture_output=True, text=True)
@@ -170,8 +176,27 @@ def main():
 
         code, doc4, output, arch_path = run_builder(tmp, index, CLAIMS, FRAGMENTS,
                                                     name="arch", preset="architecture")
+        arch_ids = [p["id"] for p in doc4["pages"]]
         check("a second preset produces its own page set",
-              code == 0 and "dependencies" in [p["id"] for p in doc4["pages"]], output)
+              code == 0 and set(arch_ids) == {"overview", "architecture", "dependencies",
+                                              "class-views", "flows", "limitations"},
+              "%r %s" % (arch_ids, output))
+        check("the architecture preset carries no module reference by design",
+              "modules" not in arch_ids, "%r" % arch_ids)
+
+        # A page with nothing to show says so rather than being dropped -- a missing
+        # page and an empty one read very differently to someone looking for it.
+        flows = [b for p in doc4["pages"] if p["id"] == "flows" for b in p["blocks"]]
+        check("a flows page with no verified call still exists and says why",
+              flows and any("No call was verified" in str(b.get("text", ""))
+                            for b in flows), "%r" % flows)
+        rows = [r for p in doc4["pages"] if p["id"] == "class-views"
+                for b in p["blocks"] for r in b.get("rows", ())]
+        check("a base defined in the repository is linked to its file",
+              any(r[0] == "Order" and "pkg/base.py" in r[1] for r in rows), "%r" % rows)
+        check("a base from outside is marked unresolved, not linked",
+              any(r[0] == "Failure" and "not resolved" in r[1] for r in rows),
+              "%r" % rows)
 
         # Rendering.
         out_dir = os.path.join(tmp, "docs")

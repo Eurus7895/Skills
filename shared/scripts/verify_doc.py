@@ -30,10 +30,13 @@ Claim kinds and how each is decided:
                 elsewhere there is no tree to check and the claim stays a candidate.
     responsibility  an inference; recorded as supported_inference, never as fact
 
-Statuses out: verified, supported_inference, candidate, needs_context, rejected.
-`rejected` means the source contradicts the claim. `needs_context` means the claim
-could not be decided from what was supplied -- a different thing, and the only one of
-the two worth retrying.
+Statuses out: verified, supported_inference, candidate, unsupported, needs_context,
+rejected. Three of those are easy to confuse and are kept apart deliberately:
+
+    needs_context  undecidable from what was supplied. Retry with more
+    unsupported    undecidable in principle -- a call target computed at run time.
+                   Retrying cannot help, so it never re-enters the loop
+    rejected       the source contradicts the claim
 
 Exit codes: 0 every claim decided without rejection, 1 something was rejected or needs
 context, 2 input/schema error, 3 internal error.
@@ -54,8 +57,12 @@ KINDS = ("defines", "contains", "imports", "inherits", "calls", "responsibility"
 
 # Worst status wins when a fragment's claims disagree: one rejected claim makes the
 # whole fragment untrustworthy, however many verified ones surround it.
+#
+# `unsupported` sits above `candidate` and below `needs_context`: it is a permanent
+# answer, not a temporary one -- more context will never resolve a call target that is
+# computed at run time -- so it is worse than "undecided here" but is not a retry.
 SEVERITY = {"verified": 0, "supported_inference": 1, "candidate": 2,
-            "needs_context": 3, "rejected": 4}
+            "unsupported": 3, "needs_context": 4, "rejected": 5}
 
 
 def parse_entity(entity):
@@ -256,7 +263,7 @@ class Verifier(object):
         bindings = {b for edge in self.edges.get((caller_path, obj[1]), ())
                     for b in edge.get("bindings", ())}
 
-        near_miss = None
+        near_miss, computed = None, False
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or node.lineno not in lines:
                 continue
@@ -267,6 +274,11 @@ class Verifier(object):
                 name = func.attr
                 base = func.value.id if isinstance(func.value, ast.Name) else None
             else:
+                # A call through a variable, a subscript, or the result of another call.
+                # There *is* a call here; its target is decided at run time. Saying "no
+                # call at that line" would be false, and saying "verified" would be a
+                # guess -- so neither, and the claim is recorded as unsupportable.
+                computed = True
                 continue
             if name != wanted:
                 near_miss = near_miss or name
@@ -292,6 +304,11 @@ class Verifier(object):
         if near_miss:
             return "rejected", ("the cited line in %s calls %r, not %r"
                                 % (caller_path, near_miss, wanted))
+        if computed:
+            return "unsupported", ("the cited line in %s calls something computed at run "
+                                   "time -- through a variable, a subscript, or another "
+                                   "call. Static analysis cannot name the target, and no "
+                                   "further context will change that" % caller_path)
         return "rejected", "there is no call at %s:%s" % (caller_path, sorted(lines))
 
     # -- driver ----------------------------------------------------------------
@@ -323,7 +340,7 @@ class Verifier(object):
         status, message = getattr(self, "verify_" + kind)(claim, subject, obj)
         if message:
             code = {"rejected": "V010", "needs_context": "V011",
-                    "candidate": "V012"}.get(status, "V013")
+                    "candidate": "V012", "unsupported": "V014"}.get(status, "V013")
             self.finding(claim_id, code, message, retryable=(status == "needs_context"))
         return status
 
@@ -455,7 +472,12 @@ def main():
         print("  %s  %-24s %s" % (row["code"], row["claim_id"], row["message"]))
     print("wrote %s" % args.out_dir)
 
-    blocked = counts.get("rejected", 0) + counts.get("needs_context", 0)
+    # A fragment can be blocked by something no claim status shows: a reference to a
+    # claim that was never supplied. Counting only claims there would exit 0 and let the
+    # document builder drop the fragment without anyone being told.
+    blocked = (counts.get("rejected", 0) + counts.get("needs_context", 0)
+               + sum(1 for f in fragments
+                     if f["status"] in ("rejected", "needs_context")))
     return 1 if blocked else 0
 
 
