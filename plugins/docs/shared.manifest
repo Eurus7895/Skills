@@ -11,4 +11,6 @@ scripts/validate_index.py        -> skills/document-codebase/scripts/validate_in
 scripts/annotate_import_usage.py -> skills/document-codebase/scripts/annotate_import_usage.py
 scripts/query_graph.py           -> skills/document-codebase/scripts/query_graph.py
 scripts/verify_doc.py            -> skills/document-codebase/scripts/verify_doc.py
+scripts/build_document_model.py  -> skills/document-codebase/scripts/build_document_model.py
+scripts/render_docs.py           -> skills/document-codebase/scripts/render_docs.py
 scripts/assemble.py              -> skills/document-codebase/scripts/assemble.py
