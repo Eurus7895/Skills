@@ -96,8 +96,52 @@ def table(block_id, columns, rows, claim_refs=()):
             "rows": [list(r) for r in rows], "claim_refs": sorted(claim_refs)}
 
 
+def image(block_id, src, alt):
+    return {"id": block_id, "type": "image", "src": src, "alt": alt}
+
+
 def cite(path, line):
     return "%s:%d" % (path, line)
+
+
+def diagram_blocks(diagrams, page_id):
+    """An image block per rendered diagram, or nothing at all.
+
+    A page never claims a diagram that was not produced. Graphviz is optional, so the
+    common case on a machine without it is that these blocks simply do not exist -- and
+    the reader sees a page with no picture rather than a broken image.
+    """
+    if not diagrams:
+        return []
+    blocks = []
+    for name, alt in diagrams.get(page_id, ()):
+        blocks.append(image("block:%s-diagram-%s" % (page_id, os.path.splitext(name)[0]),
+                            "_diagrams/%s" % name, alt))
+    return blocks
+
+
+def find_diagrams(directory):
+    """Which rendered diagrams exist, mapped to the pages that should show them."""
+    if not directory or not os.path.isdir(directory):
+        return {}
+    manifest_path = os.path.join(directory, "diagram-manifest.json")
+    if not os.path.isfile(manifest_path):
+        return {}
+    try:
+        with open(manifest_path, encoding="utf-8") as fh:
+            manifest = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    stem = str(manifest.get("view", "full_repository")).replace("_", "-")
+    svg = "%s.svg" % stem
+    if not os.path.isfile(os.path.join(directory, svg)):
+        return {}
+    alt = ("Class diagram of the whole repository: %d class(es) grouped by package and "
+           "module, showing %s relationships"
+           % (len(manifest.get("nodes", ())), " and ".join(manifest.get("layers", ()))))
+    # The same picture belongs on both pages that talk about structure, and only on the
+    # pages a preset actually has.
+    return {"architecture": [(svg, alt)], "class-views": [(svg, alt)]}
 
 
 def overview_page(index, fragments, claims_by_id):
@@ -371,11 +415,12 @@ BUILDERS = {
 }
 
 
-def build(index, fragments, claims, preset):
+def build(index, fragments, claims, preset, diagrams=None):
     by_id = {c.get("id"): c for c in claims}
     pages = []
     for order, (page_id, title, mandatory) in enumerate(PRESETS[preset], 1):
         blocks = BUILDERS[page_id](index, fragments, claims, by_id)
+        blocks.extend(diagram_blocks(diagrams, page_id))
         pages.append({"id": page_id, "title": title, "order": order,
                       "mandatory": mandatory, "blocks": blocks})
 
@@ -441,6 +486,9 @@ def main():
     parser.add_argument("--claims", required=True, help="verified claims, JSONL")
     parser.add_argument("--fragments", required=True, help="verified fragments, JSONL")
     parser.add_argument("--preset", default="onboarding", choices=sorted(PRESETS))
+    parser.add_argument("--diagrams", metavar="DIR",
+                        help="rendered diagram directory; pages reference what is there "
+                             "and nothing more")
     parser.add_argument("--out", default=".docs-build/doc.json")
     args = parser.parse_args()
 
@@ -476,7 +524,13 @@ def main():
         sys.stderr.write("      revise or drop them, then rerun verify_doc.py\n")
         return 2
 
-    doc = build(index, fragments, claims, args.preset)
+    diagrams = find_diagrams(args.diagrams)
+    if args.diagrams and not diagrams:
+        # Asked for, not found: say so rather than producing a document that quietly
+        # has no picture in it.
+        sys.stderr.write("WARN  %s holds no rendered diagram; the pages will have no "
+                         "figure\n" % args.diagrams)
+    doc = build(index, fragments, claims, args.preset, diagrams)
     problems = validate(doc)
     if problems:
         for problem in problems:

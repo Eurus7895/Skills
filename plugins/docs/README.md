@@ -6,15 +6,16 @@ remembers reading.
 The shape is what makes the result checkable:
 
 ```
-scan  ->  validate the index  ->  bound the context per module  ->  describe  ->  verify every claim  ->  render
+scan  ->  validate  ->  bound the context per module  ->  describe  ->  verify every claim  ->  draw  ->  render
 ```
 
 Structure is a fact extracted by code. Judgement happens afterwards, once each module's role can be stated
 against the modules that actually import it. Nothing ships that the graph does not support.
 
 Each description comes back as claims with citations rather than as prose alone, and each claim is decided
-before it can reach a page: `verified` and `supported_inference` may be written, `candidate` and
-`needs_context` are confined to the limitations section, and a `rejected` claim stops the build. A reader
+before it can reach a page: `verified` and `supported_inference` may be written, `candidate`,
+`unsupported` and `needs_context` are confined to the limitations section, and a `rejected` claim stops the
+build. A reader
 cannot tell a checked sentence from an unchecked one, so the separation is enforced where it can be.
 
 ## Install
@@ -42,6 +43,10 @@ copilot plugin install docs@CopilotBox
 | `query_graph.py` | Builds one bounded context packet per scope, partitioning rather than truncating |
 | `verify_doc.py` | Decides every claim against the graph and the source; never rewrites prose |
 | `assemble.py` | Fails the run when a dispatched module returned no row, or every row says the same thing |
+| `build_class_graph.py` | Builds the canonical class graph: packages, modules, classes, relationships in layers |
+| `build_diagrams.py` | Lays it out with Graphviz and renders Draw.io and SVG from one geometry |
+| `validate_diagrams.py` | Checks the rendered diagram against the graph it claims to draw |
+| `apply_layout_patch.py` | Applies presentation-only fixes from a visual review; refuses anything structural |
 | `build_document_model.py` | Turns verified claims into pages and blocks, with no markup in them |
 | `render_docs.py` | Renders that to RST and validates the result with Sphinx or docutils |
 
@@ -57,6 +62,11 @@ copilot plugin install docs@CopilotBox
   the generated document says so wherever it reports the count.
 - **Nothing is silently truncated.** A file too large for the context ceiling is split along its own top-level
   definitions and fetched part by part; a file with nothing to split on is refused rather than halved.
+- **The class diagram is a claim too.** `class-graph.json` is canonical and Draw.io and SVG are render
+  products of it, generated from one geometry so they cannot drift apart. Every class the scanner found
+  appears exactly once, an unresolved base draws no edge at all, and inheritance and composition are kept in
+  separate layers from the weaker association and call edges. A visual review may move, resize and reroute;
+  it may not change what exists or what connects to what, and a refused patch leaves the diagram untouched.
 - **Approximate data labels itself.** Python is parsed exactly with `ast`. JavaScript, TypeScript, Go, Rust,
   Java, Ruby, C and C++ are approximated by import regex; those records carry `"exact": false`, and any claim
   resting on them is marked *(approximate)*.

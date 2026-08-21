@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "applies_to": {
+    "source_graph_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+    "view_spec_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000002"
+  },
+  "findings_addressed": ["Order looks like it should inherit from Failure"],
+  "operations": [
+    {"op": "move", "target": "class:pkg/models.py:Failure", "dy": -60},
+    {"op": "reparent", "target": "class:pkg/models.py:Failure", "parent": "module:pkg/base.py"},
+    {"op": "move", "target": "edge:inheritance:class:pkg/models.py:Order:class:pkg/base.py:Record", "target_node": "class:pkg/models.py:Failure", "layer": "composition"}
+  ]
+}

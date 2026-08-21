@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "detail": "public",
+  "source": {"root": ".", "revision": null, "dirty": true},
+  "source_graph_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+  "layers": ["inheritance", "composition", "association", "calls", "inference"],
+  "packages": [{"id": "package:pkg", "name": "pkg", "modules": ["module:pkg/base.py", "module:pkg/models.py"]}],
+  "modules": [
+    {"id": "module:pkg/base.py", "name": "pkg/base.py", "package": "package:pkg", "lang": "python", "source_hash": "sha256:aa", "classes": ["class:pkg/base.py:Record"]},
+    {"id": "module:pkg/models.py", "name": "pkg/models.py", "package": "package:pkg", "lang": "python", "source_hash": "sha256:bb", "classes": ["class:pkg/models.py:Order", "class:pkg/models.py:Failure"]}
+  ],
+  "classes": [
+    {"id": "class:pkg/base.py:Record", "name": "Record", "module": "module:pkg/base.py", "package": "package:pkg", "stereotype": "class", "cite": "pkg/base.py:1", "source_hash": "sha256:aa", "members": {"methods": [], "attributes": []}},
+    {"id": "class:pkg/models.py:Order", "name": "Order", "module": "module:pkg/models.py", "package": "package:pkg", "stereotype": "class", "cite": "pkg/models.py:4", "source_hash": "sha256:bb", "members": {"methods": [{"name": "total", "line": 8, "params": [], "visibility": "public"}], "attributes": [{"name": "engine", "line": 5, "types": ["Engine"]}]}},
+    {"id": "class:pkg/models.py:Failure", "name": "Failure", "module": "module:pkg/models.py", "package": "package:pkg", "stereotype": "exception", "cite": "pkg/models.py:12", "source_hash": "sha256:bb", "members": {"methods": [], "attributes": []}}
+  ],
+  "edges": [
+    {"id": "edge:inheritance:class:pkg/models.py:Order:class:pkg/base.py:Record", "layer": "inheritance", "from": "class:pkg/models.py:Order", "to": "class:pkg/base.py:Record", "verified": true, "cite": "pkg/models.py:4"},
+    {"id": "edge:composition:class:pkg/models.py:Order:class:pkg/base.py:Record", "layer": "composition", "from": "class:pkg/models.py:Order", "to": "class:pkg/base.py:Record", "verified": true, "labels": ["engine"], "cites": ["pkg/models.py:5"]}
+  ],
+  "unresolved": [],
+  "coverage": {"classes": 3, "modules_with_detail": 2, "modules_without_detail": 0, "by_layer": {"inheritance": 1, "composition": 1, "association": 0, "calls": 0, "inference": 0}, "unresolved_relationships": 0}
+}

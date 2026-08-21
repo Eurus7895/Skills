@@ -68,8 +68,10 @@ separately to prove it still is.
 ## Where the intermediate files go
 
 Everything except the finished document is written to **`.docs-build/`** in the working directory:
-`structure.json`, `fragments.jsonl`, `claims.jsonl`, their verified counterparts, `findings.jsonl`, and
-`doc.json`. Say so when you finish, and offer to delete it. Nothing in there is meant to be committed.
+`structure.json`, `fragments.jsonl`, `claims.jsonl`, their verified counterparts, `findings.jsonl`,
+`class-graph.json` and `doc.json`. Say so when you finish, and offer to delete it. Nothing in there is meant
+to be committed. The rendered diagrams are the exception: they belong beside the document, under
+`docs/_diagrams/`.
 
 ## Steps
 
@@ -224,16 +226,66 @@ finding explaining anything that is not the first two.
 Revise the affected fragment only. Re-analysing the whole repository because one claim failed wastes the
 budget from step 3 and usually reintroduces claims that already passed.
 
-### 7. Build the document model and render
+### 7. Draw the class diagram, if the tools are there
+
+```bash
+python3 scripts/build_class_graph.py --index .docs-build/structure.json \
+    --claims .docs-build/claims.verified.jsonl --detail public \
+    --out .docs-build/class-graph.json
+
+python3 scripts/build_diagrams.py --class-graph .docs-build/class-graph.json \
+    --out docs/_diagrams --policy optional --previews
+
+python3 scripts/validate_diagrams.py docs/_diagrams \
+    --class-graph .docs-build/class-graph.json
+```
+
+`class-graph.json` is the canonical source; the `.drawio` and `.svg` are render products
+of it. Layout needs Graphviz — under `--policy optional` a missing `dot` skips the
+diagram and the document is generated without one. **`skipped` is not `passed`**: say
+which happened.
+
+You may write a `view-spec.json` first to choose the detail level, which layers are
+visible, and what to emphasise. You may **not** use it to add a class, drop one, or
+change what connects to what — `build_diagrams.py` refuses such a spec before laying
+anything out. See [`references/diagram-policy.md`](references/diagram-policy.md) for the
+layers, the density threshold, and the severity mapping.
+
+**The visual review loop, when a preview exists.** Read
+`docs/_diagrams/full-repository-preview.png` and judge only what a picture shows:
+overlap, clipped labels, spacing, edge crossings, dense regions. Write your findings and
+a candidate patch, then:
+
+```bash
+python3 scripts/apply_layout_patch.py --model docs/_diagrams/diagram-model.json \
+    --patch docs/_diagrams/layout-patch.json
+python3 scripts/build_diagrams.py --render-only docs/_diagrams/diagram-model.json \
+    --out docs/_diagrams --previews
+python3 scripts/validate_diagrams.py docs/_diagrams \
+    --class-graph .docs-build/class-graph.json
+```
+
+A patch may move, resize, reroute, restyle and re-wrap. It may not change what exists or
+what connects to what, and a patch that tries is refused with the model left untouched.
+**Every patch is followed by a rerender and the full structural check** — a patch is not
+accepted until those pass again. Stop after two attempts, or the moment the same finding
+repeats: the loop is not converging and a third attempt costs the same and finds the
+same thing.
+
+### 8. Build the document model and render
 
 ```bash
 python3 scripts/build_document_model.py --index .docs-build/structure.json \
     --claims .docs-build/claims.verified.jsonl \
     --fragments .docs-build/fragments.verified.jsonl \
-    --preset onboarding --out .docs-build/doc.json
+    --preset onboarding --diagrams docs/_diagrams --out .docs-build/doc.json
 
-python3 scripts/render_docs.py --doc .docs-build/doc.json --out docs --check
+python3 scripts/render_docs.py --doc .docs-build/doc.json --out docs \
+    --diagrams docs/_diagrams --check
 ```
+
+Drop both `--diagrams` flags when no diagram was produced. A page never references a
+figure that is not there; the renderer refuses rather than emitting a broken image.
 
 Presets are described in [`references/presets.md`](references/presets.md). `onboarding` is the default;
 `architecture` is denser and assumes the reader already knows the domain.
@@ -248,11 +300,12 @@ reports `skipped` when neither is present. **`skipped` is not a pass** — say w
 The renderer never creates or edits a `conf.py`. If the user wants these pages inside their existing Sphinx
 project, that is a separate step: show them the output first and ask.
 
-### 8. Report
+### 9. Report
 
 State, from the artefacts rather than from memory: files scanned and skipped, the fan-in cutoff used, how many
-modules were described, how many claims were verified, how many are candidates and why, whether the build
-check passed or was skipped, and that `.docs-build/` can be deleted.
+modules were described, how many claims were verified, how many are candidates or unsupported and why, whether
+a diagram was generated or skipped and for what reason, how many visual findings were left unresolved, whether
+the build check passed or was skipped, and that `.docs-build/` can be deleted.
 
 ## Single-file output
 
@@ -270,10 +323,15 @@ This is the legacy output and is kept because a small repository often does not 
 | `scripts/query_graph.py` | Step 4, once per scope |
 | `scripts/assemble.py` | Step 5, always — before verifying |
 | `scripts/verify_doc.py` | Step 6, always — before writing anything |
-| `scripts/build_document_model.py` | Step 7 |
-| `scripts/render_docs.py` | Step 7 |
+| `scripts/build_class_graph.py` | Step 7, when diagrams are wanted |
+| `scripts/build_diagrams.py` | Step 7, and again after every layout patch |
+| `scripts/validate_diagrams.py` | Step 7, after every render |
+| `scripts/apply_layout_patch.py` | Step 7, only inside the visual loop |
+| `scripts/build_document_model.py` | Step 8 |
+| `scripts/render_docs.py` | Step 8 |
 | `references/schemas.md` | Step 4, before emitting the first claim |
-| `references/presets.md` | Step 7, to choose a preset |
+| `references/presets.md` | Step 8, to choose a preset |
+| `references/diagram-policy.md` | Step 7, before drawing or reviewing a diagram |
 | `references/context-policy.md` | When a packet is oversized or a retry needs scoping |
 
 ## Side effects

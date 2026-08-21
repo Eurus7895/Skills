@@ -281,6 +281,43 @@ def main():
         check("the renderer wrote no conf.py",
               not os.path.isfile(os.path.join(out_dir, "conf.py")),
               "a conf.py was left behind")
+
+        # Diagrams are optional, so the two cases that matter are "there is one" and
+        # "there is not" -- and neither may produce a page pointing at a missing file.
+        contracts = os.path.join(REPO, "tests", "contracts")
+        diagrams = os.path.join(tmp, "_diagrams")
+        subprocess.run([sys.executable,
+                        os.path.join(REPO, "shared", "scripts", "build_diagrams.py"),
+                        "--render-only",
+                        os.path.join(contracts, "diagram-model-v1-valid.json"),
+                        "--out", diagrams], capture_output=True, text=True)
+        code, doc6, output, with_figure = run_builder(
+            tmp, index, CLAIMS, FRAGMENTS, name="figure", preset="architecture")
+        # Rebuild with the diagram directory attached.
+        proc = subprocess.run(
+            [sys.executable, BUILDER, "--index", index,
+             "--claims", os.path.join(tmp, "figure-claims.jsonl"),
+             "--fragments", os.path.join(tmp, "figure-fragments.jsonl"),
+             "--preset", "architecture", "--diagrams", diagrams,
+             "--out", with_figure], capture_output=True, text=True)
+        check("a document can reference a rendered diagram", proc.returncode == 0,
+              proc.stdout + proc.stderr)
+        with open(with_figure, encoding="utf-8") as fh:
+            doc6 = json.load(fh)
+        figures = [b for p in doc6["pages"] for b in p["blocks"] if b["type"] == "image"]
+        check("the figure lands on the pages about structure",
+              {b["id"].split("-diagram-")[0] for b in figures}
+              == {"block:architecture", "block:class-views"}, "%r" % figures)
+        check("and every figure has alt text",
+              all(b.get("alt") for b in figures), "%r" % figures)
+
+        figure_docs = os.path.join(tmp, "figure-docs")
+        code, output = run_renderer(with_figure, figure_docs, "--diagrams", diagrams)
+        check("rendering copies the diagrams in beside the pages",
+              code == 0 and os.path.isfile(
+                  os.path.join(figure_docs, "_diagrams", "full-repository.svg")), output)
+        code, output = run_renderer(with_figure, os.path.join(tmp, "no-figures"))
+        check("a figure with nowhere to resolve stops the render", code == 2, output)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

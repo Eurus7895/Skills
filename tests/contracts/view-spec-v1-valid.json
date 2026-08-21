@@ -1,0 +1,7 @@
+{
+  "view": "full_repository",
+  "detail": "public",
+  "layers": ["inheritance", "composition"],
+  "emphasis": ["class:pkg/models.py:Order"],
+  "rankdir": "LR"
+}

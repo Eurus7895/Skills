@@ -175,6 +175,9 @@ def main():
                         help="output markup; only rst is implemented")
     parser.add_argument("--check", action="store_true",
                         help="validate the rendered markup after writing it")
+    parser.add_argument("--diagrams", metavar="DIR",
+                        help="copy this directory in as _diagrams/ and resolve figures "
+                             "against it")
     args = parser.parse_args()
 
     if not os.path.isfile(args.doc):
@@ -207,8 +210,29 @@ def main():
         return 2
     rendered["index.rst"] = render_index(doc, pages)
 
+    # A figure pointing at a file that is not there renders as a broken image and
+    # fails a Sphinx build with a message about the page, not about the picture. Check
+    # it here, where the message can name what is missing and nothing has been written.
+    wanted = [b["src"] for page in pages for b in page["blocks"] if b["type"] == "image"]
+    if wanted and not args.diagrams:
+        sys.stderr.write("FAIL  the model references %d figure(s) but --diagrams was "
+                         "not given: %s\n" % (len(wanted), ", ".join(wanted[:3])))
+        return 2
+    missing = [src for src in wanted
+               if not os.path.isfile(os.path.join(args.diagrams,
+                                                  os.path.basename(src)))]
+    if missing:
+        sys.stderr.write("FAIL  %d figure(s) are not in %s: %s\n"
+                         % (len(missing), args.diagrams, ", ".join(missing[:3])))
+        return 2
+
     if not os.path.isdir(args.out):
         os.makedirs(args.out)
+    if args.diagrams:
+        destination = os.path.join(args.out, "_diagrams")
+        if os.path.isdir(destination):
+            shutil.rmtree(destination)
+        shutil.copytree(args.diagrams, destination)
     for name, text in sorted(rendered.items()):
         with open(os.path.join(args.out, name), "w", encoding="utf-8") as fh:
             fh.write(text)

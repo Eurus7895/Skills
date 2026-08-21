@@ -1,0 +1,12 @@
+{
+  "view": "full_repository",
+  "detail": "public",
+  "layers": ["inheritance"],
+  "add_classes": [
+    {"id": "class:pkg/models.py:Invented", "name": "Invented", "module": "module:pkg/models.py"}
+  ],
+  "remove_classes": ["class:pkg/models.py:Failure"],
+  "relationships": [
+    {"from": "class:pkg/models.py:Order", "to": "class:pkg/models.py:Failure", "kind": "inheritance"}
+  ]
+}
