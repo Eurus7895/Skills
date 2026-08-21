@@ -71,6 +71,10 @@ class Order(Record):
 
 class Failure(Exception):
     pass
+
+
+class ParseError:
+    pass
 """
 
 PLAIN = "def helper():\n    return 1\n"
@@ -114,7 +118,8 @@ def main():
         ids = [c["id"] for c in graph["classes"]]
         check("every class appears exactly once",
               sorted(ids) == ["class:base.py:Engine", "class:base.py:Record",
-                              "class:models.py:Failure", "class:models.py:Order"],
+                              "class:models.py:Failure", "class:models.py:Order",
+                              "class:models.py:ParseError"],
               "%r" % ids)
         check("a module with no classes contributes none",
               not any("plain.py" in i for i in ids), "%r" % ids)
@@ -163,11 +168,14 @@ def main():
         check("public detail keeps public methods",
               [m["name"] for m in order["members"]["methods"]] == ["total"],
               "%r" % order["members"]["methods"])
+        stereotypes = {c["name"]: c["stereotype"] for c in graph["classes"]}
         check("stereotypes are only assigned where the code states them",
-              order["stereotype"] == "class"
-              and next(c for c in graph["classes"]
-                       if c["name"] == "Failure")["stereotype"] == "exception",
-              "%r" % [(c["name"], c["stereotype"]) for c in graph["classes"]])
+              stereotypes.get("Order") == "class"
+              and stereotypes.get("Failure") == "exception", "%r" % stereotypes)
+        # A name is not a base class. `ParseError` inherits from nothing, and calling it
+        # an exception is the one guess a reader would take on trust.
+        check("a name ending in Error is not an exception on that basis alone",
+              stereotypes.get("ParseError") == "class", "%r" % stereotypes)
 
         summary_out = os.path.join(tmp, "summary.json")
         code, summary, output = run(index, summary_out, "--detail", "summary")

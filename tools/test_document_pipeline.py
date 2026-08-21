@@ -282,6 +282,20 @@ def main():
               not os.path.isfile(os.path.join(out_dir, "conf.py")),
               "a conf.py was left behind")
 
+        # The documented invocation is `--out docs`, which is where a project keeps its
+        # real Sphinx configuration. A check that writes its own conf.py there and
+        # deletes it afterwards destroys the thing it was asked to check.
+        existing = os.path.join(tmp, "has-conf")
+        code, output = run_renderer(doc_path, existing)
+        marker = "project = 'the real project'\n"
+        with open(os.path.join(existing, "conf.py"), "w", encoding="utf-8") as fh:
+            fh.write(marker)
+        code, output = run_renderer(doc_path, existing, "--check")
+        check("--check leaves an existing conf.py exactly as it found it",
+              code == 0 and os.path.isfile(os.path.join(existing, "conf.py"))
+              and open(os.path.join(existing, "conf.py"),
+                       encoding="utf-8").read() == marker, output)
+
         # Diagrams are optional, so the two cases that matter are "there is one" and
         # "there is not" -- and neither may produce a page pointing at a missing file.
         contracts = os.path.join(REPO, "tests", "contracts")
@@ -318,6 +332,18 @@ def main():
                   os.path.join(figure_docs, "_diagrams", "full-repository.svg")), output)
         code, output = run_renderer(with_figure, os.path.join(tmp, "no-figures"))
         check("a figure with nowhere to resolve stops the render", code == 2, output)
+
+        # `--out docs --diagrams docs/_diagrams` is the documented invocation, so the
+        # source and the destination are the same directory. Clearing the destination
+        # first would delete the diagrams and then copy from nothing.
+        in_place = os.path.join(tmp, "in-place")
+        os.makedirs(in_place)
+        shutil.copytree(diagrams, os.path.join(in_place, "_diagrams"))
+        code, output = run_renderer(with_figure, in_place,
+                                    "--diagrams", os.path.join(in_place, "_diagrams"))
+        check("rendering into the directory the diagrams already live in keeps them",
+              code == 0 and os.path.isfile(
+                  os.path.join(in_place, "_diagrams", "full-repository.svg")), output)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

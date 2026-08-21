@@ -121,20 +121,29 @@ def check_build(out_dir):
     if shutil.which("sphinx-build"):
         work = tempfile.mkdtemp(prefix="render-docs-check-")
         try:
-            # A conf.py of our own, in a temp directory: the target project's
-            # configuration is never read, created or modified by this check.
-            with open(os.path.join(out_dir, "conf.py"), "w", encoding="utf-8") as fh:
+            # The pages are copied out and built in a temp tree with a conf.py of our
+            # own. Writing that conf.py into --out would overwrite a project's real
+            # Sphinx configuration -- and the documented invocation is `--out docs`,
+            # which is exactly where a project keeps it. A check must not be able to
+            # destroy the thing it is checking.
+            source = os.path.join(work, "source")
+            build = os.path.join(work, "build")
+            os.makedirs(source)
+            for name in sorted(os.listdir(out_dir)):
+                origin = os.path.join(out_dir, name)
+                if os.path.isdir(origin):
+                    shutil.copytree(origin, os.path.join(source, name))
+                elif name != "conf.py":
+                    shutil.copyfile(origin, os.path.join(source, name))
+            with open(os.path.join(source, "conf.py"), "w", encoding="utf-8") as fh:
                 fh.write("project = 'check'\nextensions = []\n"
                          "master_doc = 'index'\nexclude_patterns = ['_build']\n")
-            try:
-                proc = subprocess.run(
-                    ["sphinx-build", "-W", "-q", "-b", "html", out_dir, work],
-                    capture_output=True, text=True, timeout=300)
-                if proc.returncode == 0:
-                    return "passed", "sphinx-build -W reported no warnings"
-                return "failed", (proc.stderr or proc.stdout).strip()[:2000]
-            finally:
-                os.remove(os.path.join(out_dir, "conf.py"))
+            proc = subprocess.run(
+                ["sphinx-build", "-W", "-q", "-b", "html", source, build],
+                capture_output=True, text=True, timeout=300)
+            if proc.returncode == 0:
+                return "passed", "sphinx-build -W reported no warnings"
+            return "failed", (proc.stderr or proc.stdout).strip()[:2000]
         except (OSError, subprocess.SubprocessError) as exc:
             return "failed", "sphinx-build could not be run: %s" % exc
         finally:
@@ -227,9 +236,16 @@ def main():
         os.makedirs(args.out)
     if args.diagrams:
         destination = os.path.join(args.out, "_diagrams")
-        if os.path.isdir(destination):
-            shutil.rmtree(destination)
-        shutil.copytree(args.diagrams, destination)
+        # The documented invocation is `--out docs --diagrams docs/_diagrams`, where the
+        # diagrams are already where they belong. Deleting the destination first would
+        # delete the source and then copy from nothing.
+        already_there = (os.path.isdir(destination)
+                         and os.path.realpath(destination)
+                         == os.path.realpath(args.diagrams))
+        if not already_there:
+            if os.path.isdir(destination):
+                shutil.rmtree(destination)
+            shutil.copytree(args.diagrams, destination)
     for name, text in sorted(rendered.items()):
         with open(os.path.join(args.out, name), "w", encoding="utf-8") as fh:
             fh.write(text)

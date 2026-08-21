@@ -36,14 +36,19 @@ does not know.
 | `public` | public methods and typed attributes | the default |
 | `full` | everything extracted | one module's detail view, never the whole repository |
 
-**Density threshold (decision 15):** switch the default from `public` to `summary` when
+**Density threshold (decision 15):** the default drops from `public` to `summary` when
 the graph holds more than **60 classes** or more than **400 members** in total. Past that
 a full canvas at `public` produces boxes too small to read, and the honest move is fewer
-words per box rather than a smaller font.
+words per box rather than a smaller font. `build_diagrams.py` enforces this and says so
+on stderr; a detail level named explicitly in a view spec is the author's call and is
+left alone.
 
-**Detail views (decision 16):** when the full-repository canvas exceeds the threshold,
-per-package detail views are **mandatory**. The summary canvas stays complete -- every
-class appears -- and the detail a reader needs moves to a view that has room for it.
+**Detail views (decision 16):** *not implemented in this version.* The plan calls for
+mandatory per-package detail views once the canvas passes the threshold. Today the
+canvas drops to `summary` and stays complete -- every class still appears -- but the
+detail that would move into a package view has nowhere to go. Until those views exist,
+a reader past the threshold gets names and structure, not members. This is a gap, and
+it is written down here rather than left as an unmet promise elsewhere in the document.
 
 ## Stereotypes
 

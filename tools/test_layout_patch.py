@@ -199,6 +199,41 @@ def main():
         code, output = run(MODEL, empty)
         check("a patch with no operations is refused", code == 1, output)
 
+        # A patch with no identity is not "applies anywhere" -- it is a patch that
+        # cannot be checked, and replaying it onto another diagram is exactly what
+        # recording the hashes was for.
+        for name, drop in (("no-applies-to", lambda p: p.pop("applies_to", None)),
+                           ("no-graph-hash",
+                            lambda p: p["applies_to"].pop("source_graph_hash")),
+                           ("no-view-hash",
+                            lambda p: p["applies_to"].pop("view_spec_hash"))):
+            fresh = os.path.join(tmp, name + "-model.json")
+            shutil.copyfile(MODEL, fresh)
+            code, output = run(fresh, patch_file(tmp, name, drop))
+            check("a patch with %s is refused" % name.replace("-", " "), code == 1,
+                  output)
+            check("  and %s changes nothing" % name, load(fresh) == original)
+
+        # A style operation that no renderer reads would report success and do nothing.
+        styled = os.path.join(tmp, "styled-model.json")
+        shutil.copyfile(MODEL, styled)
+        styled_out = os.path.join(tmp, "styled.json")
+        code, output = run(styled, patch_file(tmp, "styled", lambda p: p["operations"]
+                                              .append({"op": "style",
+                                                       "target": "class:pkg/base.py:Record",
+                                                       "fill": "#112233"})), styled_out)
+        check("a style patch applies", code == 0, output)
+        styled_docs = os.path.join(tmp, "styled-docs")
+        subprocess.run([sys.executable, BUILD, "--render-only", styled_out,
+                        "--out", styled_docs], capture_output=True, text=True)
+        svg = open(os.path.join(styled_docs, "full-repository.svg"),
+                   encoding="utf-8").read()
+        drawio = open(os.path.join(styled_docs, "full-repository.drawio"),
+                      encoding="utf-8").read()
+        check("and both renderers actually use the colour it set",
+              "#112233" in svg and "#112233" in drawio,
+              "svg %s / drawio %s" % ("#112233" in svg, "#112233" in drawio))
+
         old = os.path.join(tmp, "old-patch.json")
         with open(old, "w", encoding="utf-8") as fh:
             json.dump({"schema_version": 99, "operations": []}, fh)

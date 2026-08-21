@@ -133,6 +133,22 @@ def main():
         check("a node removed from one format only is caught",
               code == 1 and "G005" in codes(report), "%r" % report)
 
+        # The other direction: an artifact that grew a node no class graph backs. A
+        # gate that only looks for what is missing passes a picture asserting something
+        # the source never said.
+        fabricated = os.path.join(tmp, "fabricated")
+        shutil.copytree(good, fabricated)
+        with open(os.path.join(fabricated, "full-repository.svg"), encoding="utf-8") as fh:
+            svg = fh.read()
+        with open(os.path.join(fabricated, "full-repository.svg"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(svg.replace("</g></svg>",
+                                 '<rect id="class:pkg/models.py:Invented" x="10" y="10" '
+                                 'width="20" height="20"/></g></svg>'))
+        code, report = validate(fabricated)
+        check("a node added to a rendered artifact is caught",
+              code == 1 and "G005" in codes(report), "%r" % report)
+
         broken = os.path.join(tmp, "broken-xml")
         shutil.copytree(good, broken)
         with open(os.path.join(broken, "full-repository.drawio"), "w",

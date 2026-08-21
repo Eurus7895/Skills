@@ -95,7 +95,13 @@ def check_patch(patch, model):
     for field, expected in (("source_graph_hash", model.get("source_graph_hash")),
                             ("view_spec_hash", model.get("view_spec_hash"))):
         recorded = applies_to.get(field)
-        if recorded and recorded != expected:
+        if not recorded:
+            # Absent is not "applies to anything". A patch with no identity could be
+            # replayed onto any diagram whose ids happen to overlap, which is exactly
+            # what recording the hashes was meant to stop.
+            problems.append("patch records no %s, so there is nothing to check it "
+                            "against; a patch without identity is not reusable" % field)
+        elif recorded != expected:
             problems.append("patch was made against %s %s, but this model is %s -- the "
                             "coordinates it moves belong to a different diagram"
                             % (field, recorded[:19], (expected or "?")[:19]))

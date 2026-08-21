@@ -252,21 +252,32 @@ def check_equivalence(model, out_dir, findings):
     expected_nodes = {n["id"] for n in model["nodes"]} | {c["id"] for c in model["containers"]}
     expected_edges = {e["id"] for e in model["edges"] if e.get("points")}
 
+    # Both directions. Checking only what is missing lets an artifact grow a node or an
+    # edge that no class graph backs -- a picture asserting something the source never
+    # said, which is the failure the whole gate exists to catch.
     for label, found in (("Draw.io", drawio_nodes), ("SVG", svg_nodes)):
         missing = sorted(expected_nodes - found)
         if missing:
             findings.add("G005", "%s is missing %d node(s) the model declares: %s"
                          % (label, len(missing), ", ".join(missing[:5])))
+        extra = sorted(found - expected_nodes)
+        if extra:
+            findings.add("G005", "%s contains %d node(s) the model does not declare: %s"
+                         % (label, len(extra), ", ".join(extra[:5])))
     for label, found in (("Draw.io", drawio_edges), ("SVG", svg_edges)):
         missing = sorted(expected_edges - found)
         if missing:
             findings.add("G005", "%s is missing %d edge(s) the model declares: %s"
                          % (label, len(missing), ", ".join(missing[:5])))
+        extra = sorted(found - {e["id"] for e in model["edges"]})
+        if extra:
+            findings.add("G005", "%s contains %d edge(s) the model does not declare: %s"
+                         % (label, len(extra), ", ".join(extra[:5])))
 
     # The two formats come from one geometry, so a difference between them means one was
     # edited by hand or one renderer has drifted from the other.
-    only_drawio = sorted((drawio_nodes - svg_nodes) & expected_nodes)
-    only_svg = sorted((svg_nodes - drawio_nodes) & expected_nodes)
+    only_drawio = sorted(drawio_nodes - svg_nodes)
+    only_svg = sorted(svg_nodes - drawio_nodes)
     if only_drawio or only_svg:
         findings.add("G005", "Draw.io and SVG disagree: %r only in Draw.io, %r only in SVG"
                      % (only_drawio[:3], only_svg[:3]))

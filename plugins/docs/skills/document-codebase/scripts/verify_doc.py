@@ -58,6 +58,18 @@ SUPPORTED_SCHEMA = {2}
 
 KINDS = ("defines", "contains", "imports", "inherits", "calls", "responsibility")
 
+# Which entity kinds each claim may join. Without this, `imports` with a `class:`
+# subject and a `method:` object verifies whenever the paths buried in those ids happen
+# to share a module edge -- classes do not import methods, and the claim would be a
+# true statement about two files dressed up as a false one about two entities.
+KIND_SHAPES = {
+    "defines": ({"module"}, {"symbol", "class"}),
+    "contains": ({"class"}, {"method"}),
+    "imports": ({"module"}, {"module"}),
+    "inherits": ({"class"}, {"class"}),
+    "calls": ({"module", "symbol", "method"}, {"symbol", "method"}),
+}
+
 # Worst status wins when a fragment's claims disagree: one rejected claim makes the
 # whole fragment untrustworthy, however many verified ones surround it.
 #
@@ -127,6 +139,63 @@ class Verifier(object):
         self._trees[path] = parsed
         return parsed
 
+    def shadowed_at(self, tree, name, line):
+        """True when `name` at `line` is something other than the module-level import.
+
+        A module-wide binding set is not what a call site sees. `from service import
+        handle` followed by `def f(handle): return handle()` calls the parameter, and
+        crediting that to service.handle invents a call edge -- the precise failure this
+        pipeline exists to prevent, arrived at from the other direction.
+
+        Only rebinding that encloses the call counts. A sibling function that happens to
+        take a `handle` parameter shadows nothing here.
+        """
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                     ast.Lambda, ast.ClassDef)):
+                continue
+            start = getattr(node, "lineno", 0)
+            end = getattr(node, "end_lineno", start)
+            if not start <= line <= end:
+                continue
+
+            arguments = getattr(node, "args", None)
+            if arguments is not None:
+                every = (list(getattr(arguments, "posonlyargs", []))
+                         + list(arguments.args) + list(arguments.kwonlyargs))
+                for extra in (arguments.vararg, arguments.kwarg):
+                    if extra is not None:
+                        every.append(extra)
+                if any(argument.arg == name for argument in every):
+                    return True
+
+            for inner in ast.walk(node):
+                if isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                        and inner is not node and inner.name == name:
+                    return True
+                if isinstance(inner, ast.ClassDef) and inner is not node \
+                        and inner.name == name:
+                    return True
+                if isinstance(inner, (ast.Import, ast.ImportFrom)):
+                    for alias in inner.names:
+                        if (alias.asname or alias.name.split(".")[0]) == name \
+                                and inner.lineno != line:
+                            return True
+                targets = []
+                if isinstance(inner, ast.Assign):
+                    targets = inner.targets
+                elif isinstance(inner, (ast.AnnAssign, ast.AugAssign)):
+                    targets = [inner.target]
+                elif isinstance(inner, (ast.For, ast.AsyncFor)):
+                    targets = [inner.target]
+                elif isinstance(inner, ast.With):
+                    targets = [i.optional_vars for i in inner.items if i.optional_vars]
+                for target in targets:
+                    for leaf in ast.walk(target):
+                        if isinstance(leaf, ast.Name) and leaf.id == name:
+                            return True
+        return False
+
     def check_evidence(self, claim):
         """Every claim must be citable. Returns True when the citations hold."""
         claim_id = claim.get("id")
@@ -149,9 +218,22 @@ class Verifier(object):
                              "file" % (path, start, record.get("loc", 0)))
                 ok = False
                 continue
-            if isinstance(end, int) and end < start:
+            # The end of a range needs the same check as its start. Validating only the
+            # start lets `line_start: 3, line_end: 9000` through, and the claim is then
+            # verified while citing lines that do not exist.
+            if not isinstance(end, int):
+                self.finding(claim_id, "V003", "evidence range %s:%d-%r has no usable "
+                             "end" % (path, start, end))
+                ok = False
+                continue
+            if end < start:
                 self.finding(claim_id, "V003", "evidence range %s:%d-%d runs backwards"
                              % (path, start, end))
+                ok = False
+                continue
+            if end > record.get("loc", 0):
+                self.finding(claim_id, "V003", "evidence range %s:%d-%d ends past a "
+                             "%d-line file" % (path, start, end, record.get("loc", 0)))
                 ok = False
                 continue
             recorded = item.get("source_hash") or record.get("source_hash")
@@ -288,9 +370,20 @@ class Verifier(object):
                 continue
             # Direct: `from callee import wanted` bound the name itself.
             if base is None and wanted in bindings:
+                if self.shadowed_at(tree, wanted, node.lineno):
+                    return "rejected", ("%s:%d calls %r, but that name is rebound in the "
+                                        "scope around it -- a parameter, a local, or a "
+                                        "narrower import. The call does not reach %s"
+                                        % (caller_path, node.lineno, wanted, obj[1]))
                 return "verified", None
             # Qualified: `import callee as base` bound the module the call goes through.
             if base is not None and base in bindings:
+                if self.shadowed_at(tree, base, node.lineno):
+                    return "rejected", ("%s:%d calls %r through %r, but %r is rebound in "
+                                        "the scope around it, so it is not the module "
+                                        "imported from %s"
+                                        % (caller_path, node.lineno, wanted, base, base,
+                                           obj[1]))
                 return "verified", None
             if not bindings:
                 # No direct edge at all. The call could still reach that file through a
@@ -338,6 +431,13 @@ class Verifier(object):
         if subject is None or obj is None:
             self.finding(claim_id, "V007", "subject %r or object %r is not a valid "
                          "entity id" % (claim.get("subject"), claim.get("object")))
+            return "rejected"
+
+        subject_kinds, object_kinds = KIND_SHAPES[kind]
+        if subject[0] not in subject_kinds or obj[0] not in object_kinds:
+            self.finding(claim_id, "V015", "a %r claim joins %s to %s, not %r to %r"
+                         % (kind, "/".join(sorted(subject_kinds)),
+                            "/".join(sorted(object_kinds)), subject[0], obj[0]))
             return "rejected"
 
         status, message = getattr(self, "verify_" + kind)(claim, subject, obj)

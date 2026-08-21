@@ -58,7 +58,9 @@ LANG_BY_EXT = {
 
 SCHEMA_VERSION = 2
 
-MAIN_GUARD_RE = re.compile(r"^if\s+__name__\s*==", re.MULTILINE)
+# The compared value matters: `if __name__ == "pkg.optional":` is a real pattern and is
+# not a way into the program. Matching the whole comparison keeps it out.
+MAIN_GUARD_RE = re.compile(r"""^if\s+__name__\s*==\s*(['"])__main__\1""", re.MULTILINE)
 
 # Names that conventionally mean "this is how the program starts". Only consulted for a
 # file nothing imports, so a `main.py` in the middle of a package does not qualify.
@@ -573,12 +575,17 @@ def module_key(path):
 
 def build_indexes(records):
     """Four lookups. Ambiguous keys are dropped, so they can never make an edge."""
-    by_module, suffix_hits, stem_hits, path_hits = {}, defaultdict(set), defaultdict(set), defaultdict(set)
+    module_hits, suffix_hits = defaultdict(set), defaultdict(set)
+    stem_hits, path_hits = defaultdict(set), defaultdict(set)
 
     for record in records:
         path = record["path"]
         key = module_key(path)
-        by_module[key] = path
+        # Accumulated, not assigned. `foo.py` and `foo.ts` both key on `foo`, and
+        # assigning would hand every `import foo` to whichever was scanned last -- a
+        # confident edge into an arbitrary language. Ambiguity drops the key here for
+        # the same reason it does in the three indexes below.
+        module_hits[key].add(path)
 
         parts = key.split(".")
         for i in range(len(parts)):
@@ -591,6 +598,7 @@ def build_indexes(records):
         path_hits[os.path.splitext(path)[0]].add(path)
         path_hits[path].add(path)
 
+    by_module = {k: next(iter(v)) for k, v in module_hits.items() if len(v) == 1}
     by_suffix = {k: next(iter(v)) for k, v in suffix_hits.items() if len(v) == 1}
     by_stem = {k: next(iter(v)) for k, v in stem_hits.items() if len(v) == 1}
     by_path = {k: next(iter(v)) for k, v in path_hits.items() if len(v) == 1}

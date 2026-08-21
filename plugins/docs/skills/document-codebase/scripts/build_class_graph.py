@@ -100,7 +100,10 @@ def stereotype_of(cls):
     """
     bases = {b["name"].split(".")[-1] for b in cls.get("bases", ())}
     decorators = {d.split(".")[-1] for d in cls.get("decorators", ())}
-    if bases & {"Exception", "BaseException"} or cls["name"].endswith("Error"):
+    # No name-based fallback. A class called `ParseError` that inherits from nothing is
+    # an ordinary class, and labelling it an exception is the one guess a reader would
+    # believe without a citation.
+    if bases & {"Exception", "BaseException"}:
         return "exception"
     if "dataclass" in decorators:
         return "dataclass"

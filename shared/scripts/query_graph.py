@@ -189,6 +189,10 @@ def parts_of(record, source, hard_limit):
             "line_end": end,
             "symbols": names,
             "token_estimate": estimate_tokens(text),
+            # One definition can be bigger than the ceiling all by itself -- a generated
+            # function, a large data literal. There is nothing left to split it on, so
+            # the part is marked rather than handed over as if it fitted.
+            "over_hard_limit": estimate_tokens(text) > hard_limit,
         })
         start_index = end_index
     return parts
@@ -216,6 +220,11 @@ def build_packet(index, root, path, part_id, includes, findings, limits, neighbo
         chosen = next((p for p in parts if p["id"] == part_id), None)
         if chosen is None:
             return None, "%s is not a part of %s" % (part_id, path)
+        if chosen["over_hard_limit"]:
+            return None, ("%s is a single definition estimated at %d tokens, over the "
+                          "%d hard limit, and there is nothing inside it to split on. "
+                          "Returning it would hand back more than the ceiling promises"
+                          % (part_id, chosen["token_estimate"], limits["hard"]))
         lines = source.splitlines(True)
         text = "".join(lines[chosen["line_start"] - 1:chosen["line_end"]])
         snippets.append({"path": path, "line_start": chosen["line_start"],
@@ -422,11 +431,22 @@ def main():
     if args.packet:
         findings = []
         if args.findings:
+            # verify_doc.py writes findings.jsonl -- one object per line, which is what
+            # references/context-policy.md tells the caller to pass here. json.load
+            # chokes on the second line, so the documented retry never gets a packet.
             try:
                 with open(args.findings, encoding="utf-8") as fh:
-                    findings = json.load(fh)
-            except (OSError, ValueError) as exc:
+                    text = fh.read()
+            except OSError as exc:
                 return fail("cannot read --findings %s: %s" % (args.findings, exc))
+            try:
+                if text.lstrip().startswith("["):
+                    findings = json.loads(text)
+                else:
+                    findings = [json.loads(line) for line in text.splitlines()
+                                if line.strip()]
+            except ValueError as exc:
+                return fail("cannot parse --findings %s: %s" % (args.findings, exc))
         result, error = build_packet(
             index, args.root, args.packet, args.part, args.include, findings,
             {"soft": args.soft_limit, "hard": args.hard_limit}, args.neighbours)

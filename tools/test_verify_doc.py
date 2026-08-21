@@ -66,6 +66,15 @@ def write(root, rel, body=""):
 # 20 (blank)
 # 21 def dispatch(table, key):
 # 22     return table[key]()
+# 23 (blank)
+# 24 (blank)
+# 25 def shadowed(handle):
+# 26     return handle()
+# 27 (blank)
+# 28 (blank)
+# 29 def rebound():
+# 30     handle = shadow
+# 31     return handle()
 API = """\
 from service import handle
 import helpers
@@ -89,6 +98,15 @@ def shadow():
 
 def dispatch(table, key):
     return table[key]()
+
+
+def shadowed(handle):
+    return handle()
+
+
+def rebound():
+    handle = shadow
+    return handle()
 """
 
 SERVICE = "def handle():\n    return 1\n\n\ndef retire():\n    return 0\n"
@@ -190,12 +208,25 @@ def main():
                   "notes.go", 5),
             claim("c:calls-computed", "calls", "module:api.py",
                   "symbol:service.py:handle", "api.py", 22),
+            claim("c:calls-shadowed-param", "calls", "module:api.py",
+                  "symbol:service.py:handle", "api.py", 26),
+            claim("c:calls-rebound-local", "calls", "module:api.py",
+                  "symbol:service.py:handle", "api.py", 31),
+            claim("c:wrong-kinds", "imports", "class:models.py:Order",
+                  "method:models.py:Order.total", "models.py", 4),
+            claim("c:end-past-eof", "defines", "module:service.py",
+                  "symbol:service.py:handle", "service.py", 1),
             claim("c:role", "responsibility", "module:api.py", None),
             claim("c:noevidence", "imports", "module:api.py", "module:service.py"),
             claim("c:badline", "imports", "module:api.py", "module:service.py", "api.py", 900),
             claim("c:badentity", "imports", "api.py", "module:service.py", "api.py", 1),
             claim("c:badkind", "invents", "module:api.py", "module:service.py", "api.py", 1),
         ]
+        # An end past the file is only visible if the start is inside it.
+        for row in claims:
+            if row["id"] == "c:end-past-eof":
+                row["evidence"][0]["line_end"] = 9000
+
         code, status, findings, _, stderr = run(tmp, root, index, claims)
         check("verification runs", code in (0, 1), "exit %d: %s" % (code, stderr))
 
@@ -237,6 +268,22 @@ def main():
               "%r" % status.get("c:calls-noline"))
         check("a call in a language with no tree stays a candidate, not a fact",
               status.get("c:calls-go") == "candidate", "%r" % status.get("c:calls-go"))
+        # The module-level import binds `handle`, but at these two call sites the name
+        # is a parameter and a local. Crediting either to service.handle would invent a
+        # call edge from a true import and a matching name.
+        check("a call to a shadowing parameter is not credited to the import",
+              status.get("c:calls-shadowed-param") == "rejected",
+              "%r" % status.get("c:calls-shadowed-param"))
+        check("a call to a locally rebound name is not either",
+              status.get("c:calls-rebound-local") == "rejected",
+              "%r" % status.get("c:calls-rebound-local"))
+        check("a claim joining the wrong kinds of entity is rejected",
+              status.get("c:wrong-kinds") == "rejected"
+              and any(f["code"] == "V015" for f in findings),
+              "%r" % status.get("c:wrong-kinds"))
+        check("evidence ending past the end of the file is rejected",
+              status.get("c:end-past-eof") == "rejected",
+              "%r" % status.get("c:end-past-eof"))
         # `table[key]()` is a real call whose target is chosen at run time. Reporting
         # "there is no call at that line" would be false; retrying would never help.
         check("a call through a computed target is unsupported, not rejected",

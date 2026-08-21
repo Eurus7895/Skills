@@ -39,6 +39,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -51,6 +52,12 @@ DEFAULT_LAYERS = ("inheritance", "composition")
 ALL_LAYERS = ("inheritance", "composition", "association", "calls", "inference")
 
 POINTS_PER_INCH = 72.0
+
+# Past this, `public` detail produces boxes too small to read on one canvas, so the
+# default drops to `summary`. Documented in references/diagram-policy.md; enforced here,
+# because a threshold that only exists in prose is not a policy.
+DENSITY_CLASSES = 60
+DENSITY_MEMBERS = 400
 
 # Edge styling per layer, kept here so Draw.io and SVG cannot disagree about it.
 LAYER_STYLE = {
@@ -335,6 +342,11 @@ def normalize(laid_out, graph, spec, labels, sizes, cluster_index):
 
 # -- rendering -------------------------------------------------------------------------
 
+def override(item, field, fallback):
+    """A colour a layout patch set, or the default. Patches store these under `style`."""
+    return ((item.get("style") or {}).get(field)) or fallback
+
+
 def drawio_style(kind, layer=None, stereotype=None):
     if kind == "package":
         return ("rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#999999;"
@@ -378,10 +390,16 @@ def render_drawio(model):
             "as": "geometry"})
 
     for node in model["nodes"]:
+        style = drawio_style("node", stereotype=node.get("stereotype"))
+        fill = override(node, "fill", None)
+        stroke = override(node, "stroke", None)
+        if fill:
+            style = re.sub(r"fillColor=[^;]*;", "fillColor=%s;" % fill, style)
+        if stroke:
+            style = re.sub(r"strokeColor=[^;]*;", "strokeColor=%s;" % stroke, style)
         cell = ET.SubElement(root, "mxCell", {
             "id": node["id"], "value": "\n".join(node["label"]),
-            "style": drawio_style("node", stereotype=node.get("stereotype")),
-            "vertex": "1", "parent": "1"})
+            "style": style, "vertex": "1", "parent": "1"})
         ET.SubElement(cell, "mxGeometry", {
             "x": str(node["x"]), "y": str(node["y"]),
             "width": str(node["width"]), "height": str(node["height"]),
@@ -428,12 +446,15 @@ def render_svg(model):
                       svg_escape(container["label"])))
 
     for node in model["nodes"]:
-        fill = {"exception": "#FDF0EF", "abstract": "#F2F0FA", "enum": "#F0F6FD",
-                "dataclass": "#F1FAF3"}.get(node.get("stereotype"), "#FFFFFF")
+        fill = override(node, "fill",
+                        {"exception": "#FDF0EF", "abstract": "#F2F0FA",
+                         "enum": "#F0F6FD", "dataclass": "#F1FAF3"}.get(
+                             node.get("stereotype"), "#FFFFFF"))
+        stroke = override(node, "stroke", "#333333")
         out.append('<rect id="%s" x="%s" y="%s" width="%s" height="%s" fill="%s" '
-                   'stroke="#333333"/>'
+                   'stroke="%s"/>'
                    % (svg_escape(node["id"]), node["x"], node["y"], node["width"],
-                      node["height"], fill))
+                      node["height"], svg_escape(fill), svg_escape(stroke)))
         for position, line in enumerate(node["label"]):
             out.append('<text x="%s" y="%s" font-size="11" fill="#111111">%s</text>'
                        % (node["x"] + 6, node["y"] + 16 + position * 14,
@@ -509,12 +530,23 @@ def rasterize(svg_path, png_path, bounds):
         return "no rasterizer found (tried rsvg-convert, chromium, chrome, inkscape)"
     size = (min(max(int(bounds["width"]) + 40, MIN_PREVIEW[0]), MAX_PREVIEW[0]),
             min(max(int(bounds["height"]) + 40, MIN_PREVIEW[1]), MAX_PREVIEW[1]))
+    # Delete any previous preview first. Left in place, a failed rasterizer leaves the
+    # old PNG on disk and the existence check calls it success -- the visual review then
+    # studies the previous diagram believing it is this one.
+    try:
+        if os.path.exists(png_path):
+            os.remove(png_path)
+    except OSError as exc:
+        return "the previous preview could not be removed: %s" % exc
     try:
         proc = subprocess.run(command(tool, os.path.abspath(svg_path),
                                       os.path.abspath(png_path), size),
                               capture_output=True, text=True, timeout=300)
     except (OSError, subprocess.SubprocessError) as exc:
         return "%s could not be run: %s" % (os.path.basename(tool), exc)
+    if proc.returncode != 0:
+        return "%s exited %d: %s" % (os.path.basename(tool), proc.returncode,
+                                     (proc.stderr or proc.stdout or "").strip()[:300])
     if not os.path.isfile(png_path):
         return "%s produced no file: %s" % (os.path.basename(tool),
                                             (proc.stderr or "").strip()[:300])
@@ -622,6 +654,24 @@ def main():
         return 0
 
     detail = spec.get("detail") or graph["detail"]
+    members = sum(len(c["members"]["methods"]) + len(c["members"]["attributes"])
+                  for c in graph["classes"])
+    dense = len(graph["classes"]) > DENSITY_CLASSES or members > DENSITY_MEMBERS
+    if dense and detail != "summary":
+        # An explicit `--view-spec` detail is the author's call and is left alone; the
+        # switch applies to the default only.
+        if spec.get("detail"):
+            sys.stderr.write("WARN  %d class(es) and %d member(s) is past the density "
+                             "threshold, but the view spec asks for %r detail; keeping "
+                             "it\n" % (len(graph["classes"]), members, detail))
+        else:
+            sys.stderr.write("WARN  %d class(es) and %d member(s) is past the density "
+                             "threshold; dropping to summary detail so the canvas stays "
+                             "readable\n" % (len(graph["classes"]), members))
+            detail = "summary"
+    # The effective level is part of the view, so it belongs in the spec that gets
+    # hashed -- a diagram drawn at summary is a different view from one drawn at public.
+    spec["detail"] = detail
     labels = {c["id"]: node_label(c, detail) for c in graph["classes"]}
     sizes = {c["id"]: size_for(labels[c["id"]]) for c in graph["classes"]}
     source, cluster_index = build_dot(graph, spec, labels, sizes)

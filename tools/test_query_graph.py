@@ -187,6 +187,38 @@ def main():
         check("an unknown part id exits 2", code == 2, "exit %d" % code)
 
         # Paths and inputs.
+        # context-policy.md tells the caller to pass findings.jsonl here, and
+        # verify_doc.py writes one object per line. json.load would choke on line two.
+        findings = os.path.join(tmp, "findings.jsonl")
+        with open(findings, "w", encoding="utf-8") as fh:
+            fh.write('{"claim_id": "c:1", "code": "V011", "message": "first"}\n')
+            fh.write('{"claim_id": "c:2", "code": "V011", "message": "second"}\n')
+        code, packet = run(index, root, "--packet", "app.py", "--findings", findings)
+        check("a JSONL findings file is read as a list of findings",
+              code == 0 and [f["claim_id"] for f in packet["previous_findings"]]
+              == ["c:1", "c:2"], "%r" % packet.get("previous_findings"))
+
+        # A single definition larger than the ceiling cannot be split further, so
+        # handing it back would return more than the ceiling promises.
+        huge_root = os.path.join(tmp, "one-big")
+        os.makedirs(huge_root)
+        write(huge_root, "one.py",
+              "def small():\n    return 0\n\n\ndef enormous():\n"
+              + "".join("    x%d = %d  # %s\n" % (i, i, "y" * 200) for i in range(200)))
+        huge_index = os.path.join(tmp, "one-big.json")
+        subprocess.run([sys.executable, SCANNER, "--root", huge_root, "--out", huge_index],
+                       capture_output=True, text=True)
+        code, packet = run(huge_index, huge_root, "--packet", "one.py",
+                           "--hard-limit", "1000")
+        oversized = [p for p in packet.get("parts", ()) if p.get("over_hard_limit")]
+        check("a part that is over the ceiling is marked as such",
+              code == 0 and oversized, "%r" % packet.get("parts"))
+        if oversized:
+            code, _ = run(huge_index, huge_root, "--packet", "one.py",
+                          "--part", oversized[0]["id"], "--hard-limit", "1000")
+            check("and fetching it is refused rather than truncated", code == 2,
+                  "exit %d" % code)
+
         code, _ = run(index, root, "--packet", "../outside.py")
         check("a traversing path exits 2", code == 2, "exit %d" % code)
         code, _ = run(index, root, "--packet", "nosuch.py")

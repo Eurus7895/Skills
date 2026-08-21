@@ -165,8 +165,10 @@ def overview_page(index, fragments, claims_by_id):
     if top:
         blocks.append(table(
             "block:overview-key-modules",
-            ("Module", "Depended on by", "Role"),
-            [(f["source"], str(fan_in.get(f["source"], 0)), f.get("role", ""))
+            ("Module", "Depended on by", "Basis", "Role"),
+            [(f["source"], str(fan_in.get(f["source"], 0)),
+              "verified" if f["status"] == "verified" else "inferred",
+              f.get("role", ""))
              for f in top],
             {c for f in top for c in f.get("claim_ids", ())
              if claims_by_id.get(c, {}).get("status") in PROSE_STATUSES}))
@@ -235,7 +237,11 @@ def modules_page(index, fragments, claims_by_id):
     for fragment in sorted(fragments, key=lambda f: f.get("source", "")):
         if fragment.get("status") not in PROSE_STATUSES:
             continue
+        # A role resting only on a responsibility claim is a reading of the code, not a
+        # structural fact, and it must not sit in the same column as one that is. The
+        # status is shown rather than the two being run together.
         rows.append((fragment["source"], str(fan_in.get(fragment["source"], 0)),
+                     "verified" if fragment["status"] == "verified" else "inferred",
                      fragment.get("role", "")))
         refs.update(c for c in fragment.get("claim_ids", ())
                     if claims_by_id.get(c, {}).get("status") in PROSE_STATUSES)
@@ -245,8 +251,11 @@ def modules_page(index, fragments, claims_by_id):
                       "here rather than stating something unchecked.")]
     return [
         prose("block:modules-intro",
-              "One row per module whose description was verified against the graph."),
-        table("block:modules", ("Path", "Imported by", "Role"), rows, refs),
+              "One row per module whose description survived verification. `verified` "
+              "means every claim behind the role was checked against the graph or the "
+              "source; `inferred` means the role rests on a reading of the code that no "
+              "pass could confirm."),
+        table("block:modules", ("Path", "Imported by", "Basis", "Role"), rows, refs),
     ]
 
 
