@@ -239,9 +239,19 @@ def main():
               text["flows.rst"])
         check("the navigation page groups by directory",
               "store" in text["navigation.rst"], text["navigation.rst"])
-        check("the unused-import caveat is present and hedged",
-              "logging" not in text["limitations.rst"]
-              and "not evidence" in text["limitations.rst"], text["limitations.rst"])
+        # Ruff is optional, and the page says a different true thing in each case. The
+        # assertion has to follow that rather than assume the tool is installed --
+        # which is what made this pass locally and fail in CI.
+        if shutil.which("ruff"):
+            check("the unused-import count is stated with its caveat attached",
+                  "not evidence" in text["limitations.rst"], text["limitations.rst"])
+        else:
+            check("with no Ruff, the page says no claim was made rather than none",
+                  "not checked" in text["limitations.rst"]
+                  and "no claim is made" in text["limitations.rst"],
+                  text["limitations.rst"])
+        check("either way the document never names an unused import as dead code",
+              "logging" not in text["limitations.rst"], text["limitations.rst"])
 
         # `.docs-build/` is the only place intermediates may land.
         stray = [n for n in os.listdir(root)
