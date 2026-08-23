@@ -71,6 +71,13 @@ The rasterizer is looked for in this order: `rsvg-convert`, `chromium`, `chrome`
 sized to the drawing, not to a fixed window -- a reviewer given a mostly-blank image
 spends the budget on whitespace.
 
+A browser rasterizer needs one concession to that: `--window-size` counts the window
+frame, which the screenshot does not contain, so a window sized exactly to the drawing
+loses the bottom of it. The request adds a generous allowance, which leaves white space
+under a browser-rendered preview. That is deliberate. Guessing the allowance low clips
+the canvas and takes classes out of the picture a reviewer studies, and no structural
+check can see it -- the SVG is correct and only the image is wrong.
+
 ## The visual review loop
 
 The model sees a rendered preview, `diagram-manifest.json`, this file, and the findings

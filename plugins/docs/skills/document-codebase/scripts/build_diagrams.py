@@ -43,6 +43,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 
 SCHEMA_VERSION = 1
@@ -491,9 +492,33 @@ def manifest_of(model):
 def _chromium_command(tool, svg, png, size):
     # The window is sized to the drawing. A fixed window pads the diagram with blank
     # space, and a reviewer -- model or person -- then spends the image budget on it.
+    #
+    # `svg` here is a wrapper page, not the SVG file. Opened directly, Chromium gives
+    # the document the default 8px body margin and shrinks the drawing to fit the
+    # remaining width, which silently clips the bottom of the diagram -- the visual
+    # review then studies a picture with classes missing from it.
     return [tool, "--headless", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
             "--default-background-color=ffffffff", "--screenshot=" + png,
             "--window-size=%d,%d" % size, svg]
+
+
+WRAPPER = ("<!doctype html><meta charset=\"utf-8\">"
+           "<style>html,body{margin:0;padding:0;background:#fff}"
+           "svg{display:block}</style>%s")
+
+
+def wrap_for_browser(svg_path, work_dir):
+    """An HTML page holding the SVG with no page margin, for a browser rasterizer.
+
+    Returns the page's path. Written beside nothing the caller owns -- a temp
+    directory -- because the diagram directory is an output, not a scratch space.
+    """
+    with open(svg_path, encoding="utf-8") as fh:
+        markup = fh.read()
+    page = os.path.join(work_dir, "preview.html")
+    with open(page, "w", encoding="utf-8") as fh:
+        fh.write(WRAPPER % markup)
+    return page
 
 
 RASTERIZERS = (
@@ -507,6 +532,13 @@ RASTERIZERS = (
 # Chromium refuses a window below this, and a preview smaller than it is unreadable.
 MIN_PREVIEW = (320, 240)
 MAX_PREVIEW = (4000, 4000)
+
+# A browser's --window-size counts the window frame, which the screenshot does not
+# contain, so the usable viewport is shorter than the number asked for. Measured at 88px
+# on Chromium 1194; the allowance is deliberately larger, because guessing low clips the
+# bottom of the diagram -- classes silently missing from the picture a reviewer studies
+# -- while guessing high only leaves white space under it.
+BROWSER_FRAME_ALLOWANCE = 160
 
 
 def find_rasterizer():
@@ -530,6 +562,11 @@ def rasterize(svg_path, png_path, bounds):
         return "no rasterizer found (tried rsvg-convert, chromium, chrome, inkscape)"
     size = (min(max(int(bounds["width"]) + 40, MIN_PREVIEW[0]), MAX_PREVIEW[0]),
             min(max(int(bounds["height"]) + 40, MIN_PREVIEW[1]), MAX_PREVIEW[1]))
+    work = None
+    if command is _chromium_command:
+        work = tempfile.mkdtemp(prefix="diagram-preview-")
+        svg_path = wrap_for_browser(svg_path, work)
+        size = (size[0], min(size[1] + BROWSER_FRAME_ALLOWANCE, MAX_PREVIEW[1]))
     # Delete any previous preview first. Left in place, a failed rasterizer leaves the
     # old PNG on disk and the existence check calls it success -- the visual review then
     # studies the previous diagram believing it is this one.
@@ -544,6 +581,9 @@ def rasterize(svg_path, png_path, bounds):
                               capture_output=True, text=True, timeout=300)
     except (OSError, subprocess.SubprocessError) as exc:
         return "%s could not be run: %s" % (os.path.basename(tool), exc)
+    finally:
+        if work:
+            shutil.rmtree(work, ignore_errors=True)
     if proc.returncode != 0:
         return "%s exited %d: %s" % (os.path.basename(tool), proc.returncode,
                                      (proc.stderr or proc.stdout or "").strip()[:300])

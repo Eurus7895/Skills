@@ -27,6 +27,16 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Graphviz, so the diagram layout is actually exercised
+        run: |
+          # Without `dot`, tools/test_diagrams.py skips every layout assertion and the
+          # primary diagram deliverable ships unverified. The scripts still treat
+          # Graphviz as optional at runtime; this is about the tests having something
+          # to check.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq graphviz
+          dot -V
+
       - name: Every script compiles
         run: python3 -m compileall -q tools shared plugins
 

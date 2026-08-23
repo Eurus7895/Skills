@@ -20,6 +20,7 @@ import copy
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -288,6 +289,30 @@ def main():
             code, output = run(BUILD, "--class-graph", GRAPH, "--out",
                                os.path.join(tmp, "req"), "--policy", "required")
             check("missing Graphviz under required fails", code == 2, output)
+
+        # -- previews -------------------------------------------------------------
+        # A browser's --window-size counts the window frame, which the screenshot does
+        # not include, so a window sized to the drawing loses the bottom of it. That is
+        # invisible in every structural check -- the SVG is correct, the picture is not
+        # -- and it cost a class off the canvas before it was caught.
+        preview_dir = os.path.join(tmp, "preview")
+        code, output = render(MODEL, preview_dir, "--previews")
+        png = os.path.join(preview_dir, "full-repository-preview.png")
+        if code == 0 and os.path.isfile(png):
+            with open(MODEL, encoding="utf-8") as fh:
+                bounds = json.load(fh)["bounds"]
+            with open(png, "rb") as fh:
+                header = fh.read(24)
+            width, height = struct.unpack(">II", header[16:24])
+            check("the preview is at least as tall as the drawing plus frame allowance",
+                  height >= bounds["height"] + 40, "%dx%d for a %r drawing"
+                  % (width, height, bounds))
+            check("and at least as wide", width >= bounds["width"],
+                  "%d for width %r" % (width, bounds["width"]))
+        else:
+            print("skip preview checks -- no rasterizer available")
+            check("--previews without a rasterizer fails rather than reporting success",
+                  code != 0, output)
 
         # -- inputs -------------------------------------------------------------
         code, output = render(os.path.join(tmp, "absent.json"), os.path.join(tmp, "no"))
