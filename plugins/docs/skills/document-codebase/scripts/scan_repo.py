@@ -897,7 +897,7 @@ def build(root, detail=False, detail_match=None):
     fan_in = Counter(e["to"] for e in edges)
     fan_out = Counter(e["from"] for e in edges)
 
-    return {
+    index = {
         "schema_version": SCHEMA_VERSION,
         "source": git_snapshot(root),
         "root": root_real,
@@ -925,6 +925,19 @@ def build(root, detail=False, detail_match=None):
             "methods": sum(len(c["methods"]) for r in records for c in r.get("classes", ())),
         },
     }
+    # The identity of what was scanned. Everything derived from it -- fragments, claims
+    # -- repeats it, so a row left behind by an earlier run is caught rather than
+    # blended into the current one.
+    #
+    # `source` and `root` are left out on purpose. They hold the absolute path, the
+    # revision and the dirty flag, and none of those change what the code *is*: the same
+    # tree scanned from a second checkout, or after committing an unrelated file, would
+    # otherwise invalidate every fragment written against it. What is in the hash is the
+    # content -- files, edges, coverage -- which is exactly what a claim is about.
+    material = {k: v for k, v in index.items() if k not in ("source", "root")}
+    index["index_hash"] = "sha256:" + hashlib.sha256(
+        json.dumps(material, sort_keys=True).encode("utf-8")).hexdigest()
+    return index
 
 
 def digest(data, top):
@@ -1024,6 +1037,9 @@ def main():
         print("")
     print("wrote %s (%d files, %d import-edges)" % (
         args.out, len(data["files"]), len(data["edges"])))
+    # Printed because every fragment and claim written against this scan has to carry
+    # it, and the reader should not have to open the JSON to find it.
+    print("index_hash: %s" % data["index_hash"])
     return 0
 
 

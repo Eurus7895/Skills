@@ -1,1 +1,1 @@
-{"fragment_id": "fragment:app.py", "source": "app.py", "role": "Entry module: resolves a value through the store package.", "claim_ids": ["claim:never-supplied"], "status": "candidate"}
+{"fragment_id": "fragment:app.py", "source": "app.py", "role": "Entry module: resolves a value through the store package.", "claim_ids": ["claim:never-supplied"], "status": "candidate", "index_hash": "sha256:465979ee1968f0ae2bed2fd812e36fd954a9103efe0caf334c80fe7c6d430663"}

@@ -24,6 +24,7 @@ Written by `scan_repo.py`, checked by `validate_index.py`. The deterministic hal
 ```json
 {
   "schema_version": 2,
+  "index_hash": "sha256:…",
   "source": {"root": "/abs/path", "revision": "a1b2c3…", "dirty": false},
   "files": [],
   "edges": [],
@@ -83,13 +84,27 @@ Beyond the scope's own source and symbols, the fields that matter are:
 - `partitioned` / `parts` — when the scope was too large to send whole. Each part has an id to fetch with
   `--part`, and the parts tile the file with no gap.
 
+## Run identity
+
+`structure.json` carries `index_hash`, a sha256 over the scan's content — the files, edges and coverage. It
+deliberately excludes `source` and `root`: the absolute path, the revision and the dirty flag say nothing
+about what the code *is*, and including them would invalidate every fragment as soon as an unrelated file was
+committed or the repository was scanned from a second checkout. It is the identity of a scan, not a checksum
+of the file, so the advisory fields `annotate_import_usage.py` adds later do not change it. Every row in
+`fragments.jsonl` and `claims.jsonl` repeats it, and `verify_doc.py` rejects (`V021`) a row whose hash does
+not match the index it was given, or that carries none.
+
+`.docs-build/` outlives a run. A fragment left there by an earlier one parses, names a real file, and its
+claims may still verify against today's index — the identity is the only thing that separates it from a row
+written a minute ago. The scanner prints the hash so it can be copied without opening the JSON.
+
 ## `fragments.jsonl`
 
 One row per dispatched scope. Flat — the assembler validates a flat schema, and a nested row cannot be
 checked against it.
 
 ```json
-{"fragment_id": "fragment:src/api.py", "source": "src/api.py", "role": "…", "claim_ids": ["claim:…"], "status": "candidate"}
+{"fragment_id": "fragment:src/api.py", "source": "src/api.py", "role": "…", "claim_ids": ["claim:…"], "status": "candidate", "index_hash": "sha256:…"}
 ```
 
 `verify_doc.py` rewrites `status` to the worst status among the claims the fragment references. One rejected
@@ -104,7 +119,8 @@ claim makes the whole fragment untrustworthy, however many verified ones surroun
   "subject": "module:src/api.py",
   "object": "module:src/service.py",
   "evidence": [{"path": "src/api.py", "line_start": 5, "line_end": 5}],
-  "status": "unverified"
+  "status": "unverified",
+  "index_hash": "sha256:…"
 }
 ```
 

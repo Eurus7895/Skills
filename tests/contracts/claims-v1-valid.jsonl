@@ -1,3 +1,3 @@
-{"id": "claim:app-imports-store", "kind": "imports", "subject": "module:app.py", "object": "module:pkg/store.py", "evidence": [{"path": "app.py", "line_start": 1, "line_end": 1}]}
-{"id": "claim:app-role", "kind": "responsibility", "subject": "module:app.py", "object": null, "evidence": []}
-{"id": "claim:store-defines-save", "kind": "defines", "subject": "module:pkg/store.py", "object": "symbol:pkg/store.py:save", "evidence": [{"path": "pkg/store.py", "line_start": 10, "line_end": 10}]}
+{"id": "claim:app-imports-store", "kind": "imports", "subject": "module:app.py", "object": "module:pkg/store.py", "evidence": [{"path": "app.py", "line_start": 1, "line_end": 1}], "index_hash": "sha256:465979ee1968f0ae2bed2fd812e36fd954a9103efe0caf334c80fe7c6d430663"}
+{"id": "claim:app-role", "kind": "responsibility", "subject": "module:app.py", "object": null, "evidence": [], "index_hash": "sha256:465979ee1968f0ae2bed2fd812e36fd954a9103efe0caf334c80fe7c6d430663"}
+{"id": "claim:store-defines-save", "kind": "defines", "subject": "module:pkg/store.py", "object": "symbol:pkg/store.py:save", "evidence": [{"path": "pkg/store.py", "line_start": 10, "line_end": 10}], "index_hash": "sha256:465979ee1968f0ae2bed2fd812e36fd954a9103efe0caf334c80fe7c6d430663"}

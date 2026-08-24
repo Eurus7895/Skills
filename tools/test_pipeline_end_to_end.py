@@ -136,6 +136,19 @@ FRAGMENTS = [
 ]
 
 
+STAMP = """
+import json
+index_hash = json.load(open('.docs-build/structure.json'))['index_hash']
+for name in ('claims', 'fragments'):
+    path = '.docs-build/%s.jsonl' % name
+    rows = [json.loads(line) for line in open(path) if line.strip()]
+    with open(path, 'w') as fh:
+        for row in rows:
+            row['index_hash'] = index_hash
+            fh.write(json.dumps(row) + '\\n')
+"""
+
+
 def write_rows(path, rows):
     with open(path, "w", encoding="utf-8") as fh:
         for row in rows:
@@ -147,6 +160,10 @@ def pipeline(root, out="docs"):
     steps = [
         ("scan", script("scan_repo.py", "--root", ".", "--out",
                         ".docs-build/structure.json", "--detail")),
+        # The fixture writes its rows before the scan exists, so it stamps them here.
+        # In a real run the model writes each row after step 1 and copies in the hash
+        # the scanner reported, which is the same thing in the right order.
+        ("stamp", [sys.executable, "-c", STAMP]),
         ("validate-index", script("validate_index.py", ".docs-build/structure.json",
                                   "--root", ".")),
         ("annotate", script("annotate_import_usage.py", ".docs-build/structure.json",

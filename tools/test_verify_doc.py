@@ -145,9 +145,21 @@ def claim(cid, kind, subject, obj, path=None, line=None):
     return row
 
 
+def stamped(rows, index):
+    """Every row says which scan it was written against, unless a test sets its own."""
+    if not os.path.isfile(index):
+        return rows                     # the missing-index cases never get that far
+    with open(index, encoding="utf-8") as fh:
+        index_hash = json.load(fh).get("index_hash")
+    return [dict({"index_hash": index_hash}, **row) for row in rows]
+
+
 def run(tmp, root, index, claims, fragments=None, name="run"):
     out_dir = os.path.join(tmp, name)
     claims_path = os.path.join(tmp, name + "-claims.jsonl")
+    claims = stamped(claims, index)
+    if fragments is not None:
+        fragments = stamped(fragments, index)
     with open(claims_path, "w", encoding="utf-8") as fh:
         for row in claims:
             fh.write(json.dumps(row) + "\n")
@@ -367,6 +379,30 @@ def main():
                        "api.py", 1)]
         code, _, _, _, _ = run(tmp, root, index, clean, name="clean")
         check("a fully verified run exits 0", code == 0, "exit %d" % code)
+
+        # `.docs-build/` survives between runs. A fragment left there by an earlier one
+        # parses, names a real file, and its claims may verify against today's index --
+        # the identity is the only thing that tells it apart from one written now.
+        left_over = [dict(claim("c:imports", "imports", "module:api.py",
+                                "module:service.py", "api.py", 1),
+                          index_hash="sha256:" + "0" * 64)]
+        code, statuses, findings, _, _ = run(tmp, root, index, left_over, name="stale")
+        check("a claim from an earlier scan is rejected, not verified",
+              code == 1 and statuses.get("c:imports") == "rejected"
+              and any(f["code"] == "V021" for f in findings), "%r" % findings)
+
+        unstamped = [claim("c:imports", "imports", "module:api.py", "module:service.py",
+                           "api.py", 1)]
+        proc_rows = os.path.join(tmp, "unstamped-claims.jsonl")
+        with open(proc_rows, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(unstamped[0]) + "\n")
+        proc = subprocess.run([sys.executable, SCRIPT, "--claims", proc_rows,
+                               "--index", index, "--root", root,
+                               "--out-dir", os.path.join(tmp, "unstamped")],
+                              capture_output=True, text=True)
+        check("a claim carrying no identity at all is rejected too",
+              proc.returncode == 1 and "V021" in proc.stdout + proc.stderr,
+              proc.stdout + proc.stderr)
 
         # Input errors are exit 2, distinct from a verification failure.
         code, _, _, _, _ = run(tmp, root, os.path.join(tmp, "absent.json"), clean,

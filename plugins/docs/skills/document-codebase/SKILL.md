@@ -196,9 +196,16 @@ Each scope produces **one fragment line** in `.docs-build/fragments.jsonl` and *
 `.docs-build/claims.jsonl` — flat JSON, one object per line, no array, no pretty-printing:
 
 ```json
-{"fragment_id": "fragment:src/api.py", "source": "src/api.py", "role": "Exposes the HTTP boundary and delegates to application services.", "claim_ids": ["claim:api-imports-service"], "status": "candidate"}
-{"id": "claim:api-imports-service", "kind": "imports", "subject": "module:src/api.py", "object": "module:src/service.py", "evidence": [{"path": "src/api.py", "line_start": 5, "line_end": 5}]}
+{"fragment_id": "fragment:src/api.py", "source": "src/api.py", "role": "Exposes the HTTP boundary and delegates to application services.", "claim_ids": ["claim:api-imports-service"], "status": "candidate", "index_hash": "sha256:…"}
+{"id": "claim:api-imports-service", "kind": "imports", "subject": "module:src/api.py", "object": "module:src/service.py", "evidence": [{"path": "src/api.py", "line_start": 5, "line_end": 5}], "index_hash": "sha256:…"}
 ```
+
+**Every row carries `index_hash`** — the value the scanner printed in step 1, copied
+verbatim. It is what says which scan the row was written against. `.docs-build/` survives
+between runs, and a fragment left there by an earlier one parses, names a real file, and
+may even verify against today's index; nothing else tells it apart from one you wrote a
+minute ago. `verify_doc.py` rejects a row whose hash does not match, and rejects one that
+carries no hash at all.
 
 **Create both files empty before the first scope, then append** — one scope, one append, so a crash midway
 leaves the scopes already done intact and `assemble.py` in step 5 names exactly the ones missing.

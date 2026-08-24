@@ -38,6 +38,12 @@ rejected. Three of those are easy to confuse and are kept apart deliberately:
                    Retrying cannot help, so it never re-enters the loop
     rejected       the source contradicts the claim
 
+Every claim and fragment must carry the `index_hash` of the scan it was written against,
+and one that does not match this run's index is rejected as V021 without being verified.
+`.docs-build/` survives between runs: a fragment left there by an earlier one parses,
+names a real file, and may even verify -- the identity is the only thing that tells it
+apart from one written a minute ago.
+
 Exit codes: 0 every claim decided without rejection, 1 something was rejected or needs
 context, 2 input/schema error, 3 internal error.
 
@@ -517,9 +523,36 @@ def main():
             return 2
 
     verifier = Verifier(index, args.root)
+
+    # Which scan each row was written against. A `.docs-build/` directory survives
+    # between runs, and a fragment left behind by an earlier one looks exactly like a
+    # fragment written a minute ago -- it parses, it names a real file, and its claims
+    # may even verify against the current index. Only the identity distinguishes them.
+    expected = index.get("index_hash")
+    for label, rows, key in (("claim", claims, "id"),
+                             ("fragment", fragments, "fragment_id")):
+        for row in rows:
+            carried = row.get("index_hash")
+            if carried == expected:
+                continue
+            row["status"] = "rejected"
+            if carried is None:
+                verifier.finding(row.get(key), "V021",
+                                 "%s carries no index_hash, so there is nothing to say "
+                                 "which scan it was written against" % label)
+            else:
+                verifier.finding(row.get(key), "V021",
+                                 "%s was written against index %s, but this run supplied "
+                                 "%s; it is left over from an earlier scan"
+                                 % (label, str(carried)[:19], str(expected)[:19]))
+
+    stale = {row.get("id") for row in claims if row.get("status") == "rejected"
+             and row.get("index_hash") != expected}
     seen_ids = set()
     for claim in claims:
         claim_id = claim.get("id")
+        if claim_id in stale:
+            continue
         if claim_id in seen_ids:
             verifier.finding(claim_id, "V008", "claim id appears more than once")
             claim["status"] = "rejected"
@@ -531,6 +564,8 @@ def main():
     # was never supplied is itself a defect.
     status_by_claim = {c.get("id"): c["status"] for c in claims}
     for fragment in fragments:
+        if fragment.get("index_hash") != expected:
+            continue            # already rejected above; its claims are not this run's
         statuses = []
         for claim_id in fragment.get("claim_ids", ()) or ():
             if claim_id not in status_by_claim:
