@@ -75,9 +75,20 @@ to be committed. The rendered diagrams are the exception: they belong beside the
 
 ## Steps
 
+Each step below states four things: what to **run**, what it **writes**, what you **read** of that, and what
+you **decide** next. When a step says you do not need to read a script, that is load-bearing — its output is
+the interface, not its source.
+
+Exit codes are uniform across these scripts: `0` fine, `1` a policy the script enforces was not met, `2` bad
+input or a missing dependency, `3` an internal error. **`1` is a verdict and `2`/`3` are breakage** — the
+first tells you the repository or the claims need work, the second that the invocation does.
+
 ### 1. Scan, then validate the index
 
-**Run these; you do not need to read them.**
+- **Run** the two commands below; you do not need to read either script.
+- **Writes** `.docs-build/structure.json`.
+- **Read** the digest on stdout, and every finding from the validator.
+- **Decide** whether to continue, rescan, or stop and report the repository is out of scope.
 
 ```bash
 mkdir -p .docs-build
@@ -102,6 +113,13 @@ cover them; do not fall back to reading files and writing an unverifiable docume
 
 ### 2. Optionally annotate import usage
 
+- **Run** the command below.
+- **Writes** back into `.docs-build/structure.json` **in place** — `usage` on each import record and a
+  `coverage.import_usage` block. No edge, fan-in or symbol changes. Pass `--out` to write elsewhere instead,
+  and `--report` for the diagnostics that did not match anything.
+- **Read** the summary line: how many bindings came back used, unused, suppressed, unknown.
+- **Decide** nothing about the code. This annotation is reported in step 9 and never acted on.
+
 ```bash
 python3 scripts/annotate_import_usage.py .docs-build/structure.json --root . --policy optional
 ```
@@ -119,19 +137,34 @@ external tool invoked.
 Not every file earns a paragraph, and every file that does costs a model call. Rank by how many modules depend
 on it:
 
+- **Run** the selection below.
+- **Writes** `.docs-build/units.txt` — one path per line, the modules that will be described in detail.
+- **Read** the printed list with its fan-in counts.
+- **Decide** the cutoff. The default is the top 25 by fan-in plus every entry point; change the `25` if the
+  repository warrants it, and state in the document which cutoff you used.
+
 ```bash
 python3 -c "
-import json; d = json.load(open('.docs-build/structure.json'))
-top = sorted(d['fan_in'].items(), key=lambda kv: -kv[1])[:25]
-print('\n'.join('%-4d %s' % (n, p) for p, n in top))
+import json
+d = json.load(open('.docs-build/structure.json'))
+top = [p for p, n in sorted(d['fan_in'].items(), key=lambda kv: -kv[1])[:25]]
+sel = sorted(set(top) | {e['path'] for e in d['entry_points']})
+open('.docs-build/units.txt', 'w').write('\n'.join(sel) + '\n')
+print('\n'.join('%-4d %s' % (d['fan_in'].get(p, 0), p) for p in sel))
 "
 ```
 
-**Describe in detail: the top ~25 by fan-in, plus every entry point in `structure.json`.** Cover the rest in
-one line each, grouped by directory. State the cutoff you used in the document. This budget is the difference
-between a documentation run and an unbounded one; raise it deliberately, not by forgetting it.
+`units.txt` is the contract for step 5: it must name exactly the modules that get dispatched, so edit it here
+and not later. Cover everything outside it in one line each, grouped by directory. This budget is the
+difference between a documentation run and an unbounded one; raise it deliberately, not by forgetting it.
 
 ### 4. Analyse one scope at a time, from a context packet
+
+- **Run** `query_graph.py --packet` once per path in `units.txt`.
+- **Writes** nothing on its own — the packet goes to stdout. **You** are what writes this step's output.
+- **Read** the packet: source, symbols, edges both ways with the line that proves each, neighbours' public
+  interfaces, and the manifest of what was left out.
+- **Decide** the module's role, then append your fragment and its claims to the two files below.
 
 For each in-scope file:
 
@@ -159,35 +192,39 @@ python3 scripts/query_graph.py --index .docs-build/structure.json --call-candida
 Call candidates always come back `verified: false`. They tell you where to look; only reading the line
 promotes them.
 
-Each task emits **two flat JSON objects per line**, into `.docs-build/fragments.jsonl` and
-`.docs-build/claims.jsonl`:
+Each scope produces **one fragment line** in `.docs-build/fragments.jsonl` and **one line per claim** in
+`.docs-build/claims.jsonl` — flat JSON, one object per line, no array, no pretty-printing:
 
 ```json
 {"fragment_id": "fragment:src/api.py", "source": "src/api.py", "role": "Exposes the HTTP boundary and delegates to application services.", "claim_ids": ["claim:api-imports-service"], "status": "candidate"}
 {"id": "claim:api-imports-service", "kind": "imports", "subject": "module:src/api.py", "object": "module:src/service.py", "evidence": [{"path": "src/api.py", "line_start": 5, "line_end": 5}]}
 ```
 
+**Create both files empty before the first scope, then append** — one scope, one append, so a crash midway
+leaves the scopes already done intact and `assemble.py` in step 5 names exactly the ones missing.
+
+If you fan the analysis out to parallel tasks, each task returns its lines **to you** and you do the
+appending. Two writers on one JSONL file interleave into corrupt lines, and the failure surfaces much later as
+a parse error in `verify_doc.py`.
+
 Entity ids and claim kinds are defined in [`references/schemas.md`](references/schemas.md). Cite only lines
 the packet gave you or lines you read in the packet's source; never invent a location.
 
 ### 5. Gate the fragments before verifying
 
-**Run it; do not skim the rows yourself and decide they look fine.**
+- **Run** the assembler against `units.txt` from step 3. Run it; do not skim the rows yourself and decide they
+  look fine.
+- **Writes** `.docs-build/fragments.csv`.
+- **Read** the exit status **and the warnings**, which do not affect it.
+- **Decide** which units to re-dispatch. A FAILURE means going back to step 4 for the named units, not
+  proceeding.
 
 ```bash
-python3 -c "
-import json; d = json.load(open('.docs-build/structure.json'))
-print('\n'.join(sorted(f['path'] for f in d['files'])))
-" > .docs-build/units.txt
-
 python3 scripts/assemble.py \
     --schema "fragment_id:str, source:str, role:str, claim_ids:list, status:str" \
     --input .docs-build/fragments.jsonl --unit-list .docs-build/units.txt \
     --unit-field source --out .docs-build/fragments.csv
 ```
-
-Trim `units.txt` to the modules step 3 selected — the list is the contract, so it must name exactly the
-modules that were dispatched.
 
 This gate catches the two ways parallel fan-out fails behind a finished-looking document:
 
@@ -198,9 +235,13 @@ This gate catches the two ways parallel fan-out fails behind a finished-looking 
   they do not set the exit code, and a clean exit with a constant `role` field is a failed extraction wearing
   a passing grade.
 
-A FAILURE means re-dispatching the named units, not proceeding.
-
 ### 6. Verify every claim
+
+- **Run** the verifier over the claims, the fragments and the index together.
+- **Writes** `.docs-build/claims.verified.jsonl`, `.docs-build/fragments.verified.jsonl` and
+  `.docs-build/findings.jsonl`.
+- **Read** `findings.jsonl` — grouped by code, not one at a time.
+- **Decide** per the table below. Every row of it is a decision the finding has already made for you.
 
 ```bash
 python3 scripts/verify_doc.py --claims .docs-build/claims.jsonl \
@@ -228,6 +269,13 @@ budget from step 3 and usually reintroduces claims that already passed.
 
 ### 7. Draw the class diagram, if the tools are there
 
+- **Run** the three commands below in order: build the graph, lay it out and render, then check the render.
+- **Writes** `.docs-build/class-graph.json`, and into `docs/_diagrams/`: `diagram-model.json`, a `.drawio`, an
+  `.svg`, and `full-repository-preview.png` with `--previews`.
+- **Read** whether layout ran or was skipped for a missing `dot`, and every `G0xx` finding from the validator.
+- **Decide** whether the document gets a figure at all. A skipped diagram is a documented outcome; a failed
+  structural check is not — fix it or drop the figure.
+
 ```bash
 python3 scripts/build_class_graph.py --index .docs-build/structure.json \
     --claims .docs-build/claims.verified.jsonl --detail public \
@@ -254,7 +302,9 @@ layers, the density threshold, and the severity mapping.
 **The visual review loop, when a preview exists.** Read
 `docs/_diagrams/full-repository-preview.png` and judge only what a picture shows:
 overlap, clipped labels, spacing, edge crossings, dense regions. Write your findings and
-a candidate patch, then:
+a candidate patch to `docs/_diagrams/layout-patch.json` — the five permitted operations
+and their fields are listed in
+[`references/diagram-policy.md`](references/diagram-policy.md) — then:
 
 ```bash
 python3 scripts/apply_layout_patch.py --model docs/_diagrams/diagram-model.json \
@@ -273,6 +323,11 @@ repeats: the loop is not converging and a third attempt costs the same and finds
 same thing.
 
 ### 8. Build the document model and render
+
+- **Run** the model build, then the renderer.
+- **Writes** `.docs-build/doc.json`, then the pages and `index.rst` under `docs/`.
+- **Read** the page count and the `--check` verdict.
+- **Decide** nothing about markup — the renderer owns it. Decide only whether `--check` genuinely passed.
 
 ```bash
 python3 scripts/build_document_model.py --index .docs-build/structure.json \
