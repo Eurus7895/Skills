@@ -285,8 +285,16 @@ python3 scripts/build_class_graph.py --index .docs-build/structure.json \
 
 python3 scripts/build_diagrams.py --class-graph .docs-build/class-graph.json \
     --out docs/_diagrams --policy optional --previews
+```
 
-python3 scripts/validate_diagrams.py docs/_diagrams \
+**Run the validator only if the build actually drew something.** Under `--policy optional`
+a missing `dot` prints `diagrams: skipped` and exits `0` without creating `docs/_diagrams/`,
+and the validator then exits `2` on a directory that is not there. That exit code means
+"you invoked me wrongly", not "the diagram is wrong", and treating it as a failed check
+wastes a retry on every machine without Graphviz.
+
+```bash
+[ -d docs/_diagrams ] && python3 scripts/validate_diagrams.py docs/_diagrams \
     --class-graph .docs-build/class-graph.json
 ```
 
@@ -342,6 +350,11 @@ same thing.
 - **Writes** `.docs-build/doc.json`, then the pages and `index.rst` under `docs/`.
 - **Read** the page count and the `--check` verdict.
 - **Decide** nothing about markup — the renderer owns it. Decide only whether `--check` genuinely passed.
+
+**Look at `docs/` before you render into it.** This is the step rule 8 is about: the renderer
+writes each page with `"w"` and will replace a hand-written `index.rst` or an existing page of
+the same name without saying so. If anything is already there, list what would be overwritten
+and ask first. `git status` afterwards is not a safety net — by then it has happened.
 
 ```bash
 python3 scripts/build_document_model.py --index .docs-build/structure.json \
