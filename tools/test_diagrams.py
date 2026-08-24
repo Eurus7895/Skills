@@ -99,7 +99,7 @@ def main():
         check("rendering from an existing model succeeds", code == 0, output)
         written = sorted(os.listdir(good))
         check("both formats and the manifest are written",
-              written == ["diagram-manifest.json", "diagram-model.json",
+              written == ["diagram-manifest.json", "full-repository-model.json",
                           "full-repository.drawio", "full-repository.svg"],
               "%r" % written)
 
@@ -122,6 +122,33 @@ def main():
               drawio.count('vertex="1"') >= 3, drawio[:200])
         check("edges carry the ids the model uses",
               "edge:inheritance:class:pkg/models.py:Order" in drawio)
+
+        # A render-only pass rebuilds one view. Rewriting the manifest from that single
+        # entry would drop every other view from the record while its files sit on disk,
+        # so the patch loop would read as having destroyed the rest to fix one.
+        two_views = os.path.join(tmp, "two-views")
+        render(MODEL, two_views)
+        with open(MODEL, encoding="utf-8") as fh:
+            second = json.load(fh)
+        second["view"] = "package_pkg"
+        second["scope"] = {"kind": "package", "id": "package:pkg"}
+        second_path = os.path.join(tmp, "second-model.json")
+        with open(second_path, "w", encoding="utf-8") as fh:
+            json.dump(second, fh)
+        render(second_path, two_views)
+        with open(os.path.join(two_views, "diagram-manifest.json"),
+                  encoding="utf-8") as fh:
+            manifest = json.load(fh)
+        listed = sorted(v["view"] for v in manifest["views"])
+        check("a render-only pass adds its view without dropping the others",
+              listed == ["full_repository", "package_pkg"], "%r" % listed)
+        check("the manifest records what each view is answerable for",
+              sorted(v["scope"]["kind"] for v in manifest["views"])
+              == ["package", "repository"], "%r" % manifest["views"])
+        check("each view keeps its own model file",
+              os.path.isfile(os.path.join(two_views, "full-repository-model.json"))
+              and os.path.isfile(os.path.join(two_views, "package-pkg-model.json")),
+              "%r" % sorted(os.listdir(two_views)))
 
         # -- the two formats must agree ----------------------------------------
         edited = os.path.join(tmp, "edited")
@@ -270,7 +297,7 @@ def main():
             check("layout runs where Graphviz is installed", code == 0, output)
             code, report = validate(laid_out)
             check("a freshly laid-out diagram validates", code == 0, "%r" % report)
-            with open(os.path.join(laid_out, "diagram-model.json"),
+            with open(os.path.join(laid_out, "full-repository-model.json"),
                       encoding="utf-8") as fh:
                 model = json.load(fh)
             check("the layout engine and version are recorded",

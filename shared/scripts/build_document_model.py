@@ -37,6 +37,7 @@ import sys
 FORMAT_VERSION = 1
 GENERATOR_VERSION = "0.2.0-dev"
 SUPPORTED_SCHEMA = {2}
+SUPPORTED_MANIFEST_SCHEMA = {2}
 
 PROSE_STATUSES = ("verified", "supported_inference")
 LIMITATION_STATUSES = ("candidate", "unsupported", "needs_context")
@@ -132,16 +133,32 @@ def find_diagrams(directory):
             manifest = json.load(fh)
     except (OSError, ValueError):
         return {}
-    stem = str(manifest.get("view", "full_repository")).replace("_", "-")
-    svg = "%s.svg" % stem
-    if not os.path.isfile(os.path.join(directory, svg)):
+    if manifest.get("schema_version") not in SUPPORTED_MANIFEST_SCHEMA:
+        # An unreadable manifest means no figure, never a guessed one.
         return {}
-    alt = ("Class diagram of the whole repository: %d class(es) grouped by package and "
-           "module, showing %s relationships"
-           % (len(manifest.get("nodes", ())), " and ".join(manifest.get("layers", ()))))
-    # The same picture belongs on both pages that talk about structure, and only on the
-    # pages a preset actually has.
-    return {"architecture": [(svg, alt)], "class-views": [(svg, alt)]}
+
+    overview, details = [], []
+    for entry in manifest.get("views", ()):
+        stem = entry.get("stem") or str(entry.get("view", "")).replace("_", "-")
+        svg = "%s.svg" % stem
+        if not stem or not os.path.isfile(os.path.join(directory, svg)):
+            continue
+        scope = entry.get("scope") or {"kind": "repository"}
+        layers = " and ".join(entry.get("layers", ())) or "no"
+        count = len(entry.get("nodes", ()))
+        if scope.get("kind") == "repository":
+            overview.append((svg, "Class diagram of the whole repository: %d class(es) "
+                                  "grouped by package and module, showing %s "
+                                  "relationships" % (count, layers)))
+        else:
+            name = str(scope.get("id", "")).split(":", 1)[-1]
+            details.append((svg, "Class diagram of %s: %d class(es), showing %s "
+                                 "relationships" % (name or "one scope", count, layers)))
+    if not overview and not details:
+        return {}
+    # The overview belongs on both pages that talk about structure. The detail views are
+    # what the overview had to leave out, so they go where the classes are discussed.
+    return {"architecture": overview, "class-views": overview + details}
 
 
 def overview_page(index, fragments, claims_by_id):

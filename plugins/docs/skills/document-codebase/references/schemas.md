@@ -146,6 +146,24 @@ Pages and blocks, with no markup in it. Block types are `prose`, `table`, `image
 ids, `ref` targets and `claim_refs` must all resolve before the model is written; a `claim_ref` to anything
 that is not `verified` or `supported_inference` is a build failure, not a warning.
 
+## Diagram artifacts — manifest_version 2
+
+One run may draw several views. `diagram-manifest.json` is the index of them:
+
+```json
+{"schema_version": 2, "views": [{"view": "full_repository", "stem": "full-repository",
+  "scope": {"kind": "repository"}, "source_graph_hash": "sha256:...", "nodes": ["..."]}]}
+```
+
+Each view owns `<stem>-model.json` (the geometry), `<stem>.drawio`, `<stem>.svg`, and with `--previews` a
+`<stem>-preview.png`. `scope.kind` is `repository`, `package` or `module`, with `scope.id` naming the container
+for the latter two.
+
+**Scope is what a view is answerable for.** A checker holds a view to the classes in its scope, not to the
+whole graph — otherwise a view of one package reads as a repository view that lost most of its boxes. Scope is
+derived from the graph's package structure and cannot be set in a view specification: an author-chosen scope
+would be `remove_classes` under another name.
+
 ## Exit codes
 
 Shared by every script here:

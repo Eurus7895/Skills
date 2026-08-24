@@ -270,8 +270,10 @@ budget from step 3 and usually reintroduces claims that already passed.
 ### 7. Draw the class diagram, if the tools are there
 
 - **Run** the three commands below in order: build the graph, lay it out and render, then check the render.
-- **Writes** `.docs-build/class-graph.json`, and into `docs/_diagrams/`: `diagram-model.json`, a `.drawio`, an
-  `.svg`, and `full-repository-preview.png` with `--previews`.
+- **Writes** `.docs-build/class-graph.json`, and into `docs/_diagrams/`: one
+  `diagram-manifest.json` listing every view produced, plus per view a `<view>-model.json`, a `.drawio`, an
+  `.svg`, and with `--previews` a `<view>-preview.png`. The repository view is always called
+  `full-repository`.
 - **Read** whether layout ran or was skipped for a missing `dot`, and every `G0xx` finding from the validator.
 - **Decide** whether the document gets a figure at all. A skipped diagram is a documented outcome; a failed
   structural check is not — fix it or drop the figure.
@@ -307,13 +309,18 @@ and their fields are listed in
 [`references/diagram-policy.md`](references/diagram-policy.md) — then:
 
 ```bash
-python3 scripts/apply_layout_patch.py --model docs/_diagrams/diagram-model.json \
+python3 scripts/apply_layout_patch.py \
+    --model docs/_diagrams/full-repository-model.json \
     --patch docs/_diagrams/layout-patch.json
-python3 scripts/build_diagrams.py --render-only docs/_diagrams/diagram-model.json \
+python3 scripts/build_diagrams.py \
+    --render-only docs/_diagrams/full-repository-model.json \
     --out docs/_diagrams --previews
 python3 scripts/validate_diagrams.py docs/_diagrams \
     --class-graph .docs-build/class-graph.json
 ```
+
+One patch, one view: name the model of the view whose preview you looked at. Rerendering
+one view leaves the others as they were.
 
 A patch may move, resize, reroute, restyle and re-wrap. It may not change what exists or
 what connects to what, and a patch that tries is refused with the model left untouched.

@@ -4,8 +4,9 @@
 # Regenerate: python3 tools/materialize.py
 """Apply presentation-only changes to a diagram model. Refuse everything else.
 
-    python3 scripts/apply_layout_patch.py --model docs/_diagrams/diagram-model.json \\
-        --patch docs/_diagrams/layout-patch.json --out docs/_diagrams/diagram-model.json
+    python3 scripts/apply_layout_patch.py \\
+        --model docs/_diagrams/full-repository-model.json \\
+        --patch docs/_diagrams/layout-patch.json
 
 A visual reviewer -- a model looking at a rendered preview -- can see that two boxes
 collide or a label is clipped. It cannot see whether a class really inherits from
@@ -201,7 +202,7 @@ def apply_patch(model, patch):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--model", required=True, help="diagram-model.json to patch")
+    parser.add_argument("--model", required=True, help="the view model to patch, e.g. full-repository-model.json")
     parser.add_argument("--patch", required=True, help="candidate layout-patch.json")
     parser.add_argument("--out", help="where to write the patched model (default: in place)")
     parser.add_argument("--dry-run", action="store_true",

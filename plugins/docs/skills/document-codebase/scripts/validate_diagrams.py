@@ -42,6 +42,7 @@ import sys
 import xml.etree.ElementTree as ET
 
 SUPPORTED_MODEL_SCHEMA = {1}
+SUPPORTED_MANIFEST_SCHEMA = {2}
 
 # Two boxes may share space only when one contains the other. A class sits inside its
 # module, which sits inside its package; anything else overlapping is a readability
@@ -70,6 +71,27 @@ def load_json(path, label):
         return None, "cannot read %s: %s" % (path, exc)
 
 
+def view_stem(view):
+    return str(view).replace("_", "-")
+
+
+def classes_in_scope(graph, scope):
+    """Which classes this view is answerable for.
+
+    A view of one package is complete when it holds that package's classes, not the
+    repository's. Judging every view against the whole graph would make each detail
+    view look like a full canvas that lost most of its boxes.
+    """
+    kind = (scope or {}).get("kind", "repository")
+    if kind == "repository":
+        return {c["id"] for c in graph["classes"]}
+    if kind == "package":
+        return {c["id"] for c in graph["classes"] if c.get("package") == scope.get("id")}
+    if kind == "module":
+        return {c["id"] for c in graph["classes"] if c.get("module") == scope.get("id")}
+    return None
+
+
 def box_of(item):
     return (float(item["x"]), float(item["y"]),
             float(item["x"]) + float(item["width"]),
@@ -89,20 +111,27 @@ def overlaps(a, b):
 
 
 def check_coverage(model, graph, findings):
+    scope = model.get("scope") or {"kind": "repository"}
+    expected = classes_in_scope(graph, scope)
+    if expected is None:
+        findings.add("G001", "the diagram declares scope %r, which this checker does "
+                             "not know how to hold it to" % scope)
+        return
     drawn = {n["id"] for n in model["nodes"]}
-    expected = {c["id"] for c in graph["classes"]}
     missing = sorted(expected - drawn)
     if missing:
-        findings.add("G001", "%d class(es) in the graph are not in the diagram: %s"
+        findings.add("G001", "%d class(es) in scope are not in the diagram: %s"
                      % (len(missing), ", ".join(missing[:5])))
-    invented = sorted(drawn - expected)
+    invented = sorted(drawn - {c["id"] for c in graph["classes"]})
     if invented:
         # Worse than a missing class: a box nobody can trace back to the source.
         findings.add("G001", "%d node(s) in the diagram are not in the graph: %s"
                      % (len(invented), ", ".join(invented[:5])))
 
     if "inheritance" in model.get("layers", ()):
-        wanted = {e["id"] for e in graph["edges"] if e["layer"] == "inheritance"}
+        wanted = {e["id"] for e in graph["edges"]
+                  if e["layer"] == "inheritance"
+                  and e["from"] in expected and e["to"] in expected}
         present = {e["id"] for e in model["edges"]}
         lost = sorted(wanted - present)
         if lost:
@@ -239,7 +268,7 @@ def parse_svg(path, findings):
 
 
 def check_equivalence(model, out_dir, findings):
-    stem = model["view"].replace("_", "-")
+    stem = view_stem(model["view"])
     drawio_path = os.path.join(out_dir, "%s.drawio" % stem)
     svg_path = os.path.join(out_dir, "%s.svg" % stem)
     for path in (drawio_path, svg_path):
@@ -296,15 +325,18 @@ def main():
     if not os.path.isdir(args.out_dir):
         sys.stderr.write("FAIL  not a directory: %s\n" % args.out_dir)
         return 2
-    model, error = load_json(os.path.join(args.out_dir, "diagram-model.json"),
-                             "diagram model")
+    manifest, error = load_json(os.path.join(args.out_dir, "diagram-manifest.json"),
+                                "diagram manifest")
     if error:
         sys.stderr.write("FAIL  %s\n" % error)
         return 2
-    if model.get("schema_version") not in SUPPORTED_MODEL_SCHEMA:
-        sys.stderr.write("FAIL  the diagram model declares schema_version %r; this "
-                         "script supports %s\n" % (model.get("schema_version"),
-                                                   sorted(SUPPORTED_MODEL_SCHEMA)))
+    if manifest.get("schema_version") not in SUPPORTED_MANIFEST_SCHEMA:
+        sys.stderr.write("FAIL  the diagram manifest declares schema_version %r; this "
+                         "script supports %s\n" % (manifest.get("schema_version"),
+                                                   sorted(SUPPORTED_MANIFEST_SCHEMA)))
+        return 2
+    if not manifest.get("views"):
+        sys.stderr.write("FAIL  the diagram manifest lists no views\n")
         return 2
     graph, error = load_json(args.class_graph, "class graph")
     if error:
@@ -312,14 +344,30 @@ def main():
         return 2
 
     findings = Findings()
-    check_identity(model, graph, findings)
-    check_coverage(model, graph, findings)
-    check_integrity(model, graph, findings)
-    check_geometry(model, findings)
-    check_equivalence(model, args.out_dir, findings)
+    models = []
+    for entry in manifest["views"]:
+        stem = entry.get("stem") or view_stem(entry.get("view", ""))
+        model, error = load_json(os.path.join(args.out_dir, "%s-model.json" % stem),
+                                 "diagram model for view %r" % entry.get("view"))
+        if error:
+            sys.stderr.write("FAIL  %s\n" % error)
+            return 2
+        if model.get("schema_version") not in SUPPORTED_MODEL_SCHEMA:
+            sys.stderr.write("FAIL  the diagram model for %r declares schema_version "
+                             "%r; this script supports %s\n"
+                             % (entry.get("view"), model.get("schema_version"),
+                                sorted(SUPPORTED_MODEL_SCHEMA)))
+            return 2
+        models.append(model)
+        check_identity(model, graph, findings)
+        check_coverage(model, graph, findings)
+        check_integrity(model, graph, findings)
+        check_geometry(model, findings)
+        check_equivalence(model, args.out_dir, findings)
 
     if args.json:
-        json.dump({"diagram": args.out_dir, "view": model.get("view"),
+        json.dump({"diagram": args.out_dir,
+                   "views": [m.get("view") for m in models],
                    "findings": findings.rows, "passed": not findings},
                   sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
@@ -329,9 +377,10 @@ def main():
         print("")
         print("FAIL  %d finding(s)" % len(findings))
     else:
-        print("ok  %s: %d node(s), %d edge(s), %d container(s); Draw.io and SVG agree"
-              % (model["view"], len(model["nodes"]), len(model["edges"]),
-                 len(model["containers"])))
+        for model in models:
+            print("ok  %s: %d node(s), %d edge(s), %d container(s); Draw.io and SVG "
+                  "agree" % (model["view"], len(model["nodes"]), len(model["edges"]),
+                             len(model["containers"])))
     return 1 if findings else 0
 
 

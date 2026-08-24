@@ -10,9 +10,12 @@
 
 Two stages, deliberately separable:
 
-    layout    needs `dot`. Produces diagram-model.json: normalized coordinates
-              pinned to the class graph's structure hash
-    render    needs nothing. Turns that model into .drawio and .svg
+    layout    needs `dot`. Produces one <view>-model.json per view: normalized
+              coordinates pinned to the class graph's structure hash
+    render    needs nothing. Turns those models into .drawio and .svg
+
+One run can produce several views. `diagram-manifest.json` lists them all; each view
+owns its own model and its own pair of rendered files, named from the view.
 
 `--render-only` runs the second stage against an existing model. That is not a test
 hatch: it is the path taken after a layout patch is applied, and it is what keeps the
@@ -48,6 +51,11 @@ import xml.etree.ElementTree as ET
 
 SCHEMA_VERSION = 1
 SUPPORTED_GRAPH_SCHEMA = {1}
+
+# The manifest lists every view a run produced, so it carries its own version: a reader
+# written against the single-view shape must refuse this one rather than see one view
+# where there are eight.
+MANIFEST_VERSION = 2
 
 DEFAULT_LAYERS = ("inheritance", "composition")
 ALL_LAYERS = ("inheritance", "composition", "association", "calls", "inference")
@@ -90,6 +98,11 @@ def hash_of(payload):
         json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
+def view_stem(view):
+    """The filename every artifact of one view shares."""
+    return view.replace("_", "-")
+
+
 # -- view specification ------------------------------------------------------------
 
 def default_view_spec():
@@ -111,8 +124,11 @@ def check_view_spec(spec, graph):
 
     known_classes = {c["id"] for c in graph["classes"]}
     known_packages = {p["id"] for p in graph["packages"]}
+    # `scope` decides which classes a view is answerable for, so an author-supplied one
+    # would be `remove_classes` under another name. It is derived from the graph's own
+    # package structure and is not settable here.
     for field in ("add_classes", "remove_classes", "add_edges", "remove_edges",
-                  "rename", "relationships"):
+                  "rename", "relationships", "scope"):
         if spec.get(field):
             # The whole point of the separation: a view plans presentation, and the
             # graph decides what is true. A spec reaching for either is not a
@@ -330,6 +346,10 @@ def normalize(laid_out, graph, spec, labels, sizes, cluster_index):
         "source_graph_hash": graph["source_graph_hash"],
         "view_spec_hash": hash_of(spec),
         "view": spec.get("view", "full_repository"),
+        # What this view is answerable for. A checker compares the drawing against the
+        # scope, not against the whole graph -- otherwise a view of one package reads as
+        # a view of the repository that lost most of its classes.
+        "scope": dict(spec.get("scope") or {"kind": "repository"}),
         "detail": spec.get("detail") or graph["detail"],
         "layers": list(spec.get("layers", DEFAULT_LAYERS)),
         "layout_engine": {"name": "graphviz", "version": graphviz_version()},
@@ -479,6 +499,8 @@ def manifest_of(model):
     return {
         "schema_version": SCHEMA_VERSION,
         "view": model["view"],
+        "stem": view_stem(model["view"]),
+        "scope": model.get("scope") or {"kind": "repository"},
         "source_graph_hash": model["source_graph_hash"],
         "view_spec_hash": model["view_spec_hash"],
         "layout_engine": model["layout_engine"],
@@ -596,13 +618,13 @@ def rasterize(svg_path, png_path, bounds):
 def write_outputs(model, out_dir, previews):
     if not os.path.isdir(out_dir):
         os.makedirs(out_dir)
-    stem = model["view"].replace("_", "-")
+    stem = view_stem(model["view"])
     written = {}
 
-    model_path = os.path.join(out_dir, "diagram-model.json")
+    model_path = os.path.join(out_dir, "%s-model.json" % stem)
     with open(model_path, "w", encoding="utf-8") as fh:
         json.dump(model, fh, indent=2, sort_keys=True)
-    written["diagram-model.json"] = model_path
+    written["%s-model.json" % stem] = model_path
 
     drawio_path = os.path.join(out_dir, "%s.drawio" % stem)
     with open(drawio_path, "w", encoding="utf-8") as fh:
@@ -614,11 +636,6 @@ def write_outputs(model, out_dir, previews):
         fh.write(render_svg(model))
     written["%s.svg" % stem] = svg_path
 
-    manifest_path = os.path.join(out_dir, "diagram-manifest.json")
-    with open(manifest_path, "w", encoding="utf-8") as fh:
-        json.dump(manifest_of(model), fh, indent=2, sort_keys=True)
-    written["diagram-manifest.json"] = manifest_path
-
     error = None
     if previews:
         png_path = os.path.join(out_dir, "%s-preview.png" % stem)
@@ -626,6 +643,82 @@ def write_outputs(model, out_dir, previews):
         if error is None:
             written["%s-preview.png" % stem] = png_path
     return written, error
+
+
+def plan_views(graph, spec):
+    """Which views this run draws, as (graph slice, spec) pairs.
+
+    The caller does not choose. A view's scope comes from the graph's own package
+    structure, which is a fact about where the source files live -- letting a supplied
+    specification pick the scope would be `remove_classes` with a friendlier name.
+    """
+    repository = dict(spec)
+    repository["view"] = "full_repository"
+    repository["scope"] = {"kind": "repository"}
+    return [(graph, repository)]
+
+
+def effective_detail(graph, spec):
+    """The detail level after the density rule. Explicit beats the rule; the rule beats
+    the graph's own default."""
+    detail = spec.get("detail") or graph["detail"]
+    members = sum(len(c["members"]["methods"]) + len(c["members"]["attributes"])
+                  for c in graph["classes"])
+    dense = len(graph["classes"]) > DENSITY_CLASSES or members > DENSITY_MEMBERS
+    if dense and detail != "summary":
+        # An explicit `--view-spec` detail is the author's call and is left alone; the
+        # switch applies to the default only.
+        if spec.get("detail"):
+            sys.stderr.write("WARN  %s: %d class(es) and %d member(s) is past the "
+                             "density threshold, but the view spec asks for %r detail; "
+                             "keeping it\n" % (spec.get("view"), len(graph["classes"]),
+                                               members, detail))
+        else:
+            sys.stderr.write("WARN  %s: %d class(es) and %d member(s) is past the "
+                             "density threshold; dropping to summary detail so the "
+                             "canvas stays readable\n"
+                             % (spec.get("view"), len(graph["classes"]), members))
+            detail = "summary"
+    return detail
+
+
+def lay_out_view(graph, spec, dot_source_path=None):
+    """One view: DOT, Graphviz, then normalized geometry."""
+    # The effective level is part of the view, so it belongs in the spec that gets
+    # hashed -- a diagram drawn at summary is a different view from one drawn at public.
+    spec["detail"] = effective_detail(graph, spec)
+    labels = {c["id"]: node_label(c, spec["detail"]) for c in graph["classes"]}
+    sizes = {c["id"]: size_for(labels[c["id"]]) for c in graph["classes"]}
+    source, cluster_index = build_dot(graph, spec, labels, sizes)
+    if dot_source_path:
+        with open(dot_source_path, "w", encoding="utf-8") as fh:
+            fh.write(source)
+
+    laid_out, error = run_dot(source)
+    if error:
+        return None, error
+    return normalize(laid_out, graph, spec, labels, sizes, cluster_index)
+
+
+def write_manifest(out_dir, entries, keep_others=False):
+    """List every view of this run. `keep_others` preserves views this run did not touch.
+
+    A render-only pass rebuilds one view. Rewriting the manifest from that one entry
+    would delete every other view from the record while its files sit on disk, so the
+    patch loop reads as having destroyed seven diagrams to fix one.
+    """
+    path = os.path.join(out_dir, "diagram-manifest.json")
+    merged = {entry["view"]: entry for entry in entries}
+    if keep_others and os.path.isfile(path):
+        existing, error = load_json(path, "diagram manifest")
+        if error is None and existing.get("schema_version") == MANIFEST_VERSION:
+            for entry in existing.get("views", ()):
+                merged.setdefault(entry.get("view"), entry)
+    payload = {"schema_version": MANIFEST_VERSION,
+               "views": [merged[key] for key in sorted(merged)]}
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2, sort_keys=True)
+    return path
 
 
 def main():
@@ -654,8 +747,9 @@ def main():
         written, preview_error = write_outputs(model, args.out, args.previews)
         if preview_error:
             return fail("--previews was asked for but %s" % preview_error)
-        print("rendered %d artifact(s) to %s from an existing model"
-              % (len(written), args.out))
+        write_manifest(args.out, [manifest_of(model)], keep_others=True)
+        print("rendered %d artifact(s) to %s from an existing model of view %r"
+              % (len(written), args.out, model["view"]))
         return 0
 
     graph, error = load_json(args.class_graph, "class graph")
@@ -693,47 +787,23 @@ def main():
         print("diagrams: skipped -- the class graph contains no classes")
         return 0
 
-    detail = spec.get("detail") or graph["detail"]
-    members = sum(len(c["members"]["methods"]) + len(c["members"]["attributes"])
-                  for c in graph["classes"])
-    dense = len(graph["classes"]) > DENSITY_CLASSES or members > DENSITY_MEMBERS
-    if dense and detail != "summary":
-        # An explicit `--view-spec` detail is the author's call and is left alone; the
-        # switch applies to the default only.
-        if spec.get("detail"):
-            sys.stderr.write("WARN  %d class(es) and %d member(s) is past the density "
-                             "threshold, but the view spec asks for %r detail; keeping "
-                             "it\n" % (len(graph["classes"]), members, detail))
-        else:
-            sys.stderr.write("WARN  %d class(es) and %d member(s) is past the density "
-                             "threshold; dropping to summary detail so the canvas stays "
-                             "readable\n" % (len(graph["classes"]), members))
-            detail = "summary"
-    # The effective level is part of the view, so it belongs in the spec that gets
-    # hashed -- a diagram drawn at summary is a different view from one drawn at public.
-    spec["detail"] = detail
-    labels = {c["id"]: node_label(c, detail) for c in graph["classes"]}
-    sizes = {c["id"]: size_for(labels[c["id"]]) for c in graph["classes"]}
-    source, cluster_index = build_dot(graph, spec, labels, sizes)
-    if args.dot_source:
-        with open(args.dot_source, "w", encoding="utf-8") as fh:
-            fh.write(source)
+    entries, engine = [], None
+    for view_graph, view_spec in plan_views(graph, spec):
+        model, error = lay_out_view(view_graph, view_spec, args.dot_source)
+        if error:
+            return fail(error)
+        written, preview_error = write_outputs(model, args.out, args.previews)
+        if preview_error:
+            return fail("--previews was asked for but %s" % preview_error)
+        entries.append(manifest_of(model))
+        engine = model["layout_engine"]["version"] or "graphviz"
+        print("%s: %d artifact(s), %d node(s), %d edge(s), %d container(s)"
+              % (model["view"], len(written), len(model["nodes"]),
+                 len(model["edges"]), len(model["containers"])))
 
-    laid_out, error = run_dot(source)
-    if error:
-        return fail(error)
-    model, error = normalize(laid_out, graph, spec, labels, sizes, cluster_index)
-    if error:
-        return fail(error)
-
-    written, preview_error = write_outputs(model, args.out, args.previews)
-    if preview_error:
-        return fail("--previews was asked for but %s" % preview_error)
-
-    print("wrote %d artifact(s) to %s: %d node(s), %d edge(s), %d container(s)"
-          % (len(written), args.out, len(model["nodes"]), len(model["edges"]),
-             len(model["containers"])))
-    print("layout engine: %s" % (model["layout_engine"]["version"] or "graphviz"))
+    write_manifest(args.out, entries)
+    print("wrote %d view(s) to %s" % (len(entries), args.out))
+    print("layout engine: %s" % engine)
     return 0
 
 
