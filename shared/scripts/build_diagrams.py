@@ -426,9 +426,19 @@ def render_drawio(model):
             style = re.sub(r"fillColor=[^;]*;", "fillColor=%s;" % fill, style)
         if stroke:
             style = re.sub(r"strokeColor=[^;]*;", "strokeColor=%s;" % stroke, style)
-        cell = ET.SubElement(root, "mxCell", {
-            "id": node["id"], "value": "\n".join(node["label"]),
-            "style": style, "vertex": "1", "parent": "1"})
+        if node.get("link"):
+            # Draw.io carries a link by wrapping the cell, which is why the cell's id
+            # moves out to the wrapper: the id must stay on the outermost element or
+            # nothing referencing this node resolves.
+            holder = ET.SubElement(root, "UserObject", {
+                "id": node["id"], "label": "\n".join(node["label"]),
+                "link": node["link"]})
+            cell = ET.SubElement(holder, "mxCell", {
+                "style": style, "vertex": "1", "parent": "1"})
+        else:
+            cell = ET.SubElement(root, "mxCell", {
+                "id": node["id"], "value": "\n".join(node["label"]),
+                "style": style, "vertex": "1", "parent": "1"})
         ET.SubElement(cell, "mxGeometry", {
             "x": str(node["x"]), "y": str(node["y"]),
             "width": str(node["width"]), "height": str(node["height"]),
@@ -485,6 +495,8 @@ def render_svg(model):
         fill = override(node, "fill", default_fill)
         stroke = override(node, "stroke", default_stroke)
         dashed = ' stroke-dasharray="4 3"' if node.get("external") else ""
+        if node.get("link"):
+            out.append('<a href="%s">' % svg_escape(node["link"]))
         out.append('<rect id="%s" x="%s" y="%s" width="%s" height="%s" fill="%s" '
                    'stroke="%s"%s/>'
                    % (svg_escape(node["id"]), node["x"], node["y"], node["width"],
@@ -493,6 +505,8 @@ def render_svg(model):
             out.append('<text x="%s" y="%s" font-size="11" fill="#111111">%s</text>'
                        % (node["x"] + 6, node["y"] + 16 + position * 14,
                           svg_escape(line)))
+        if node.get("link"):
+            out.append("</a>")
 
     for edge in model["edges"]:
         style = LAYER_STYLE.get(edge["layer"], LAYER_STYLE["inheritance"])
@@ -824,6 +838,24 @@ def lay_out_view(graph, spec, dot_source_path=None):
     return normalize(laid_out, graph, spec, labels, sizes, cluster_index)
 
 
+def link_to_details(overview, detail_models):
+    """Point each box on the overview at the view that shows it in full.
+
+    The overview is where a reader starts and it is the view that had to drop members to
+    stay readable, so it is the one that needs a way onward.
+    """
+    destination = {}
+    for model in detail_models:
+        target = "%s.svg" % view_stem(model["view"])
+        for node in model["nodes"]:
+            if not node.get("external"):
+                destination[node["id"]] = target
+    for node in overview["nodes"]:
+        if node["id"] in destination:
+            node["link"] = destination[node["id"]]
+    return overview
+
+
 def write_manifest(out_dir, entries, keep_others=False):
     """List every view of this run. `keep_others` preserves views this run did not touch.
 
@@ -915,7 +947,7 @@ def main():
         return 0
 
     planned = plan_views(graph, spec, args.detail_views)
-    entries, engine = [], None
+    models, engine = [], None
     for view_graph, view_spec in planned:
         # One DOT file per view, so --dot-source on a multi-view run does not leave the
         # last view's source pretending to be the whole run's.
@@ -927,11 +959,24 @@ def main():
         model, error = lay_out_view(view_graph, view_spec, dot_source)
         if error:
             return fail(error)
+        models.append(model)
+        engine = model["layout_engine"]["version"] or "graphviz"
+
+    # Linking needs every view laid out, so it happens between layout and writing: a
+    # model is written once, already carrying the links, and --render-only reproduces
+    # them from the file rather than recomputing what it cannot see.
+    details = [m for m in models
+               if (m.get("scope") or {}).get("kind") in ("package", "module")]
+    for model in models:
+        if (model.get("scope") or {}).get("kind") == "repository" and details:
+            link_to_details(model, details)
+
+    entries = []
+    for model in models:
         written, preview_error = write_outputs(model, args.out, args.previews)
         if preview_error:
             return fail("--previews was asked for but %s" % preview_error)
         entries.append(manifest_of(model))
-        engine = model["layout_engine"]["version"] or "graphviz"
         print("%s: %d artifact(s), %d node(s), %d edge(s), %d container(s)"
               % (model["view"], len(written), len(model["nodes"]),
                  len(model["edges"]), len(model["containers"])))

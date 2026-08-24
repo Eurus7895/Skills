@@ -51,7 +51,8 @@ OPERATIONS = ("move", "resize", "route", "style", "wrap")
 # something it writes. The endpoint spellings a patch might reach for instead are all
 # here.
 PROTECTED = ("id", "parent", "source", "layer", "cite", "source_hash",
-             "source_graph_hash", "claim_id", "verified", "stereotype",
+             "source_graph_hash", "claim_id", "verified", "stereotype", "external",
+             "link", "scope", "view",
              "from", "to", "target_node", "endpoint", "nodes", "edges", "containers")
 
 

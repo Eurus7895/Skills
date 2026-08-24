@@ -20,6 +20,7 @@ What is checked:
                 a neighbour. This is the promise the diagram rests on
     view set    the views add up: one covers the repository, and no class is left out
                 of every detail view. Each view can be right and the set still wrong
+    links       a box that offers a way into another view lands in one that exists
     identity    the model is pinned to the graph hash it was laid out from
     integrity   unique ids, no edge to a node that is not there, every class inside
                 the container that owns it
@@ -31,7 +32,8 @@ What is checked:
                 one renderer has drifted
 
 Finding codes: G001 coverage, G002 identity, G003 integrity, G004 geometry,
-G005 equivalence, G006 malformed output, G007 view set, G008 empty view.
+G005 equivalence, G006 malformed output, G007 view set, G008 empty view,
+G009 broken link between views.
 
 Exit codes: 0 no findings, 1 findings, 2 input error, 3 internal error.
 
@@ -189,6 +191,23 @@ def check_view_set(models, graph, findings):
                          % (model.get("view"), scope.get("id", scope.get("kind"))))
 
 
+def check_links(models, out_dir, findings):
+    """A link out of one view has to land in another one that exists."""
+    rendered = {"%s.svg" % view_stem(m["view"]) for m in models}
+    for model in models:
+        for node in model["nodes"]:
+            target = node.get("link")
+            if not target:
+                continue
+            if target not in rendered:
+                findings.add("G009", "node %r in view %r links to %r, which no view "
+                                     "in this manifest renders"
+                             % (node["id"], model.get("view"), target))
+            elif not os.path.isfile(os.path.join(out_dir, target)):
+                findings.add("G009", "node %r in view %r links to %r, which was not "
+                                     "written" % (node["id"], model.get("view"), target))
+
+
 def check_identity(model, graph, findings):
     if model.get("source_graph_hash") != graph.get("source_graph_hash"):
         findings.add("G002", "the diagram was laid out from a different class graph "
@@ -288,9 +307,15 @@ def parse_drawio(path, findings):
     except (OSError, ET.ParseError) as exc:
         findings.add("G006", "%s is not well-formed XML: %s" % (os.path.basename(path), exc))
         return None, None
+    # A linked node is a UserObject wrapping its mxCell, and the id lives on the wrapper.
+    # Reading only mxCell would report every linked class as missing from the Draw.io.
+    wrapped = {}
+    for holder in root.iter("UserObject"):
+        for cell in holder.iter("mxCell"):
+            wrapped[id(cell)] = holder.get("id")
     nodes, edges = set(), set()
     for cell in root.iter("mxCell"):
-        cell_id = cell.get("id")
+        cell_id = wrapped.get(id(cell), cell.get("id"))
         if cell.get("edge") == "1":
             edges.add(cell_id)
         elif cell.get("vertex") == "1":
@@ -415,6 +440,7 @@ def main():
         check_geometry(model, findings)
         check_equivalence(model, args.out_dir, findings)
     check_view_set(models, graph, findings)
+    check_links(models, args.out_dir, findings)
 
     if args.json:
         json.dump({"diagram": args.out_dir,
