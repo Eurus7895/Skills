@@ -3,8 +3,8 @@ name: document-codebase
 description: Generate architecture documentation for a repository of any size by parsing its structure with a
   scanner first — symbols, imports, classes, dependency graph, fan-in ranking — then describing each module
   with its real neighbours supplied, and checking every claim against the graph and the source before it is
-  written. Produces a multi-page RST document under docs/ with file:line citations, or one
-  docs/ARCHITECTURE.md. Use for "document this repo", "write architecture docs",
+  written. Produces a multi-page RST document under docs/ with file:line citations.
+  Use for "document this repo", "write architecture docs",
   "explain how this codebase fits together", "what calls what", "onboard someone to this project", "map the
   dependencies", or when an unfamiliar repository needs a written overview. The scanner reads Python,
   JavaScript, TypeScript, Go, Rust, Java, Ruby, C and C++; a repository written entirely in another language —
@@ -306,12 +306,6 @@ State, from the artefacts rather than from memory: files scanned and skipped, th
 modules were described, how many claims were verified, how many are candidates or unsupported and why, whether
 a diagram was generated or skipped and for what reason, how many visual findings were left unresolved, whether
 the build check passed or was skipped, and that `.docs-build/` can be deleted.
-
-## Single-file output
-
-If the user wants one `docs/ARCHITECTURE.md` instead of a multi-page RST document, run steps 1–6 unchanged and
-write the Markdown yourself from `claims.verified.jsonl` — same rules, same status policy, same citations.
-This is the legacy output and is kept because a small repository often does not want six pages.
 
 ## Bundled resources
 
