@@ -151,6 +151,10 @@ def node_label(cls, detail):
     lines = [cls["name"]]
     if cls.get("stereotype") and cls["stereotype"] != "class":
         lines.insert(0, "<<%s>>" % cls["stereotype"])
+    if cls.get("external"):
+        # Where it lives, because the point of drawing it at all is the boundary.
+        lines.append("(%s)" % str(cls.get("package", "")).split(":", 1)[-1])
+        return lines
     if detail != "summary":
         for attribute in cls["members"]["attributes"]:
             types = ": " + ", ".join(attribute["types"]) if attribute["types"] else ""
@@ -305,6 +309,7 @@ def normalize(laid_out, graph, spec, labels, sizes, cluster_index):
             "id": name,
             "label": labels[name],
             "stereotype": cls.get("stereotype"),
+            "external": bool(cls.get("external")),
             "parent": module_of.get(name),
             "cite": cls.get("cite"),
             "x": round(centre_x - width / 2.0, 2),
@@ -365,7 +370,7 @@ def override(item, field, fallback):
     return ((item.get("style") or {}).get(field)) or fallback
 
 
-def drawio_style(kind, layer=None, stereotype=None):
+def drawio_style(kind, layer=None, stereotype=None, external=False):
     if kind == "package":
         return ("rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#999999;"
                 "verticalAlign=top;align=left;spacingLeft=8;dashed=0;")
@@ -373,6 +378,11 @@ def drawio_style(kind, layer=None, stereotype=None):
         return ("rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#BBBBBB;"
                 "verticalAlign=top;align=left;spacingLeft=8;dashed=1;")
     if kind == "node":
+        if external:
+            # A neighbour, drawn so the boundary is visible. Greyed and dashed so nobody
+            # reads it as a class this view is describing.
+            return ("rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=top;"
+                    "fillColor=#F4F4F4;strokeColor=#999999;dashed=1;spacing=4;")
         fill = {"exception": "#FDF0EF", "abstract": "#F2F0FA",
                 "enum": "#F0F6FD", "dataclass": "#F1FAF3"}.get(stereotype, "#FFFFFF")
         return ("rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=top;"
@@ -408,7 +418,8 @@ def render_drawio(model):
             "as": "geometry"})
 
     for node in model["nodes"]:
-        style = drawio_style("node", stereotype=node.get("stereotype"))
+        style = drawio_style("node", stereotype=node.get("stereotype"),
+                             external=node.get("external"))
         fill = override(node, "fill", None)
         stroke = override(node, "stroke", None)
         if fill:
@@ -464,15 +475,20 @@ def render_svg(model):
                       svg_escape(container["label"])))
 
     for node in model["nodes"]:
-        fill = override(node, "fill",
-                        {"exception": "#FDF0EF", "abstract": "#F2F0FA",
-                         "enum": "#F0F6FD", "dataclass": "#F1FAF3"}.get(
-                             node.get("stereotype"), "#FFFFFF"))
-        stroke = override(node, "stroke", "#333333")
+        if node.get("external"):
+            default_fill, default_stroke = "#F4F4F4", "#999999"
+        else:
+            default_fill = {"exception": "#FDF0EF", "abstract": "#F2F0FA",
+                            "enum": "#F0F6FD", "dataclass": "#F1FAF3"}.get(
+                                node.get("stereotype"), "#FFFFFF")
+            default_stroke = "#333333"
+        fill = override(node, "fill", default_fill)
+        stroke = override(node, "stroke", default_stroke)
+        dashed = ' stroke-dasharray="4 3"' if node.get("external") else ""
         out.append('<rect id="%s" x="%s" y="%s" width="%s" height="%s" fill="%s" '
-                   'stroke="%s"/>'
+                   'stroke="%s"%s/>'
                    % (svg_escape(node["id"]), node["x"], node["y"], node["width"],
-                      node["height"], svg_escape(fill), svg_escape(stroke)))
+                      node["height"], svg_escape(fill), svg_escape(stroke), dashed))
         for position, line in enumerate(node["label"]):
             out.append('<text x="%s" y="%s" font-size="11" fill="#111111">%s</text>'
                        % (node["x"] + 6, node["y"] + 16 + position * 14,
@@ -642,7 +658,81 @@ def write_outputs(model, out_dir, previews):
     return written, error
 
 
-def plan_views(graph, spec):
+def slug(text):
+    """A filename fragment from a container path. Never empty, never a separator."""
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "-", str(text)).strip("-").lower()
+    return cleaned or "unnamed"
+
+
+def view_names(scopes):
+    """A stable, collision-free view name per scope.
+
+    `src/api` and `src.api` slug to the same thing. Rather than let one silently
+    overwrite the other's files, both get the hash of their real id appended -- and only
+    they do, so the common case keeps a readable name.
+    """
+    by_slug = {}
+    for kind, identifier in scopes:
+        path = str(identifier).split(":", 1)[-1]
+        by_slug.setdefault("%s_%s" % (kind, slug(path)), []).append((kind, identifier))
+    names = {}
+    for base, members in by_slug.items():
+        for kind, identifier in members:
+            if len(members) == 1:
+                names[(kind, identifier)] = base
+            else:
+                digest = hashlib.sha256(str(identifier).encode("utf-8")).hexdigest()[:8]
+                names[(kind, identifier)] = "%s_%s" % (base, digest)
+    return names
+
+
+def scope_graph(graph, kind, identifier):
+    """The slice of the graph one detail view draws, plus its boundary.
+
+    Classes outside the scope that a drawn relationship reaches are kept as `external`
+    nodes. Dropping them instead would make a package that talks to three others look
+    self-contained, which is a stronger false statement than an extra grey box.
+    """
+    inside = [c for c in graph["classes"] if c.get(kind) == identifier]
+    inside_ids = {c["id"] for c in inside}
+    if not inside_ids:
+        return None
+
+    by_id = {c["id"]: c for c in graph["classes"]}
+    edges, outside_ids = [], set()
+    for edge in graph["edges"]:
+        ends = (edge["from"], edge["to"])
+        if not any(end in inside_ids for end in ends):
+            continue
+        # Association is module-to-module and calls name symbols; neither end of those
+        # is a class node, so neither can pull a class onto this canvas.
+        if not all(end in by_id for end in ends):
+            continue
+        edges.append(edge)
+        outside_ids.update(end for end in ends if end not in inside_ids)
+
+    classes = list(inside)
+    for class_id in sorted(outside_ids):
+        neighbour = dict(by_id[class_id])
+        neighbour["external"] = True
+        # An external neighbour is shown as itself, not as a member listing: this view
+        # is not answerable for what is inside it.
+        neighbour["members"] = {"methods": [], "attributes": []}
+        classes.append(neighbour)
+
+    drawn_ids = {c["id"] for c in classes}
+    modules = [dict(m, classes=[c for c in m["classes"] if c in drawn_ids])
+               for m in graph["modules"]]
+    modules = [m for m in modules if m["classes"]]
+    module_ids = {m["id"] for m in modules}
+    packages = [dict(p, modules=[m for m in p["modules"] if m in module_ids])
+                for p in graph["packages"]]
+    packages = [p for p in packages if p["modules"]]
+
+    return dict(graph, classes=classes, modules=modules, packages=packages, edges=edges)
+
+
+def plan_views(graph, spec, detail_views=False):
     """Which views this run draws, as (graph slice, spec) pairs.
 
     The caller does not choose. A view's scope comes from the graph's own package
@@ -652,16 +742,53 @@ def plan_views(graph, spec):
     repository = dict(spec)
     repository["view"] = "full_repository"
     repository["scope"] = {"kind": "repository"}
-    return [(graph, repository)]
+    views = [(graph, repository)]
+
+    # Below the threshold the canvas is already drawn at `public` and nothing was left
+    # out, so a second set of pictures would repeat it.
+    if not detail_views and effective_detail(graph, spec, warn=False) != "summary":
+        return views
+
+    scopes = []
+    for package in graph["packages"]:
+        slice_ = scope_graph(graph, "package", package["id"])
+        if slice_ is None:
+            continue
+        if is_dense(slice_):
+            # A package that is itself past the threshold would produce a second
+            # unreadable canvas. Go one level down, and stop there.
+            for module_id in package["modules"]:
+                if scope_graph(graph, "module", module_id) is not None:
+                    scopes.append(("module", module_id))
+        else:
+            scopes.append(("package", package["id"]))
+
+    names = view_names(scopes)
+    for kind, identifier in scopes:
+        slice_ = scope_graph(graph, kind, identifier)
+        detail_spec = dict(spec)
+        detail_spec["view"] = names[(kind, identifier)]
+        detail_spec["scope"] = {"kind": kind, "id": identifier}
+        views.append((slice_, detail_spec))
+    return views
 
 
-def effective_detail(graph, spec):
+def is_dense(graph):
+    """Too much for one readable canvas at `public` detail."""
+    members = sum(len(c["members"]["methods"]) + len(c["members"]["attributes"])
+                  for c in graph["classes"])
+    return len(graph["classes"]) > DENSITY_CLASSES or members > DENSITY_MEMBERS
+
+
+def effective_detail(graph, spec, warn=True):
     """The detail level after the density rule. Explicit beats the rule; the rule beats
     the graph's own default."""
     detail = spec.get("detail") or graph["detail"]
     members = sum(len(c["members"]["methods"]) + len(c["members"]["attributes"])
                   for c in graph["classes"])
-    dense = len(graph["classes"]) > DENSITY_CLASSES or members > DENSITY_MEMBERS
+    dense = is_dense(graph)
+    if dense and detail != "summary" and not warn:
+        return detail if spec.get("detail") else "summary"
     if dense and detail != "summary":
         # An explicit `--view-spec` detail is the author's call and is left alone; the
         # switch applies to the default only.
@@ -730,6 +857,9 @@ def main():
                         help="also rasterize a PNG for visual review")
     parser.add_argument("--render-only", metavar="MODEL",
                         help="skip layout and render this existing diagram model")
+    parser.add_argument("--detail-views", action="store_true",
+                        help="draw a per-package view as well, even below the density "
+                             "threshold where the full canvas already shows members")
     parser.add_argument("--dot-source", metavar="FILE",
                         help="also write the generated DOT here, for debugging")
     args = parser.parse_args()
@@ -784,9 +914,17 @@ def main():
         print("diagrams: skipped -- the class graph contains no classes")
         return 0
 
+    planned = plan_views(graph, spec, args.detail_views)
     entries, engine = [], None
-    for view_graph, view_spec in plan_views(graph, spec):
-        model, error = lay_out_view(view_graph, view_spec, args.dot_source)
+    for view_graph, view_spec in planned:
+        # One DOT file per view, so --dot-source on a multi-view run does not leave the
+        # last view's source pretending to be the whole run's.
+        dot_source = args.dot_source
+        if dot_source and len(planned) > 1:
+            base, extension = os.path.splitext(dot_source)
+            dot_source = "%s-%s%s" % (base, view_stem(view_spec["view"]),
+                                      extension or ".dot")
+        model, error = lay_out_view(view_graph, view_spec, dot_source)
         if error:
             return fail(error)
         written, preview_error = write_outputs(model, args.out, args.previews)

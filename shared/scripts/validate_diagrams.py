@@ -125,10 +125,24 @@ def check_coverage(model, graph, findings):
         findings.add("G001", "%d node(s) in the diagram are not in the graph: %s"
                      % (len(invented), ", ".join(invented[:5])))
 
+    # A node outside the scope is legitimate only as a marked neighbour: the far end of
+    # a relationship that leaves this view. An unmarked one is a view quietly drawing
+    # something it is not answerable for.
+    for node in model["nodes"]:
+        if node["id"] not in expected and not node.get("external"):
+            findings.add("G001", "node %r is outside this view's scope but is not "
+                                 "marked as an external neighbour" % node["id"])
+        if node["id"] in expected and node.get("external"):
+            findings.add("G001", "node %r is in scope but is drawn as an external "
+                                 "neighbour" % node["id"])
+
     if "inheritance" in model.get("layers", ()):
+        # An edge with one end in scope is drawn, and so is required: dropping it is how
+        # a package view comes to look self-contained.
         wanted = {e["id"] for e in graph["edges"]
                   if e["layer"] == "inheritance"
-                  and e["from"] in expected and e["to"] in expected}
+                  and (e["from"] in expected or e["to"] in expected)
+                  and e["from"] in drawn and e["to"] in drawn}
         present = {e["id"] for e in model["edges"]}
         lost = sorted(wanted - present)
         if lost:
