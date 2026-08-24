@@ -43,12 +43,31 @@ words per box rather than a smaller font. `build_diagrams.py` enforces this and 
 on stderr; a detail level named explicitly in a view spec is the author's call and is
 left alone.
 
-**Detail views (decision 16):** *not implemented in this version.* The plan calls for
-mandatory per-package detail views once the canvas passes the threshold. Today the
-canvas drops to `summary` and stays complete -- every class still appears -- but the
-detail that would move into a package view has nowhere to go. Until those views exist,
-a reader past the threshold gets names and structure, not members. This is a gap, and
-it is written down here rather than left as an unmet promise elsewhere in the document.
+**Detail views (decision 16):** past the threshold the run also draws one view per
+package, at `public` detail, and every box on the overview links to the view that shows
+it in full. That is where the members the overview stopped showing now live. Below the
+threshold no detail views are drawn: the full canvas already shows members, so a second
+set of pictures would only repeat it. `--detail-views` asks for them anyway.
+
+A package that is itself past the threshold would produce a second unreadable canvas, so
+it yields one view per module instead. That stops one level down; a module too dense to
+draw at `public` falls back to `summary` and says so.
+
+**Which classes a view holds is not a presentation choice.** Scope comes from the
+package structure in the class graph -- where the source files actually live -- and a
+view specification is refused for setting it, exactly as it is for `remove_classes`.
+Otherwise "show only this package" becomes the way to drop the classes an author would
+rather not explain.
+
+A detail view draws the far end of any relationship that leaves its scope, as an
+`external` neighbour: greyed, dashed, labelled with the package it belongs to, and shown
+without members. The view is not answerable for what is inside a neighbour, only for the
+fact that the boundary is crossed. Dropping those instead would draw a package talking
+to nobody, which is a stronger false statement than an extra grey box.
+
+`validate_diagrams.py` holds the set together as well as each view: some view covers the
+whole repository, no class is absent from every detail view (`G007`), no view is empty
+(`G008`), and every link lands somewhere that exists (`G009`).
 
 ## Stereotypes
 

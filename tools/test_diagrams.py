@@ -17,6 +17,7 @@ class graph instead of against a picture.
 """
 
 import copy
+import hashlib
 import json
 import os
 import shutil
@@ -38,6 +39,81 @@ GRAPH = os.path.join(CONTRACTS, "class-graph-v1-minimal.json")
 HAVE_DOT = shutil.which("dot") is not None
 
 FAILURES = []
+
+# Past DENSITY_CLASSES, so the overview drops to summary and the detail views become the
+# only place members are shown. Generated rather than checked in: this fixture is about
+# scale, not about a schema shape worth freezing, and 72 hand-written classes would be
+# 40KB of noise in every review of this directory.
+DENSE_PACKAGES, DENSE_MODULES, DENSE_CLASSES = 6, 3, 4
+ALL_LAYERS = ("inheritance", "composition", "association", "calls", "inference")
+
+
+def dense_graph(collide=False):
+    """A class graph past the density threshold, with relationships that leave packages.
+
+    `collide` adds a package whose path slugs to the same filename as another's, which
+    is the case that silently overwrote one view's files with another's.
+    """
+    def cid(p, m, c):
+        return "class:src/pkg%d/mod%d.py:C%d%d%d" % (p, m, p, m, c)
+
+    packages, modules, classes, edges = [], [], [], []
+    paths = ["src/pkg%d" % p for p in range(DENSE_PACKAGES)]
+    if collide:
+        paths[-1] = "src/pkg0"          # same slug as paths[0], different id below
+    for p, path in enumerate(paths):
+        package = "package:%s" % (path if not collide or p != len(paths) - 1
+                                  else "src.pkg0")
+        module_ids = []
+        for m in range(DENSE_MODULES):
+            module = "module:src/pkg%d/mod%d.py" % (p, m)
+            module_ids.append(module)
+            ids = []
+            for c in range(DENSE_CLASSES):
+                ids.append(cid(p, m, c))
+                classes.append({
+                    "id": cid(p, m, c), "name": "C%d%d%d" % (p, m, c),
+                    "module": module, "package": package, "stereotype": "class",
+                    "cite": "src/pkg%d/mod%d.py:%d" % (p, m, c + 1),
+                    "source_hash": "sha256:%02d" % p,
+                    "members": {
+                        "methods": [{"name": "run", "line": 2, "params": [],
+                                     "visibility": "public"}],
+                        "attributes": [{"name": "value", "line": 3, "types": ["int"],
+                                        "visibility": "public"}]},
+                })
+            modules.append({"id": module, "name": "src/pkg%d/mod%d.py" % (p, m),
+                            "package": package, "lang": "python",
+                            "source_hash": "sha256:%02d" % p, "classes": ids})
+        packages.append({"id": package, "name": path, "modules": module_ids})
+
+    for p in range(len(paths)):
+        for m in range(DENSE_MODULES):
+            for c in range(1, DENSE_CLASSES):
+                edges.append({"id": "edge:inheritance:%s:%s" % (cid(p, m, c),
+                                                                cid(p, m, 0)),
+                              "layer": "inheritance", "from": cid(p, m, c),
+                              "to": cid(p, m, 0), "verified": True,
+                              "cite": "src/pkg%d/mod%d.py:%d" % (p, m, c)})
+        # One relationship out of every package: the boundary a detail view has to show
+        # rather than hide.
+        nxt = (p + 1) % len(paths)
+        edges.append({"id": "edge:composition:%s:%s" % (cid(p, 0, 0), cid(nxt, 0, 1)),
+                      "layer": "composition", "from": cid(p, 0, 0), "to": cid(nxt, 0, 1),
+                      "verified": True, "cite": "src/pkg%d/mod0.py:1" % p})
+
+    payload = {"packages": packages, "modules": modules, "classes": classes,
+               "edges": edges}
+    graph = {"schema_version": 1, "detail": "public",
+             "source": {"root": ".", "revision": None, "dirty": True},
+             "source_graph_hash": "sha256:" + hashlib.sha256(
+                 json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest(),
+             "layers": list(ALL_LAYERS), "unresolved": [],
+             "coverage": {"classes": len(classes), "modules_with_detail": len(modules),
+                          "modules_without_detail": 0, "unresolved_relationships": 0,
+                          "by_layer": {}}}
+    graph.update(payload)
+    return graph
 
 
 def check(name, condition, detail=""):
@@ -357,6 +433,99 @@ def main():
         code, report = validate(os.path.join(tmp, "not-a-directory"))
         check("validating a directory that is not there exits 2",
               code == 2, "%r" % report)
+
+        # -- detail views, past the density threshold ------------------------------
+        # The whole point of the threshold is that the overview stops showing members.
+        # Until these views existed, that detail was simply lost.
+        if HAVE_DOT:
+            dense_path = os.path.join(tmp, "dense-graph.json")
+            with open(dense_path, "w", encoding="utf-8") as fh:
+                json.dump(dense_graph(), fh)
+            dense_dir = os.path.join(tmp, "dense")
+            code, output = run(BUILD, "--class-graph", dense_path, "--out", dense_dir,
+                               "--policy", "required")
+            check("a graph past the threshold lays out", code == 0, output)
+
+            with open(os.path.join(dense_dir, "diagram-manifest.json"),
+                      encoding="utf-8") as fh:
+                manifest = json.load(fh)
+            kinds = sorted(v["scope"]["kind"] for v in manifest["views"])
+            check("the run produces one repository view and one view per package",
+                  kinds == ["package"] * DENSE_PACKAGES + ["repository"], "%r" % kinds)
+
+            models = {}
+            for entry in manifest["views"]:
+                with open(os.path.join(dense_dir, "%s-model.json" % entry["stem"]),
+                          encoding="utf-8") as fh:
+                    models[entry["view"]] = json.load(fh)
+            overview = models["full_repository"]
+            package_view = models[next(v for v in models if v != "full_repository")]
+            check("the overview drops to summary, as the threshold requires",
+                  overview["detail"] == "summary"
+                  and all(len(n["label"]) == 1 for n in overview["nodes"]),
+                  "%r" % overview["detail"])
+            check("and the detail view is where the members went",
+                  package_view["detail"] == "public"
+                  and any(len(n["label"]) > 1 for n in package_view["nodes"]
+                          if not n["external"]),
+                  "%r" % package_view["detail"])
+
+            neighbours = [n for n in package_view["nodes"] if n["external"]]
+            check("a relationship leaving the package is drawn to a marked neighbour",
+                  neighbours and all(n["label"][-1].startswith("(") for n in neighbours),
+                  "%r" % [n["id"] for n in neighbours])
+
+            drawn = set()
+            for name, model in models.items():
+                if name != "full_repository":
+                    drawn |= {n["id"] for n in model["nodes"] if not n["external"]}
+            check("every class the overview stopped describing is in some detail view",
+                  drawn == {n["id"] for n in overview["nodes"]},
+                  "%d vs %d" % (len(drawn), len(overview["nodes"])))
+
+            check("every box on the overview leads to the view that shows it in full",
+                  all(n.get("link") for n in overview["nodes"]),
+                  "%r" % [n["id"] for n in overview["nodes"] if not n.get("link")][:3])
+
+            code, report = validate(dense_dir, dense_path)
+            check("the whole set validates", code == 0 and report["passed"],
+                  "%r" % report.get("findings"))
+
+            # A package with no view of its own takes its members out of the document
+            # while every remaining view still checks out on its own.
+            gap = os.path.join(tmp, "dense-gap")
+            shutil.copytree(dense_dir, gap)
+            with open(os.path.join(gap, "diagram-manifest.json"), encoding="utf-8") as fh:
+                trimmed = json.load(fh)
+            trimmed["views"] = [v for v in trimmed["views"]
+                                if v["scope"]["kind"] != "package"][:1] + [
+                v for v in trimmed["views"] if v["scope"]["kind"] == "package"][1:]
+            with open(os.path.join(gap, "diagram-manifest.json"), "w",
+                      encoding="utf-8") as fh:
+                json.dump(trimmed, fh)
+            code, report = validate(gap, dense_path)
+            check("a package left without a detail view is caught",
+                  code == 1 and "G007" in codes(report), "%r" % report.get("findings"))
+
+            # `src/api` and `src.api` slug to one filename. Without the collision guard
+            # one view's files silently overwrite the other's.
+            collide_path = os.path.join(tmp, "collide-graph.json")
+            with open(collide_path, "w", encoding="utf-8") as fh:
+                json.dump(dense_graph(collide=True), fh)
+            collide_dir = os.path.join(tmp, "collide")
+            code, output = run(BUILD, "--class-graph", collide_path, "--out",
+                               collide_dir, "--policy", "required")
+            check("packages whose paths slug alike still lay out", code == 0, output)
+            with open(os.path.join(collide_dir, "diagram-manifest.json"),
+                      encoding="utf-8") as fh:
+                stems = [v["stem"] for v in json.load(fh)["views"]]
+            check("and each gets its own filename, so no view overwrites another",
+                  len(stems) == len(set(stems)) == DENSE_PACKAGES + 1, "%r" % stems)
+            code, report = validate(collide_dir, collide_path)
+            check("the colliding set validates too", code == 0 and report["passed"],
+                  "%r" % report.get("findings"))
+        else:
+            print("skip detail-view checks -- Graphviz is not installed")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

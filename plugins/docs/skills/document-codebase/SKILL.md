@@ -295,6 +295,13 @@ of it. Layout needs Graphviz — under `--policy optional` a missing `dot` skips
 diagram and the document is generated without one. **`skipped` is not `passed`**: say
 which happened.
 
+**Past the density threshold you get more than one picture.** The overview drops to
+class names only, so the run also draws one view per package at full member detail, and
+each box on the overview links to the package view that shows it. Read the run's output
+for how many views were produced; every one of them is checked, and the checker also
+holds them together — a package left without a view takes its members out of the
+document while each remaining view still looks complete.
+
 You may write a `view-spec.json` first to choose the detail level, which layers are
 visible, and what to emphasise. You may **not** use it to add a class, drop one, or
 change what connects to what — `build_diagrams.py` refuses such a spec before laying
