@@ -325,6 +325,37 @@ def main():
         check("and every figure has alt text",
               all(b.get("alt") for b in figures), "%r" % figures)
 
+        # A preset with no page for classes still has to give the detail views a home.
+        # Rendering seven views into _diagrams/ and referencing one leaves the rest as
+        # files the reader has no route to.
+        detail_model = os.path.join(tmp, "detail-view-model.json")
+        with open(os.path.join(contracts, "diagram-model-v1-valid.json"),
+                  encoding="utf-8") as fh:
+            detail = json.load(fh)
+        detail["view"] = "package_pkg"
+        detail["scope"] = {"kind": "package", "id": "package:pkg"}
+        with open(detail_model, "w", encoding="utf-8") as fh:
+            json.dump(detail, fh)
+        subprocess.run([sys.executable,
+                        os.path.join(REPO, "shared", "scripts", "build_diagrams.py"),
+                        "--render-only", detail_model, "--out", diagrams],
+                       capture_output=True, text=True)
+        onboarding_doc = os.path.join(tmp, "onboarding-figure-doc.json")
+        proc = subprocess.run(
+            [sys.executable, BUILDER, "--index", index,
+             "--claims", os.path.join(tmp, "figure-claims.jsonl"),
+             "--fragments", os.path.join(tmp, "figure-fragments.jsonl"),
+             "--preset", "onboarding", "--diagrams", diagrams,
+             "--out", onboarding_doc], capture_output=True, text=True)
+        check("onboarding builds with detail views present", proc.returncode == 0,
+              proc.stdout + proc.stderr)
+        with open(onboarding_doc, encoding="utf-8") as fh:
+            shown = {b["src"] for p in json.load(fh)["pages"] for b in p["blocks"]
+                     if b["type"] == "image"}
+        check("a preset without a class page still shows the detail views",
+              shown == {"_diagrams/full-repository.svg", "_diagrams/package-pkg.svg"},
+              "%r" % sorted(shown))
+
         figure_docs = os.path.join(tmp, "figure-docs")
         code, output = run_renderer(with_figure, figure_docs, "--diagrams", diagrams)
         check("rendering copies the diagrams in beside the pages",

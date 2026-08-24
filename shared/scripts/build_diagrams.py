@@ -528,6 +528,10 @@ def manifest_of(model):
         "view": model["view"],
         "stem": view_stem(model["view"]),
         "scope": model.get("scope") or {"kind": "repository"},
+        # Nodes this view is answerable for. `nodes` below includes the neighbours drawn
+        # to show the boundary, and counting those as the package's own overstates it.
+        "scope_nodes": sorted(n["id"] for n in model["nodes"]
+                              if not n.get("external")),
         "source_graph_hash": model["source_graph_hash"],
         "view_spec_hash": model["view_spec_hash"],
         "layout_engine": model["layout_engine"],

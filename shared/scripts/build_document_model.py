@@ -121,7 +121,7 @@ def diagram_blocks(diagrams, page_id):
     return blocks
 
 
-def find_diagrams(directory):
+def find_diagrams(directory, page_ids=()):
     """Which rendered diagrams exist, mapped to the pages that should show them."""
     if not directory or not os.path.isdir(directory):
         return {}
@@ -145,20 +145,31 @@ def find_diagrams(directory):
             continue
         scope = entry.get("scope") or {"kind": "repository"}
         layers = " and ".join(entry.get("layers", ())) or "no"
-        count = len(entry.get("nodes", ()))
+        # The view's own classes, not the neighbours it draws to show its boundary.
+        own = entry.get("scope_nodes")
+        count = len(own if own is not None else entry.get("nodes", ()))
         if scope.get("kind") == "repository":
             overview.append((svg, "Class diagram of the whole repository: %d class(es) "
                                   "grouped by package and module, showing %s "
                                   "relationships" % (count, layers)))
         else:
             name = str(scope.get("id", "")).split(":", 1)[-1]
-            details.append((svg, "Class diagram of %s: %d class(es), showing %s "
-                                 "relationships" % (name or "one scope", count, layers)))
+            neighbours = len(entry.get("nodes", ())) - count
+            details.append((svg, "Class diagram of %s: %d class(es)%s, showing %s "
+                                 "relationships"
+                            % (name or "one scope", count,
+                               " plus %d neighbour(s) outside it" % neighbours
+                               if neighbours > 0 else "", layers)))
     if not overview and not details:
         return {}
-    # The overview belongs on both pages that talk about structure. The detail views are
-    # what the overview had to leave out, so they go where the classes are discussed.
-    return {"architecture": overview, "class-views": overview + details}
+    # The overview belongs on every page that talks about structure. The detail views go
+    # wherever classes are discussed, and land on the architecture page when the preset
+    # has no page for classes -- a rendered view that no page references is a file the
+    # reader has no way to reach.
+    home = "class-views" if "class-views" in page_ids else "architecture"
+    placed = {"architecture": list(overview), "class-views": list(overview)}
+    placed[home] = placed.get(home, []) + details
+    return placed
 
 
 def overview_page(index, fragments, claims_by_id):
@@ -550,7 +561,8 @@ def main():
         sys.stderr.write("      revise or drop them, then rerun verify_doc.py\n")
         return 2
 
-    diagrams = find_diagrams(args.diagrams)
+    diagrams = find_diagrams(args.diagrams,
+                             [page_id for page_id, _, _ in PRESETS[args.preset]])
     if args.diagrams and not diagrams:
         # Asked for, not found: say so rather than producing a document that quietly
         # has no picture in it.
