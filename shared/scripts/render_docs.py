@@ -181,6 +181,10 @@ def main():
                         help="output markup; only rst is implemented")
     parser.add_argument("--check", action="store_true",
                         help="validate the rendered markup after writing it")
+    parser.add_argument("--replace-index", action="store_true",
+                        help="overwrite an existing index.rst; without this an index "
+                             "already in the output directory is left as the author "
+                             "wrote it")
     parser.add_argument("--diagrams", metavar="DIR",
                         help="copy this directory in as _diagrams/ and resolve figures "
                              "against it")
@@ -246,11 +250,30 @@ def main():
             if os.path.isdir(destination):
                 shutil.rmtree(destination)
             shutil.copytree(args.diagrams, destination)
+    # An index.rst that is already there is the author's table of contents, listing
+    # pages this run knows nothing about. Replacing it silently is how a documentation
+    # run deletes the navigation of the tree it was pointed at.
+    kept_index = False
+    if "index.rst" in rendered and os.path.isfile(os.path.join(args.out, "index.rst")) \
+            and not args.replace_index:
+        del rendered["index.rst"]
+        kept_index = True
+
     for name, text in sorted(rendered.items()):
-        with open(os.path.join(args.out, name), "w", encoding="utf-8") as fh:
+        path = os.path.join(args.out, name)
+        parent = os.path.dirname(path)
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent)
+        with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
 
     print("wrote %d page(s) to %s" % (len(rendered), args.out))
+    if kept_index:
+        print("kept the existing index.rst; add these pages to its toctree yourself, "
+              "or rerun with --replace-index")
+    for page in doc.get("authored_pages", ()):
+        print("not generated: %s.rst (%s) -- no evidence in the graph for this page"
+              % (page["id"], page["title"]))
 
     if not args.check:
         return 0

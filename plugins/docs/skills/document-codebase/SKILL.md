@@ -379,6 +379,17 @@ figure that is not there; the renderer refuses rather than emitting a broken ima
 Presets are described in [`references/presets.md`](references/presets.md). `onboarding` is the default;
 `architecture` is denser and assumes the reader already knows the domain.
 
+**`handbook` is for a repository that already has a documentation tree** in the usual
+`getting_started/ architecture/ usage/ development/ appendix/` shape. It fills the four pages a dependency
+graph can answer for and writes none of the others: an installation guide or a changelog is not derivable from
+code, and a generated stub would replace what someone wrote. The renderer lists each page it did not generate,
+and keeps an existing `index.rst`.
+
+For those authored pages the work is an **update, not a generation**: read what is there, check it against
+`claims.verified.jsonl`, and change only what the evidence contradicts or completes — same citations, same
+status boundary. Anything you cannot check against the graph, leave as the author wrote it, and say in step 9
+which pages you touched and which you did not.
+
 `doc.json` contains no markup. **Do not write RST or Sphinx directives yourself** — the renderer owns
 headings, tables, references, escaping and the toctree, and hand-written directives are how a build starts
 failing on markup nobody remembers adding.

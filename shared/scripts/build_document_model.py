@@ -44,25 +44,62 @@ LIMITATION_STATUSES = ("candidate", "unsupported", "needs_context")
 
 # A preset fixes the skeleton: which pages exist, in what order, and which of them may
 # not be dropped. It says nothing about what is true -- that comes from the claims.
+#
+# Each row is (page_id, title, mandatory, builder). `builder` names the function that
+# fills the page from the graph, or is None for a page this pipeline cannot fill.
+#
+# A page id is also its path under the output directory, so an id may contain "/" and
+# the layout of an existing documentation tree can be matched exactly.
 PRESETS = {
     "onboarding": [
-        ("overview", "Overview", True),
-        ("entry-points", "Entry points", True),
-        ("architecture", "Architecture", True),
-        ("flows", "Important flows", True),
-        ("modules", "Module reference", True),
-        ("navigation", "Finding your way around", True),
-        ("limitations", "Coverage and limitations", True),
+        ("overview", "Overview", True, "overview"),
+        ("entry-points", "Entry points", True, "entry-points"),
+        ("architecture", "Architecture", True, "architecture"),
+        ("flows", "Important flows", True, "flows"),
+        ("modules", "Module reference", True, "modules"),
+        ("navigation", "Finding your way around", True, "navigation"),
+        ("limitations", "Coverage and limitations", True, "limitations"),
     ],
     # No module reference here by design: this preset is for a reader who already knows
     # the domain and wants the shape, not the inventory.
     "architecture": [
-        ("overview", "Architecture overview", True),
-        ("architecture", "Components and boundaries", True),
-        ("dependencies", "Dependency graph", True),
-        ("class-views", "Classes and inheritance", True),
-        ("flows", "Cross-component flows", True),
-        ("limitations", "Coverage and limitations", True),
+        ("overview", "Architecture overview", True, "overview"),
+        ("architecture", "Components and boundaries", True, "architecture"),
+        ("dependencies", "Dependency graph", True, "dependencies"),
+        ("class-views", "Classes and inheritance", True, "class-views"),
+        ("flows", "Cross-component flows", True, "flows"),
+        ("limitations", "Coverage and limitations", True, "limitations"),
+    ],
+    # A handbook laid out the way a delivered manual usually is. Most of it is not
+    # derivable from a dependency graph -- an installation guide, a changelog, a
+    # glossary are things a person knows -- so this pipeline fills the four pages that
+    # are, lists the rest, and writes none of them. Those stay the author's, and the
+    # skill updates them against verified claims one at a time.
+    "handbook": [
+        ("getting_started/introduction", "Introduction", True, None),
+        ("getting_started/installation_integrators", "Installation", True, None),
+        ("getting_started/quick_start_integration", "Quick start", True, None),
+        ("architecture/key_modules", "Key modules", True, "architecture"),
+        ("architecture/class_diagrams", "Class diagrams", True, "class-views"),
+        ("architecture/data_flow", "Data flow", True, "flows"),
+        ("usage/invoking_main_class", "Invoking the main class", True, None),
+        ("usage/configuration_parameters", "Configuration parameters", True, None),
+        ("usage/operational_modes_details", "Operational modes", True, None),
+        ("usage/handling_output_results", "Handling output", True, None),
+        ("usage/error_handling_exceptions", "Errors and exceptions", True, None),
+        ("development/local_setup_for_dev", "Local setup", True, None),
+        ("development/testing", "Testing", True, None),
+        ("development/packaging_release", "Packaging and release", True, None),
+        ("development/contribution_guide", "Contributing", True, None),
+        ("development/module_reference", "Module reference", True, "modules"),
+        ("development/ci_cd_workflow", "CI and CD", True, None),
+        ("changelog", "Changelog", False, None),
+        ("appendix/glossary", "Glossary", False, None),
+        ("appendix/faq", "FAQ", False, None),
+        ("appendix/troubleshooting", "Troubleshooting", False, None),
+        ("appendix/references", "References", False, None),
+        ("appendix/compliance", "Compliance", False, None),
+        ("appendix/output_structure", "Output structure", False, None),
     ],
 }
 
@@ -166,8 +203,16 @@ def find_diagrams(directory, page_ids=()):
     # wherever classes are discussed, and land on the architecture page when the preset
     # has no page for classes -- a rendered view that no page references is a file the
     # reader has no way to reach.
-    home = "class-views" if "class-views" in page_ids else "architecture"
-    placed = {"architecture": list(overview), "class-views": list(overview)}
+    for candidate in ("class-views", "architecture/class_diagrams", "architecture"):
+        if candidate in page_ids:
+            home = candidate
+            break
+    else:
+        home = "architecture"
+    on_structure = [p for p in ("architecture", "class-views",
+                                "architecture/key_modules", "architecture/class_diagrams")
+                    if p in page_ids] or ["architecture", "class-views"]
+    placed = {page: list(overview) for page in on_structure}
     placed[home] = placed.get(home, []) + details
     return placed
 
@@ -454,9 +499,16 @@ BUILDERS = {
 
 def build(index, fragments, claims, preset, diagrams=None):
     by_id = {c.get("id"): c for c in claims}
-    pages = []
-    for order, (page_id, title, mandatory) in enumerate(PRESETS[preset], 1):
-        blocks = BUILDERS[page_id](index, fragments, claims, by_id)
+    pages, authored = [], []
+    for order, (page_id, title, mandatory, builder) in enumerate(PRESETS[preset], 1):
+        if builder is None:
+            # A page this pipeline has no evidence for. It is named, so the skill knows
+            # to update it and the report can say it was not generated, and it is not
+            # written -- a stub would replace whatever the author already has there.
+            authored.append({"id": page_id, "title": title, "order": order,
+                             "mandatory": mandatory})
+            continue
+        blocks = BUILDERS[builder](index, fragments, claims, by_id)
         blocks.extend(diagram_blocks(diagrams, page_id))
         pages.append({"id": page_id, "title": title, "order": order,
                       "mandatory": mandatory, "blocks": blocks})
@@ -474,6 +526,9 @@ def build(index, fragments, claims, preset, diagrams=None):
         "source_revision": (index.get("source") or {}).get("revision"),
         "source_dirty": (index.get("source") or {}).get("dirty"),
         "pages": pages,
+        # Named, not written. The renderer leaves them alone and the skill updates them
+        # from verified claims; a generated stub would overwrite the author's work.
+        "authored_pages": authored,
         "claims": sorted(claims, key=lambda c: c.get("id", "")),
         "coverage": index.get("coverage", {}),
     }
@@ -511,7 +566,12 @@ def validate(doc):
                                     "appear in prose"
                                     % (block["id"], claim_id, claim.get("status")))
 
-    for page_id, _, mandatory in PRESETS[doc["preset"]]:
+    authored_ids = {p["id"] for p in doc.get("authored_pages", ())}
+    for page_id, _, mandatory, builder in PRESETS[doc["preset"]]:
+        if builder is None:
+            if mandatory and page_id not in authored_ids:
+                problems.append("preset %r requires page %r" % (doc["preset"], page_id))
+            continue
         if mandatory and page_id not in page_ids:
             problems.append("preset %r requires page %r" % (doc["preset"], page_id))
     return problems
@@ -562,7 +622,7 @@ def main():
         return 2
 
     diagrams = find_diagrams(args.diagrams,
-                             [page_id for page_id, _, _ in PRESETS[args.preset]])
+                             [page_id for page_id, _, _, _ in PRESETS[args.preset]])
     if args.diagrams and not diagrams:
         # Asked for, not found: say so rather than producing a document that quietly
         # has no picture in it.

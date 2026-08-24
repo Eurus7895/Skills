@@ -356,6 +356,59 @@ def main():
               shown == {"_diagrams/full-repository.svg", "_diagrams/package-pkg.svg"},
               "%r" % sorted(shown))
 
+        # -- a preset that matches an existing documentation tree -------------------
+        # Most of a delivered manual is not derivable from a dependency graph. The
+        # handbook preset names those pages and writes none of them: a generated stub
+        # would replace whatever the author already has there.
+        hand_doc = os.path.join(tmp, "handbook-doc.json")
+        proc = subprocess.run(
+            [sys.executable, BUILDER, "--index", index,
+             "--claims", os.path.join(tmp, "figure-claims.jsonl"),
+             "--fragments", os.path.join(tmp, "figure-fragments.jsonl"),
+             "--preset", "handbook", "--out", hand_doc], capture_output=True, text=True)
+        check("the handbook preset builds", proc.returncode == 0,
+              proc.stdout + proc.stderr)
+        with open(hand_doc, encoding="utf-8") as fh:
+            handbook = json.load(fh)
+        generated = {p["id"] for p in handbook["pages"]}
+        authored = {p["id"] for p in handbook["authored_pages"]}
+        check("it fills only the pages the graph can answer for",
+              generated == {"architecture/key_modules", "architecture/class_diagrams",
+                            "architecture/data_flow", "development/module_reference"},
+              "%r" % sorted(generated))
+        check("and names the rest rather than inventing them",
+              "getting_started/installation_integrators" in authored
+              and "appendix/faq" in authored and not (generated & authored),
+              "%r" % sorted(authored))
+
+        # The author's own pages and table of contents have to survive the render.
+        tree = os.path.join(tmp, "handbook-docs")
+        os.makedirs(os.path.join(tree, "getting_started"))
+        keeper = os.path.join(tree, "getting_started", "introduction.rst")
+        with open(keeper, "w", encoding="utf-8") as fh:
+            fh.write("Introduction\n============\n\nWritten by a person.\n")
+        with open(os.path.join(tree, "index.rst"), "w", encoding="utf-8") as fh:
+            fh.write("Docs\n====\n\n.. toctree::\n\n   getting_started/introduction\n")
+        code, output = run_renderer(hand_doc, tree)
+        check("rendering a nested preset succeeds", code == 0, output)
+        check("pages land at the paths the preset names",
+              os.path.isfile(os.path.join(tree, "architecture", "class_diagrams.rst")),
+              "%r" % sorted(os.listdir(tree)))
+        with open(keeper, encoding="utf-8") as fh:
+            check("an authored page is left exactly as it was",
+                  "Written by a person." in fh.read())
+        with open(os.path.join(tree, "index.rst"), encoding="utf-8") as fh:
+            check("and the author's toctree is not replaced",
+                  "Written by" not in fh.read() and "getting_started/introduction"
+                  in open(os.path.join(tree, "index.rst"), encoding="utf-8").read())
+        check("the run says which pages it did not generate",
+              "not generated: appendix/faq.rst" in output, output)
+
+        code, output = run_renderer(hand_doc, tree, "--replace-index")
+        with open(os.path.join(tree, "index.rst"), encoding="utf-8") as fh:
+            check("--replace-index is how the index gets rewritten, and only then",
+                  "architecture/class_diagrams" in fh.read(), output)
+
         figure_docs = os.path.join(tmp, "figure-docs")
         code, output = run_renderer(with_figure, figure_docs, "--diagrams", diagrams)
         check("rendering copies the diagrams in beside the pages",
