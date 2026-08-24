@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "source_graph_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+  "view_spec_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+  "view": "full_repository",
+  "detail": "public",
+  "layers": ["inheritance", "composition"],
+  "layout_engine": {"name": "graphviz", "version": "dot - graphviz version 9.0.0"},
+  "bounds": {"width": 520.0, "height": 340.0},
+  "containers": [
+    {"id": "package:pkg", "label": "pkg", "kind": "package", "x": 10.0, "y": 10.0, "width": 500.0, "height": 320.0},
+    {"id": "module:pkg/base.py", "label": "base.py", "kind": "module", "x": 24.0, "y": 40.0, "width": 220.0, "height": 120.0},
+    {"id": "module:pkg/models.py", "label": "models.py", "kind": "module", "x": 270.0, "y": 40.0, "width": 224.0, "height": 260.0}
+  ],
+  "nodes": [
+    {"id": "class:pkg/base.py:Record", "label": ["Record"], "stereotype": "class", "parent": "module:pkg/base.py", "cite": "pkg/base.py:1", "x": 40.0, "y": 70.0, "width": 180.0, "height": 44.0},
+    {"id": "class:pkg/models.py:Order", "label": ["Order", "engine: Engine", "total()"], "stereotype": "class", "parent": "module:pkg/models.py", "cite": "pkg/models.py:4", "x": 290.0, "y": 70.0, "width": 190.0, "height": 60.0},
+    {"id": "class:pkg/models.py:Failure", "label": ["<<exception>>", "Failure"], "stereotype": "exception", "parent": "module:pkg/models.py", "cite": "pkg/models.py:12", "x": 290.0, "y": 200.0, "width": 190.0, "height": 44.0}
+  ],
+  "edges": [
+    {"id": "edge:inheritance:class:pkg/models.py:Order:class:pkg/base.py:Record", "layer": "inheritance", "source": "class:pkg/models.py:Order", "target": "class:pkg/base.py:Record", "label": "", "points": [[290.0, 100.0], [255.0, 100.0], [220.0, 92.0]]},
+    {"id": "edge:composition:class:pkg/models.py:Order:class:pkg/base.py:Record", "layer": "composition", "source": "class:pkg/models.py:Order", "target": "class:pkg/base.py:Record", "label": "engine", "points": [[290.0, 120.0], [255.0, 130.0], [220.0, 110.0]]}
+  ]
+}

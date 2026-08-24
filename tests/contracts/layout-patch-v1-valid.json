@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "applies_to": {
+    "source_graph_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+    "view_spec_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+    "layout_engine": "dot - graphviz version 9.0.0",
+    "visual_policy": "1"
+  },
+  "findings_addressed": ["the Failure box sits far below Order, leaving a gap inside models.py"],
+  "operations": [
+    {"op": "move", "target": "class:pkg/models.py:Failure", "dy": -60},
+    {"op": "resize", "target": "module:pkg/models.py", "height": 200},
+    {"op": "route", "target": "edge:composition:class:pkg/models.py:Order:class:pkg/base.py:Record", "points": [[290.0, 120.0], [250.0, 120.0], [220.0, 110.0]]},
+    {"op": "wrap", "target": "class:pkg/models.py:Order", "width": 12}
+  ]
+}

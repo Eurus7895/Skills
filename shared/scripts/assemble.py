@@ -16,6 +16,7 @@ Schema syntax, comma-separated:
     name:num          numeric required
     name:int          integer required
     name:enum(a|b|c)  must be one of the listed values
+    name:list         non-empty JSON array of strings; written to CSV space-separated
     name:...?         trailing ? marks the field nullable -- empty is valid,
                       and the field is exempt from the mostly-empty warning
 
@@ -82,7 +83,7 @@ def parse_schema(text):
             raise ValueError("cannot parse schema field %r" % raw.strip())
         name, kind, values, nullable = match.groups()
         kind = kind or "any"
-        if kind not in ("any", "str", "num", "int", "enum"):
+        if kind not in ("any", "str", "num", "int", "enum", "list"):
             raise ValueError("unknown type %r for field %r" % (kind, name))
         allowed = None
         if kind == "enum":
@@ -140,6 +141,8 @@ def load_rows(path):
 
 
 def is_empty(value):
+    if isinstance(value, (list, tuple)):
+        return not value
     return value is None or (isinstance(value, str) and not value.strip())
 
 
@@ -169,6 +172,17 @@ def check_value(value, field):
     elif kind == "str":
         if not isinstance(value, str):
             return "expected str, got %s" % type(value).__name__
+    elif kind == "list":
+        # A row that references other rows -- claim ids, citations -- cannot be
+        # expressed as a scalar, and a comma-joined string cannot be checked for
+        # whether its parts are well formed. The elements stay strings, though: a
+        # list of objects is a nested shape, and nesting is what this schema exists
+        # to keep out.
+        if not isinstance(value, list):
+            return "expected list, got %s" % type(value).__name__
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                return "expected a list of non-empty strings, got %r" % (item,)
     return None
 
 
@@ -246,7 +260,10 @@ def write_csv(rows, names, out_path):
         writer = csv.DictWriter(fh, fieldnames=names, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
-            writer.writerow({n: row.get(n, "") for n in names})
+            # A list cell written straight out becomes a Python repr, quotes and all,
+            # which no spreadsheet or downstream reader can split back apart.
+            writer.writerow({n: " ".join(row[n]) if isinstance(row.get(n), list)
+                             else row.get(n, "") for n in names})
 
 
 def main():

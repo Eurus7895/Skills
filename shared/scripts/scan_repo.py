@@ -24,6 +24,9 @@ can find a class name but not its bases, and a half-filled record reads like a c
 one. A base class links to the file defining it only when the import resolves *and* that
 file defines a class by that name; otherwise it stays unresolved.
 
+The JSON carries `schema_version`, the source snapshot it was taken from, and a sha256
+per file, so a later step can prove a claim still points at the code that was scanned.
+
 Emits JSON on --out and a short ranked digest on --summary. Read the digest; do not
 read the JSON into context, query it with code.
 
@@ -34,6 +37,7 @@ Symlinks pointing outside --root are skipped, not followed. No network.
 import argparse
 import ast
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -50,6 +54,19 @@ LANG_BY_EXT = {
     ".java": "java",
     ".rb": "ruby",
     ".c": "c", ".h": "c", ".cc": "cpp", ".cpp": "cpp", ".hpp": "cpp",
+}
+
+SCHEMA_VERSION = 2
+
+# The compared value matters: `if __name__ == "pkg.optional":` is a real pattern and is
+# not a way into the program. Matching the whole comparison keeps it out.
+MAIN_GUARD_RE = re.compile(r"""^if\s+__name__\s*==\s*(['"])__main__\1""", re.MULTILINE)
+
+# Names that conventionally mean "this is how the program starts". Only consulted for a
+# file nothing imports, so a `main.py` in the middle of a package does not qualify.
+ENTRY_FILENAMES = {
+    "__main__.py", "main.py", "cli.py", "app.py", "manage.py", "wsgi.py", "asgi.py",
+    "main.go", "main.rs", "Main.java", "index.js", "index.ts", "server.js", "server.ts",
 }
 
 # Extensions that are not code, so their absence from LANG_BY_EXT is not a coverage gap
@@ -124,6 +141,108 @@ def list_files(root):
     return sorted(found)
 
 
+def file_hash(full):
+    """sha256 of the bytes on disk, or None when they cannot be read."""
+    digest_ = hashlib.sha256()
+    try:
+        with open(full, "rb") as fh:
+            for chunk in iter(lambda: fh.read(65536), b""):
+                digest_.update(chunk)
+    except OSError:
+        return None
+    return "sha256:" + digest_.hexdigest()
+
+
+def git_snapshot(root):
+    """Which revision this scan describes, and whether the tree was clean.
+
+    `dirty` is true when the answer is unknown as well as when the tree has changes --
+    a revision that might not match the files is worth no more than no revision at all.
+    """
+    snapshot = {"root": os.path.abspath(root), "revision": None, "dirty": True}
+
+    def git(*args):
+        try:
+            out = subprocess.run(["git", "-C", root] + list(args),
+                                 capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return out.stdout if out.returncode == 0 else None
+
+    revision = git("rev-parse", "HEAD")
+    if revision is None:
+        return snapshot
+    snapshot["revision"] = revision.strip()
+    status = git("status", "--porcelain")
+    if status is not None:
+        snapshot["dirty"] = bool(status.strip())
+    return snapshot
+
+
+def entry_points_of(records, fan_in):
+    """Files nothing in the repository imports that also look like a way in.
+
+    Fan-in zero alone is not enough -- it is equally the signature of dead code. A
+    `__main__` guard or a conventional launcher name is the part that says "start
+    here", so each entry carries which of the two it was found by.
+    """
+    found = []
+    for record in records:
+        path = record["path"]
+        if fan_in.get(path) or record["is_test"]:
+            continue
+        if record.get("main_guard"):
+            found.append({"path": path, "reason": "main_guard"})
+        elif os.path.basename(path) in ENTRY_FILENAMES:
+            found.append({"path": path, "reason": "conventional_name"})
+    return sorted(found, key=lambda e: e["path"])
+
+
+def diagnostics_of(records, unresolved, skipped_symlinks, unscanned):
+    """What the scan could not do, as rows rather than as prose in a digest.
+
+    The digest already says these things to a reader. These rows say them to a script,
+    so a coverage section can be generated rather than transcribed by hand.
+    """
+    found = []
+    for record in records:
+        if record["lang"] == "python" and not record["exact"]:
+            found.append({"code": "D004", "severity": "warning", "path": record["path"],
+                          "message": "Python file did not parse; imports are regex-approximated"})
+        elif not record["exact"]:
+            found.append({"code": "D005", "severity": "info", "path": record["path"],
+                          "message": "no parser for %s; imports are regex-approximated"
+                                     % record["lang"]})
+    if unresolved:
+        found.append({"code": "D001", "severity": "info", "path": None,
+                      "message": "%d import(s) named nothing in this repository -- "
+                                 "third-party or standard library" % unresolved})
+    for ext, count in sorted(unscanned.items()):
+        found.append({"code": "D002", "severity": "warning", "path": None,
+                      "message": "%d file(s) with extension %s were not examined" % (count, ext)})
+    for path in skipped_symlinks:
+        found.append({"code": "D003", "severity": "warning", "path": path,
+                      "message": "symlink resolves outside the root; skipped, not followed"})
+    return found
+
+
+def coverage_of(records, detail, unresolved, skipped_symlinks, unscanned):
+    """What was covered, as numbers a report can cite without recomputing them."""
+    return {
+        "files_scanned": len(records),
+        "files_exact": sum(1 for r in records if r["exact"]),
+        "files_approximate": sum(1 for r in records if not r["exact"]),
+        "files_unscanned": sum(unscanned.values()),
+        "files_hashed": sum(1 for r in records if r["source_hash"]),
+        "languages": dict(Counter(r["lang"] for r in records)),
+        "unresolved_imports": unresolved,
+        "skipped_symlinks": len(skipped_symlinks),
+        "unscanned_extensions": dict(unscanned),
+        "detail_requested": detail,
+        "files_with_detail": sum(1 for r in records if "classes" in r),
+    }
+
+
 def within(root_real, candidate):
     """True when candidate resolves to somewhere at or beneath root_real."""
     target = os.path.realpath(candidate)
@@ -159,16 +278,22 @@ def scan_python(text):
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                imports.append({"name": alias.name, "line": node.lineno, "level": 0})
+                # `import a.b.c` binds `a`; `import a.b as x` binds `x`. The bound name
+                # is what a usage checker reports on, and it is not the module name.
+                bound = alias.asname or alias.name.split(".")[0]
+                imports.append({"name": alias.name, "line": node.lineno, "level": 0,
+                                "bindings": [bound]})
         elif isinstance(node, ast.ImportFrom):
             level = node.level or 0
             if node.module:
-                imports.append({"name": node.module, "line": node.lineno, "level": level})
+                imports.append({"name": node.module, "line": node.lineno, "level": level,
+                                "bindings": [a.asname or a.name for a in node.names]})
             else:
                 # `from . import helper` -- the module lives in the alias, not in
                 # node.module. Recording only the dots would drop the edge entirely.
                 for alias in node.names:
-                    imports.append({"name": alias.name, "line": node.lineno, "level": level})
+                    imports.append({"name": alias.name, "line": node.lineno, "level": level,
+                                    "bindings": [alias.asname or alias.name]})
     return symbols, imports, tree
 
 
@@ -246,17 +371,55 @@ def self_targets(node):
     return []
 
 
+def annotation_names(node):
+    """Every dotted name written inside a type annotation, outermost first.
+
+    `Order` gives ['Order']; `Optional[Order]` gives ['Optional', 'Order']; `dict[str,
+    Order]` gives ['dict', 'str', 'Order']. The container is kept alongside what it
+    contains because neither can be assumed to be the interesting one -- a later pass
+    keeps whichever resolves to a class in this repository and discards the rest.
+
+    A string annotation is re-parsed, so `x: "Order"` under `from __future__ import
+    annotations` is not silently invisible.
+    """
+    found = []
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        try:
+            node = ast.parse(node.value, mode="eval").body
+        except (SyntaxError, ValueError):
+            return found
+
+    if isinstance(node, (ast.Name, ast.Attribute)):
+        name = dotted(node)
+        if name:
+            found.append(name)
+    elif isinstance(node, ast.Subscript):
+        found.extend(annotation_names(node.value))
+        found.extend(annotation_names(node.slice))
+    elif isinstance(node, (ast.Tuple, ast.List)):
+        for element in node.elts:
+            found.extend(annotation_names(element))
+    elif isinstance(node, ast.BinOp):
+        # `Order | None`, the 3.10 union spelling.
+        found.extend(annotation_names(node.left))
+        found.extend(annotation_names(node.right))
+    return found
+
+
 def self_attributes(func):
-    """`self.x = ...` inside one method, in source order."""
+    """`self.x = ...` inside one method, in source order, with any written type."""
     found = []
     for node in ast.walk(func):
-        targets = []
+        targets, annotation = [], None
         if isinstance(node, ast.Assign):
             targets = node.targets
         elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
             targets = [node.target]
+            annotation = getattr(node, "annotation", None)
+        types = annotation_names(annotation) if annotation is not None else []
         for target in targets:
-            found.extend(self_targets(target))
+            for attr in self_targets(target):
+                found.append(dict(attr, type_names=types) if types else attr)
     return found
 
 
@@ -281,16 +444,21 @@ def detail_python(tree):
             methods, attributes, seen_attrs = [], [], set()
 
             for stmt in node.body:
-                targets = []
+                targets, annotation = [], None
                 if isinstance(stmt, ast.Assign):
                     targets = stmt.targets
                 elif isinstance(stmt, ast.AnnAssign):
                     targets = [stmt.target]
+                    annotation = stmt.annotation
+                types = annotation_names(annotation) if annotation is not None else []
                 for target in targets:
                     if isinstance(target, ast.Name) and target.id not in seen_attrs:
                         seen_attrs.add(target.id)
-                        attributes.append({"name": target.id, "line": target.lineno,
-                                           "from": "class-body"})
+                        record = {"name": target.id, "line": target.lineno,
+                                  "from": "class-body"}
+                        if types:
+                            record["type_names"] = types
+                        attributes.append(record)
 
             for stmt in node.body:
                 if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -407,12 +575,17 @@ def module_key(path):
 
 def build_indexes(records):
     """Four lookups. Ambiguous keys are dropped, so they can never make an edge."""
-    by_module, suffix_hits, stem_hits, path_hits = {}, defaultdict(set), defaultdict(set), defaultdict(set)
+    module_hits, suffix_hits = defaultdict(set), defaultdict(set)
+    stem_hits, path_hits = defaultdict(set), defaultdict(set)
 
     for record in records:
         path = record["path"]
         key = module_key(path)
-        by_module[key] = path
+        # Accumulated, not assigned. `foo.py` and `foo.ts` both key on `foo`, and
+        # assigning would hand every `import foo` to whichever was scanned last -- a
+        # confident edge into an arbitrary language. Ambiguity drops the key here for
+        # the same reason it does in the three indexes below.
+        module_hits[key].add(path)
 
         parts = key.split(".")
         for i in range(len(parts)):
@@ -425,6 +598,7 @@ def build_indexes(records):
         path_hits[os.path.splitext(path)[0]].add(path)
         path_hits[path].add(path)
 
+    by_module = {k: next(iter(v)) for k, v in module_hits.items() if len(v) == 1}
     by_suffix = {k: next(iter(v)) for k, v in suffix_hits.items() if len(v) == 1}
     by_stem = {k: next(iter(v)) for k, v in stem_hits.items() if len(v) == 1}
     by_path = {k: next(iter(v)) for k, v in path_hits.items() if len(v) == 1}
@@ -530,6 +704,49 @@ def wanted(path, patterns):
     return not patterns or any(fnmatch.fnmatch(path, p) for p in patterns)
 
 
+def resolve_attribute_types(records, aliases_by_path, by_module, by_suffix, by_stem,
+                            by_path):
+    """Point an attribute's written type at the file defining that class, or drop it.
+
+    Same two steps as `resolve_bases`, and the same refusal to guess: a type name that
+    does not resolve to a file defining a class by that name leaves no link at all. Most
+    annotations are `str`, `int`, `Optional` and other names this repository does not
+    define, and every one of those must resolve to nothing rather than to something
+    plausible.
+
+    Only attributes are resolved. A parameter type says a function is passed something;
+    an attribute type says the class holds one, which is what composition means.
+    """
+    classes_by_path = {r["path"]: {c["name"] for c in r.get("classes", [])}
+                       for r in records if "classes" in r}
+
+    for record in records:
+        path = record["path"]
+        local = classes_by_path.get(path, set())
+        aliases = aliases_by_path.get(path, {})
+
+        for cls in record.get("classes", []):
+            for attribute in cls.get("attributes", []):
+                resolved = []
+                for name in attribute.get("type_names", ()):
+                    head, leaf = name.split(".")[0], name.split(".")[-1]
+                    if name in local:
+                        resolved.append({"name": name, "resolved": path})
+                        continue
+                    entry = binding_before(aliases.get(head, ()), cls["line"])
+                    if entry is None:
+                        continue
+                    target = resolve_one(entry, path, by_module, by_suffix, by_stem,
+                                         by_path)
+                    if target is None:
+                        continue
+                    wanted = entry["symbol"] if head == name and entry["symbol"] else leaf
+                    if wanted in classes_by_path.get(target, set()):
+                        resolved.append({"name": wanted, "resolved": target})
+                if resolved:
+                    attribute["types"] = resolved
+
+
 def resolve_bases(records, aliases_by_path, by_module, by_suffix, by_stem, by_path):
     """Point each base class at the file that defines it, or leave it unresolved.
 
@@ -623,6 +840,11 @@ def build(root, detail=False, detail_match=None):
             "exact": exact,
             "parser": "ast" if exact else "regex",
             "is_test": is_test_path(rel_path),
+            # Hashing the bytes on disk, not the decoded text: a later step compares
+            # this against the file it reads, and errors="replace" above would make a
+            # non-UTF-8 file hash to something no reader can reproduce.
+            "source_hash": file_hash(full),
+            "main_guard": bool(lang == "python" and MAIN_GUARD_RE.search(text)),
             "symbols": symbols,
             "imports": sorted(unique, key=lambda e: (e["line"], e["name"])),
         }
@@ -638,29 +860,43 @@ def build(root, detail=False, detail_match=None):
     by_module, by_suffix, by_stem, by_path = build_indexes(records)
     if detail:
         resolve_bases(records, aliases_by_path, by_module, by_suffix, by_stem, by_path)
+        resolve_attribute_types(records, aliases_by_path, by_module, by_suffix, by_stem,
+                                by_path)
 
     edges, unresolved_total = [], 0
     for record in records:
-        seen_targets = set()
+        # One edge per (from, to), keeping the first import line -- but every binding
+        # that produced it, because a usage checker reports on bindings and would
+        # otherwise have nothing in the edge to attach itself to.
+        by_target, order = {}, []
         for entry in record["imports"]:
             target = resolve_one(entry, record["path"], by_module, by_suffix, by_stem, by_path)
             if target is None:
                 unresolved_total += 1
                 continue
-            if target == record["path"] or target in seen_targets:
+            if target == record["path"]:
                 continue
-            seen_targets.add(target)
-            edges.append({
-                "from": record["path"],
-                "to": target,
-                "line": entry["line"],
-                "import": ("." * entry.get("level", 0)) + entry["name"],
-            })
+            if target not in by_target:
+                by_target[target] = {
+                    "edge_id": "import:%s:%d:%s" % (record["path"], entry["line"], target),
+                    "from": record["path"],
+                    "to": target,
+                    "line": entry["line"],
+                    "import": ("." * entry.get("level", 0)) + entry["name"],
+                }
+                order.append(target)
+            for name in entry.get("bindings", ()):
+                bound = by_target[target].setdefault("bindings", [])
+                if name not in bound:
+                    bound.append(name)
+        edges.extend(by_target[target] for target in order)
 
     fan_in = Counter(e["to"] for e in edges)
     fan_out = Counter(e["from"] for e in edges)
 
-    return {
+    index = {
+        "schema_version": SCHEMA_VERSION,
+        "source": git_snapshot(root),
         "root": root_real,
         "edges_are": "imports, not calls -- an edge does not prove an invocation",
         "detail_requested": detail,
@@ -668,6 +904,9 @@ def build(root, detail=False, detail_match=None):
         "edges": edges,
         "fan_in": dict(fan_in),
         "fan_out": dict(fan_out),
+        "entry_points": entry_points_of(records, fan_in),
+        "diagnostics": diagnostics_of(records, unresolved_total, skipped_symlinks, unscanned),
+        "coverage": coverage_of(records, detail, unresolved_total, skipped_symlinks, unscanned),
         "unresolved_imports": unresolved_total,
         "skipped_symlinks": skipped_symlinks,
         "unscanned_extensions": dict(unscanned),
@@ -683,6 +922,19 @@ def build(root, detail=False, detail_match=None):
             "methods": sum(len(c["methods"]) for r in records for c in r.get("classes", ())),
         },
     }
+    # The identity of what was scanned. Everything derived from it -- fragments, claims
+    # -- repeats it, so a row left behind by an earlier run is caught rather than
+    # blended into the current one.
+    #
+    # `source` and `root` are left out on purpose. They hold the absolute path, the
+    # revision and the dirty flag, and none of those change what the code *is*: the same
+    # tree scanned from a second checkout, or after committing an unrelated file, would
+    # otherwise invalidate every fragment written against it. What is in the hash is the
+    # content -- files, edges, coverage -- which is exactly what a claim is about.
+    material = {k: v for k, v in index.items() if k not in ("source", "root")}
+    index["index_hash"] = "sha256:" + hashlib.sha256(
+        json.dumps(material, sort_keys=True).encode("utf-8")).hexdigest()
+    return index
 
 
 def digest(data, top):
@@ -782,6 +1034,9 @@ def main():
         print("")
     print("wrote %s (%d files, %d import-edges)" % (
         args.out, len(data["files"]), len(data["edges"])))
+    # Printed because every fragment and claim written against this scan has to carry
+    # it, and the reader should not have to open the JSON to find it.
+    print("index_hash: %s" % data["index_hash"])
     return 0
 
 

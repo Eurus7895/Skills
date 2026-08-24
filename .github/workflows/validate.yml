@@ -27,6 +27,16 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Graphviz, so the diagram layout is actually exercised
+        run: |
+          # Without `dot`, tools/test_diagrams.py skips every layout assertion and the
+          # primary diagram deliverable ships unverified. The scripts still treat
+          # Graphviz as optional at runtime; this is about the tests having something
+          # to check.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq graphviz
+          dot -V
+
       - name: Every script compiles
         run: python3 -m compileall -q tools shared plugins
 
@@ -42,5 +52,14 @@ jobs:
           # be "none" for a scenario that plainly declares pytest.
           python3 shared/scripts/detect_stack.py fixtures/02-wrong-test
 
-      - name: Environment check reports the right action and consent
-        run: python3 tools/test_check_env.py
+      - name: Every behavioural test
+        run: |
+          # Globbed rather than listed, so a new tools/test_*.py is covered the moment
+          # it lands instead of the day someone remembers to edit this file. Each one is
+          # stdlib-only and exits non-zero on failure.
+          status=0
+          for test in tools/test_*.py; do
+            echo "== $test"
+            python3 "$test" || status=1
+          done
+          exit $status

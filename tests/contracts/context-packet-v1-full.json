@@ -1,0 +1,92 @@
+{
+  "classes": [],
+  "context_manifest": {
+    "hard_limit": 48000,
+    "included": [
+      "app.py",
+      "pkg/store.py (interface only)"
+    ],
+    "omitted": [
+      "pkg/store.py body"
+    ],
+    "over_soft_limit": false,
+    "required_coverage": 1.0,
+    "soft_limit": 32000,
+    "token_estimate": 105,
+    "token_estimate_is_an_estimate": true
+  },
+  "cross_directory_edges": [
+    {
+      "cite": "app.py:1",
+      "edge_id": "import:app.py:1:pkg/store.py",
+      "import": "pkg.store",
+      "path": "pkg/store.py",
+      "relationship": "imports"
+    }
+  ],
+  "import_usage_coverage": "absent",
+  "imported_by": [],
+  "imports": [
+    {
+      "cite": "app.py:1",
+      "edge_id": "import:app.py:1:pkg/store.py",
+      "import": "pkg.store",
+      "path": "pkg/store.py",
+      "relationship": "imports"
+    }
+  ],
+  "neighbour_interfaces": [
+    {
+      "exact": true,
+      "path": "pkg/store.py",
+      "symbols": [
+        {
+          "cite": "pkg/store.py:1",
+          "kind": "class",
+          "name": "Record"
+        },
+        {
+          "cite": "pkg/store.py:5",
+          "kind": "class",
+          "name": "Row"
+        },
+        {
+          "cite": "pkg/store.py:10",
+          "kind": "function",
+          "name": "save"
+        }
+      ]
+    }
+  ],
+  "packet_id": "packet:module:app.py",
+  "packet_version": 1,
+  "partitioned": false,
+  "parts": [],
+  "previous_findings": [],
+  "scope": {
+    "exact_parse": true,
+    "id": "module:app.py",
+    "lang": "python",
+    "loc": 10,
+    "path": "app.py",
+    "source_hash": "sha256:e7ec6a17713f44893880d4aee6232d5b689fe5d828ea3b7817319535a9efb6e5"
+  },
+  "source_dirty": true,
+  "source_revision": null,
+  "source_snippets": [
+    {
+      "line_end": 10,
+      "line_start": 1,
+      "path": "app.py",
+      "text": "from pkg.store import save\n\n\ndef main():\n    return save(1)\n\n\nif __name__ == \"__main__\":\n    main()\n"
+    }
+  ],
+  "symbols": [
+    {
+      "cite": "app.py:4",
+      "kind": "function",
+      "name": "main"
+    }
+  ],
+  "task": "analyze_module"
+}
