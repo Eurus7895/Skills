@@ -12,8 +12,11 @@ is not allowed to lose one.
 
 What is checked:
 
-    coverage    every class in the graph is a node; every verified inheritance edge
-                is drawn. This is the promise the diagram rests on
+    coverage    every class in a view's scope is a node, every verified inheritance
+                edge it can draw is drawn, and a node outside the scope is marked as
+                a neighbour. This is the promise the diagram rests on
+    view set    the views add up: one covers the repository, and no class is left out
+                of every detail view. Each view can be right and the set still wrong
     identity    the model is pinned to the graph hash it was laid out from
     integrity   unique ids, no edge to a node that is not there, every class inside
                 the container that owns it
@@ -25,7 +28,7 @@ What is checked:
                 one renderer has drifted
 
 Finding codes: G001 coverage, G002 identity, G003 integrity, G004 geometry,
-G005 equivalence, G006 malformed output.
+G005 equivalence, G006 malformed output, G007 view set, G008 empty view.
 
 Exit codes: 0 no findings, 1 findings, 2 input error, 3 internal error.
 
@@ -148,6 +151,39 @@ def check_coverage(model, graph, findings):
         if lost:
             findings.add("G001", "%d verified inheritance edge(s) are not drawn: %s"
                          % (len(lost), ", ".join(lost[:5])))
+
+
+def check_view_set(models, graph, findings):
+    """What no single view can be asked: do they add up?
+
+    Each view checks out against its own scope, and a set of views can still be wrong as
+    a set -- a package missing a view takes its classes' members out of the document
+    with every individual check passing.
+    """
+    scopes = [m.get("scope") or {"kind": "repository"} for m in models]
+    if not any(s.get("kind") == "repository" for s in scopes):
+        findings.add("G007", "no view covers the whole repository; the detail views "
+                             "have no map to sit under")
+    detail_views = [m for m in models
+                    if (m.get("scope") or {}).get("kind") in ("package", "module")]
+    if not detail_views:
+        return
+
+    covered = set()
+    for model in detail_views:
+        covered |= {n["id"] for n in model["nodes"] if not n.get("external")}
+    uncovered = sorted({c["id"] for c in graph["classes"]} - covered)
+    if uncovered:
+        findings.add("G007", "%d class(es) appear in no detail view, so their members "
+                             "are in no picture: %s"
+                     % (len(uncovered), ", ".join(uncovered[:5])))
+
+    for model in models:
+        scope = model.get("scope") or {"kind": "repository"}
+        own = [n for n in model["nodes"] if not n.get("external")]
+        if not own:
+            findings.add("G008", "view %r draws nothing of its own scope %r"
+                         % (model.get("view"), scope.get("id", scope.get("kind"))))
 
 
 def check_identity(model, graph, findings):
@@ -375,6 +411,7 @@ def main():
         check_integrity(model, graph, findings)
         check_geometry(model, findings)
         check_equivalence(model, args.out_dir, findings)
+    check_view_set(models, graph, findings)
 
     if args.json:
         json.dump({"diagram": args.out_dir,
