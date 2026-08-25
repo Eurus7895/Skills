@@ -1,11 +1,13 @@
 # Plan 2 — the layout engine, the quality gate and the release
 
-Four commits and then the debts. Depends on plan 1 (`doc/plan-1-rendering.md`) being
-merged: the quality gate aggregates every stage including the renderers, and the release
-must not advertise a renderer that is not there.
+Five commits, the last of which is the release. Depends on plan 1
+(`doc/plan-1-rendering.md`) being merged: the quality gate aggregates every stage
+including the renderers, and the release must not advertise a renderer that is not there.
 
 The commits keep the `A6` … `A9` numbering they had when both plans were one, so that
-anything already written against those names still resolves.
+anything already written against those names still resolves. `A8b` sits between the
+quality gate and the release because that is where the evidence has to be, not because
+the numbering wanted a gap.
 
 ## Decisions taken
 
@@ -87,6 +89,26 @@ a layout can be judged at all, and it is already in `tools/test_diagrams.py`.
 - Late, because it consumes the output of every stage; writing it earlier means rewriting
   it as the stages settle.
 
+### A8b. Run it on a real repository, and run the visual loop once
+
+Before the release, not after it. The plan says two things that cannot both hold with
+`A9` in front: that a hand-written layout is the change most likely to look fine on a
+fixture and fall apart on real code, and that the visual review loop stops being optional
+once the builtin engine exists. Releasing first means shipping the fallback layout to
+users and finding out afterwards.
+
+- **A real repository.** A few hundred files of open-source Python, laid out by both
+  engines. This is also the first time the density threshold, packet partitioning and the
+  fan-in budget are reached at all — this repository has 33 units in total and cannot
+  reach any of them.
+- **One complete visual cycle** on the builtin layout: preview, a model reading the
+  image, findings, a patch, rerender, and every structural check again. Four stages that
+  have never run end to end with a patch that came from looking at a picture.
+
+Either one finding a defect is a reason to fix it before `A9`, not a reason to note it.
+What survives after the release is genuine follow-up: broader corpora, more languages,
+tuning. Not the first evidence that the engine works.
+
 ### A9. Steps 17 and 18 — metadata and release
 
 `SKILL.md`, plugin README, `plugin.json`, marketplace manifest, root catalog,
@@ -102,11 +124,14 @@ base is the plan-1 merge commit rather than a branch that has to be rebased late
 
 ---
 
-## After the release — the debts
+## The two debts, in detail
 
-Neither of these is a missing feature. They are things that exist and that nobody has yet
-shown to work. They belong here rather than in plan 1 because both depend on the layout
-engine having landed.
+Neither is a missing feature. They are things that exist and that nobody has yet shown to
+work, and `A8b` is where they are paid: **before** the release, because both are evidence
+that what is about to ship works, not follow-up on something already shipped.
+
+They sit in this plan rather than plan 1 because both need the layout engine to have
+landed.
 
 ### B1. Never run on a large repository
 

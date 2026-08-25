@@ -56,18 +56,22 @@ Extract the harness now living inside `render_docs.py`.
 
 - Detect whether `sphinx-build` is available.
 - Run `sphinx-build -W` and capture a structured result.
-- **Distinguish the four outcomes the plan requires**, which are currently collapsed into
-  one `failed`: missing dependency, invalid markup, broken reference, internal runner
-  failure. They imply different next moves, so they cannot share a status.
+- **Distinguish the outcomes**, which were collapsed into one `failed` before A1: missing
+  dependency, invalid markup, broken reference, internal runner failure. They imply
+  different next moves, so they cannot share a status.
+- **`unwired` is a fifth outcome and must survive the extraction.** The phase plan lists
+  four; A1 added the toctree gap as its own status, and folding it back into invalid
+  markup or broken reference would undo A1 and make the quality gate in plan 2 fail
+  pages that are correct. It gets a structured outcome and its own extraction test.
 - Keep the harness independent of the target repository's `conf.py`. Pages are copied to
   a temp tree and built there; this property already exists and must survive the move.
 - Add a controlled Sphinx fixture for renderer tests.
 
 Acceptance: a valid minimal page builds with zero warnings; invalid RST fails with the
 relevant Sphinx output; a broken internal reference fails and is reported as a broken
-reference rather than as bad markup; a missing `sphinx-build` follows the declared
-required/optional policy; the harness creates and modifies nothing in the target
-documentation configuration.
+reference rather than as bad markup; **a page in no toctree comes back `unwired`, not
+`failed`**; a missing `sphinx-build` follows the declared required/optional policy; the
+harness creates and modifies nothing in the target documentation configuration.
 
 ### A3. Step 13 — the RST renderer, through the harness
 
@@ -98,6 +102,14 @@ tested per format because the rules differ; identical input produces identical o
 - `--init-sphinx` as an explicit, non-interactive initialisation with a stated fallback.
 - Never create or overwrite `conf.py` without explicit authorisation.
 - Never silently turn MyST output into RST.
+- **`--format myst` into an existing RST-only project needs the parser registered.**
+  Writing Markdown pages into a project whose `conf.py` does not enable `myst_parser`
+  produces files Sphinx will not read: the pages are wired into the toctree and the build
+  reports them missing. The controlled fixture in A4 cannot catch this, because the
+  fixture has the extension enabled. So before writing MyST into a reused project, check
+  that `myst_parser` is installed and enabled; if it is not, either enable it as an
+  explicitly authorised edit to `conf.py`, or refuse with a configuration diagnostic
+  naming what is missing. Writing the pages anyway is the one thing not allowed.
 - **`--wire-toctree`**: insert the generated pages into the author's existing toctree
   rather than only printing what to add. The renderer edits the author's file, so the
   rules are strict: the flag is required, the insertion is idempotent, entries already
@@ -106,13 +118,17 @@ tested per format because the rules differ; identical input produces identical o
 
 Acceptance: an existing `conf.py` is never touched without the flag; wiring twice
 produces the same file as wiring once; a hand-written index keeps everything it had; the
-toctree gap from A1 disappears once wiring has run.
+toctree gap from A1 disappears once wiring has run; MyST into a project without
+`myst_parser` is refused or authorised, never written blindly, and that case is tested
+against a project fixture that does **not** have the extension enabled.
 
 ---
 
 ## Branch
 
-`feat/docs-sphinx-and-quality-gate`, cut from `origin/dev` at `74c1435`. Pull request #20.
+`feat/docs-sphinx-and-quality-gate`, pull request #20. It was cut from `origin/dev` at
+`74c1435`; that hash is a record of where this branch started, not an instruction. Any
+later branch starts from the current `origin/dev`, per `AGENTS.md`.
 
 ## What this plan does not do
 
