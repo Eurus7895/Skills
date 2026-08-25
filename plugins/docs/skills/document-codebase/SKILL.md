@@ -3,7 +3,7 @@ name: document-codebase
 description: Generate architecture documentation for a repository of any size by parsing its structure with a
   scanner first — symbols, imports, classes, dependency graph, fan-in ranking — then describing each module
   with its real neighbours supplied, and checking every claim against the graph and the source before it is
-  written. Produces a multi-page RST document under docs/ with file:line citations.
+  written. Produces a multi-page RST or MyST document under docs/ with file:line citations.
   Use for "document this repo", "write architecture docs",
   "explain how this codebase fits together", "what calls what", "onboard someone to this project", "map the
   dependencies", or when an unfamiliar repository needs a written overview. The scanner reads Python,
@@ -390,9 +390,14 @@ For those authored pages the work is an **update, not a generation**: read what 
 status boundary. Anything you cannot check against the graph, leave as the author wrote it, and say in step 9
 which pages you touched and which you did not.
 
-`doc.json` contains no markup. **Do not write RST or Sphinx directives yourself** — the renderer owns
+`doc.json` contains no markup. **Do not write RST, MyST or Sphinx directives yourself** — the renderer owns
 headings, tables, references, escaping and the toctree, and hand-written directives are how a build starts
 failing on markup nobody remembers adding.
+
+`--format` chooses the markup: `rst` (the default) or `myst`. The same `doc.json` renders to both, page for
+page and reference for reference; only the emitter differs. **MyST needs the target project to enable
+`myst_parser`** — Markdown pages in a project that has not are files Sphinx will not read, and the build fails
+for a reason that is nothing to do with the pages.
 
 `--check` runs `sphinx-build -W` when Sphinx is installed, falls back to docutils, and reports `skipped` when
 neither is present. It answers with one of six outcomes, and they are not interchangeable:
