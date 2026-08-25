@@ -1,8 +1,14 @@
 # Docs plugin — the work after PR #19
 
 PR #19 delivered PR 3a (context selection and the verified document model) and PR 3b
-(diagrams, including the per-package detail views). Three tracks remain. This file is the
-plan for all three, in the order they are meant to happen.
+(diagrams, including the per-package detail views). Two tracks remain. This file is the
+plan for both, in the order they are meant to happen.
+
+Track A is one branch and one pull request: rendering, the release, and the layout engine
+that removes the Graphviz dependency. Those were planned separately and were merged into
+one step deliberately. It is a large review — nine commits across the renderer, a new
+layout engine and the release — so each commit below is written to stand on its own and to
+leave the tree green, and the two halves touch different files almost everywhere.
 
 Everything here follows the constraints already in force: scripts are authored in
 `shared/scripts/` and materialized by `tools/materialize.py`; tests are `tools/test_*.py`,
@@ -27,9 +33,15 @@ and nothing outside the renderers may assume RST.
 
 ---
 
-## Track A — PR 3c: rendering and release quality
+## Track A — rendering, layout and release
 
-Steps 12–18 of the phase plan. Seven commits.
+Steps 12–18 of the phase plan, plus the layout engine. Nine commits, one branch, one pull
+request.
+
+`A6`/`A7` are the layout engine and sit between the Sphinx work and the quality gate on
+purpose: the gate in `A8` reports which engine laid each diagram out, so the engine has to
+exist before the report is written, and the release in `A9` must not advertise a renderer
+or an engine that is not yet there.
 
 ### A1. Fix what a real Sphinx build already finds
 
@@ -110,27 +122,7 @@ Acceptance: an existing `conf.py` is never touched without the flag; wiring twic
 produces the same file as wiring once; a hand-written index keeps everything it had; the
 toctree gap from A1 disappears once wiring has run.
 
-### A6. Step 16 — `quality_docs.py` and `generation-report.json`
-
-- Validate schemas and references; enforce preset coverage; enforce class-graph and
-  diagram structural coverage.
-- Ingest `visual-findings.json` **without delegating pass/fail to the model**; apply the
-  critical/major/minor policy and the visual-review availability policy.
-- Aggregate every stage's result into `generation-report.json` with stable exit codes.
-- Last, because it consumes the output of every stage; writing it earlier means rewriting
-  it as the stages settle.
-
-### A7. Steps 17 and 18 — metadata and release
-
-`SKILL.md`, plugin README, `plugin.json`, marketplace manifest, root catalog,
-`shared.manifest`. Advertise only what is implemented and invoked. Version, then release
-through `dev` before `main`.
-
-**Branch:** `feat/docs-sphinx-and-quality-gate`, cut from `origin/dev` at `74c1435`.
-
----
-
-## Track B — a layout engine that needs no external binary
+### A6. A layout contract, and an engine that needs no external binary
 
 Today a machine without Graphviz gets no diagram at all. Bundling Graphviz binaries was
 considered and rejected: a DLL is Windows-only so it would mean five or six platform
@@ -178,14 +170,47 @@ immediately without a new rule being written. Output must also be deterministic.
 the visual review loop moves from optional to necessary. That loop has never run as a
 complete cycle, which makes it part of this track rather than a separate concern.
 
+### A7. Prove the builtin engine on a graph worth laying out
+
+The 72-class fixture that the detail views are tested against is the smallest graph where
+a layout can be judged at all, and it is already in `tools/test_diagrams.py`.
+
+- Every existing diagram test runs against both engines, not just whichever the machine
+  happens to have. `--layout builtin` makes that a choice rather than an accident.
+- Determinism per engine: the same graph laid out twice is byte for byte identical.
+- Render a preview of the builtin layout and **look at it**. A structural check cannot see
+  a diagram that is correct and unreadable, which is exactly how the clipped preview
+  survived every check it had.
+- `diagram-policy.md` states what each engine is for, and that Graphviz is preferred where
+  installed.
+
+### A8. Step 16 — `quality_docs.py` and `generation-report.json`
+
+- Validate schemas and references; enforce preset coverage; enforce class-graph and
+  diagram structural coverage.
+- Ingest `visual-findings.json` **without delegating pass/fail to the model**; apply the
+  critical/major/minor policy and the visual-review availability policy.
+- Aggregate every stage's result into `generation-report.json` with stable exit codes,
+  including which layout engine drew each diagram.
+- Late, because it consumes the output of every stage; writing it earlier means rewriting
+  it as the stages settle.
+
+### A9. Steps 17 and 18 — metadata and release
+
+`SKILL.md`, plugin README, `plugin.json`, marketplace manifest, root catalog,
+`shared.manifest`. Advertise only what is implemented and invoked. Version, then release
+through `dev` before `main`.
+
+**Branch:** `feat/docs-sphinx-and-quality-gate`, cut from `origin/dev` at `74c1435`.
+
 ---
 
-## Track C — the debts
+## Track B — the debts
 
 Neither of these is a missing feature. They are things that exist and that nobody has yet
 shown to work.
 
-### C1. Never run on a large repository
+### B1. Never run on a large repository
 
 The phase plan says outright that this repository is only a smoke test: its dependency
 graph is too small to evaluate against. So every mechanism built for scale has never once
@@ -201,7 +226,7 @@ studied was missing a class. Only looking at it found that.
 Do: run the whole pipeline against a few hundred files of real open-source Python, and see
 what breaks, what is slow, and what turns out to be pointless.
 
-### C2. The visual review loop has never run a full cycle
+### B2. The visual review loop has never run a full cycle
 
 Four stages: render a preview, have a model look at the image and write findings and a
 patch, apply the patch, rerender and re-run every structural check.
@@ -216,17 +241,20 @@ improves the picture, or it invents problems, the patch makes things worse, and 
 two-attempt stop condition gets its first real test. `apply_layout_patch.py` exists
 entirely to serve this loop.
 
-This depends on C1 for a diagram dense enough to have something worth fixing. The one in
+This depends on B1 for a diagram dense enough to have something worth fixing. The one in
 this repository is too sparse to complain about.
 
 ---
 
 ## Order
 
-Track A first: it is on the path to a release, and `dev` → `main` is waiting on it.
+Track A in the order A1 … A9, then track B.
 
-Track B is independent and blocks nobody, **unless** a target machine that cannot install
-Graphviz is a live problem — in which case B goes first. It changes what arrives sooner,
-not the total.
+Within track A the Sphinx run A2 → A5 and the layout run A6 → A7 are independent of each
+other and touch different files; only A8 and A9 need both to be finished. If the review
+turns out too large to be useful, the natural cut is between A5 and A6 — that is where the
+two halves stop overlapping, and either half is releasable on its own.
 
-Track C last, and C2 after C1, because C2 needs the dense real diagram that C1 produces.
+Track B is last, and B2 after B1, because B2 needs the dense real diagram B1 produces.
+B1 also stops being optional once A6 lands: a hand-written layout is the change most
+likely to look fine on a fixture and fall apart on a real repository.
