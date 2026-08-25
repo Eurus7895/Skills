@@ -99,6 +99,30 @@ def main():
         check("no warnings at all is a pass",
               sphinx_support.classify([]) == sphinx_support.PASSED)
 
+        # The two majors do not agree on the shape of a failing -W build, and Sphinx 7's
+        # does not contain the word WARNING anywhere. Filtering on that token reads it as
+        # a builder that failed silently -- which is what CI reported before this.
+        sphinx7 = ("Warning, treated as error:\n"
+                   "/x/orphan.rst:document isn't included in any toctree")
+        sphinx9 = ("/x/orphan.rst: WARNING: document isn't included in any toctree "
+                   "[toc.not_included]")
+        for label, output in (("7", sphinx7), ("9", sphinx9)):
+            lines = sphinx_support.warning_lines(output)
+            check("a Sphinx %s failure yields its warning, not silence" % label,
+                  len(lines) == 1 and "toctree" in lines[0], "%r" % lines)
+            check("and Sphinx %s's toctree gap classifies as unwired" % label,
+                  sphinx_support.classify(lines) == sphinx_support.UNWIRED)
+
+        # Sphinx reports its own breakage in the same shape as a warning. Reading
+        # "Could not import extension" as bad markup sends the reader to a page that is
+        # fine.
+        for fatal in ("Extension error:\nCould not import extension nope",
+                      "Configuration error:\nconf.py is unreadable"):
+            check("%r is the builder failing, not the document"
+                  % fatal.splitlines()[0],
+                  any(marker in fatal.lower()
+                      for marker in sphinx_support.FATAL_FRAMING))
+
         # A missing builder and a broken one are different answers. Collapsing them
         # turns a broken installation into "not installed" and hides it.
         real = sphinx_support._tool
