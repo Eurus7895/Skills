@@ -28,6 +28,7 @@ under --out.
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -40,22 +41,32 @@ SUPPORTED_FORMAT = {1}
 TITLE_CHAR = "="
 SECTION_CHAR = "-"
 
+# `word_` is a reference in RST and `[1]_` a footnote, and an undefined one fails the
+# build. Mid-word underscores are not references, so `snake_case` -- which is most of
+# what this pipeline writes -- is left alone rather than peppered with backslashes.
+TRAILING_UNDERSCORE = re.compile(r"(?<=[\w\]])_(?![\w])")
+
 
 def escape_inline(text):
-    """Neutralise the two characters that change meaning mid-sentence in RST.
+    """Neutralise the characters that change meaning mid-sentence in RST.
 
     Backslash first, or escaping the others would be undone by the pass that follows.
     `*` opens emphasis and a lone `` ` `` opens a role; both swallow the rest of the
-    line when a path or an identifier happens to contain one.
+    line when a path or an identifier happens to contain one. `|` opens a substitution
+    reference, and an undefined one is a build error rather than a cosmetic slip -- a
+    docstring mentioning `|x|` failed the build before this, and only in table cells
+    was it ever escaped.
     """
-    return (text.replace("\\", "\\\\")
+    text = (text.replace("\\", "\\\\")
                 .replace("*", "\\*")
-                .replace("`", "\\`"))
+                .replace("`", "\\`")
+                .replace("|", "\\|"))
+    return TRAILING_UNDERSCORE.sub(r"\\_", text)
 
 
 def escape_cell(text):
-    """Table cells additionally cannot contain the row separator or a newline."""
-    return escape_inline(text).replace("|", "\\|").replace("\n", " ")
+    """A table cell additionally cannot span lines: the row would end early."""
+    return escape_inline(text).replace("\n", " ")
 
 
 def heading(text, char):
