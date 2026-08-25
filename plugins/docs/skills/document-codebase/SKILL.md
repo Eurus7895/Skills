@@ -414,8 +414,19 @@ neither is present. It answers with one of six outcomes, and they are not interc
 `unwired` and `skipped` do not fail the run. Neither is a pass either, and reporting them as one is the
 failure this table exists to prevent.
 
-The renderer never creates or edits a `conf.py`. If the user wants these pages inside their existing Sphinx
-project, that is a separate step: show them the output first and ask.
+**Writing into a project someone else owns.** The renderer never creates or edits a `conf.py`. Two flags
+cover the rest, and both are off by default because both touch what the author wrote:
+
+- `--wire-toctree` adds the generated pages to an index that already exists. It is idempotent, keeps every
+  entry and every line of prose that was there, and **refuses** an index with no toctree, with more than one,
+  or that it cannot parse — leaving the file untouched and naming the pages to add by hand. Without the flag
+  the pages are written and the run prints what is missing; the build check then reports `unwired`, and
+  wiring is what turns that into `passed`.
+- `--assume-parser` writes MyST into a project whose `conf.py` does not visibly enable `myst_parser`.
+  Without it that is refused before anything is written, because Markdown in such a project is a file Sphinx
+  will not read: the pages land, the toctree names them, and the build fails over documents that are not at
+  fault. `conf.py` is read as text, never imported — running a stranger's configuration to find out what it
+  configures is not a check, it is execution.
 
 ### 9. Report
 
