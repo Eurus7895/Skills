@@ -73,6 +73,18 @@ def render_table(block):
     return "\n".join(lines)
 
 
+def absolute(target):
+    """A reference from the source root, not from the page that carries it.
+
+    Sphinx resolves a relative `:doc:` target and a relative image path against the
+    directory of the document they appear in. A preset whose page ids contain a
+    separator therefore emits references that resolve to `architecture/architecture/...`
+    and fail -- correct for a flat layout, wrong for a nested one. The leading slash
+    means "from the source root" and is right for both.
+    """
+    return target if str(target).startswith("/") else "/" + str(target)
+
+
 def render_block(block, titles):
     kind = block["type"]
     if kind == "prose":
@@ -81,7 +93,7 @@ def render_block(block, titles):
         return render_table(block)
     if kind == "image":
         return ".. figure:: %s\n   :alt: %s\n" % (
-            block["src"], escape_inline(block.get("alt", "")))
+            absolute(block["src"]), escape_inline(block.get("alt", "")))
     if kind == "ref":
         target = block["target"]
         if target not in titles:
@@ -91,7 +103,8 @@ def render_block(block, titles):
             # until someone clicks.
             raise ValueError("block %r references page %r, which is not in this document"
                              % (block["id"], target))
-        return "Next: :doc:`%s <%s>`\n" % (escape_inline(titles[target]), target)
+        return "Next: :doc:`%s <%s>`\n" % (escape_inline(titles[target]),
+                                           absolute(target))
     raise ValueError("unknown block type %r in %r" % (kind, block["id"]))
 
 
@@ -117,7 +130,13 @@ def render_index(doc, pages):
 
 
 def check_build(out_dir):
-    """Return (status, detail). status is 'passed', 'failed' or 'skipped'."""
+    """Return (status, detail).
+
+    status is 'passed', 'unwired', 'failed' or 'skipped'. `unwired` means the markup is
+    sound and the only complaint is that pages are in no toctree yet -- the state an
+    existing documentation tree is in until the generated pages are wired into its
+    index. It is reported, and it is not a failure.
+    """
     if shutil.which("sphinx-build"):
         work = tempfile.mkdtemp(prefix="render-docs-check-")
         try:
@@ -143,7 +162,16 @@ def check_build(out_dir):
                 capture_output=True, text=True, timeout=300)
             if proc.returncode == 0:
                 return "passed", "sphinx-build -W reported no warnings"
-            return "failed", (proc.stderr or proc.stdout).strip()[:2000]
+            output = (proc.stderr or proc.stdout).strip()
+            # A page that is in no toctree is not broken markup. It happens whenever the
+            # author's own index was kept, which is the documented behaviour, and calling
+            # it a failed check sends the reader looking for a defect in the page. The
+            # gap is real and worth naming; it is just a different thing.
+            warnings = [line for line in output.splitlines() if "WARNING" in line]
+            if warnings and all("toc.not_included" in line for line in warnings):
+                return "unwired", ("the markup builds, but %d page(s) are in no toctree "
+                                   "yet: %s" % (len(warnings), output[:1200]))
+            return "failed", output[:2000]
         except (OSError, subprocess.SubprocessError) as exc:
             return "failed", "sphinx-build could not be run: %s" % exc
         finally:
@@ -157,10 +185,15 @@ def check_build(out_dir):
                            "was not parsed. Install either one to validate it.")
 
     problems = []
-    for name in sorted(os.listdir(out_dir)):
-        if not name.endswith(".rst"):
-            continue
-        with open(os.path.join(out_dir, name), encoding="utf-8") as fh:
+    # Recursive: a preset whose page ids contain a separator writes pages into
+    # subdirectories, and a flat listing parses none of them while still reporting that
+    # every page passed.
+    pages = []
+    for base, _, names in os.walk(out_dir):
+        pages.extend(os.path.join(base, name) for name in names if name.endswith(".rst"))
+    for path in sorted(pages):
+        name = os.path.relpath(path, out_dir)
+        with open(path, encoding="utf-8") as fh:
             text = fh.read()
         try:
             publish_doctree(text, settings_overrides={
