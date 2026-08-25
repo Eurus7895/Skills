@@ -36,6 +36,7 @@ import shutil
 import sys
 
 import sphinx_support
+import wire_toctree
 
 SUPPORTED_FORMAT = {1}
 
@@ -234,6 +235,14 @@ def main():
                         help="overwrite an existing index page; without this an index "
                              "already in the output directory is left as the author "
                              "wrote it")
+    parser.add_argument("--assume-parser", action="store_true",
+                        help="write this format even though the target conf.py does "
+                             "not visibly enable its parser. For a project that builds "
+                             "its extension list at run time")
+    parser.add_argument("--wire-toctree", action="store_true",
+                        help="add the generated pages to an index the author already "
+                             "wrote. Without this the pages are written and the run "
+                             "says which toctree lines are missing")
     parser.add_argument("--diagrams", metavar="DIR",
                         help="copy this directory in as _diagrams/ and resolve figures "
                              "against it")
@@ -287,6 +296,18 @@ def main():
                          % (len(missing), args.diagrams, ", ".join(missing[:3])))
         return 2
 
+    # A format the target project cannot read is a configuration problem, and writing
+    # the pages anyway leaves a build failing over documents that are not at fault.
+    blockers = sphinx_support.missing_parsers(args.out, emitter.build_extensions)
+    if blockers and not args.assume_parser:
+        sys.stderr.write("FAIL  %s cannot be read by the project at %s:\n"
+                         % (args.format, args.out))
+        for blocker in blockers:
+            sys.stderr.write("        %s\n" % blocker)
+        sys.stderr.write("      Enable it in conf.py, or pass --assume-parser if the "
+                         "project configures extensions somewhere this cannot see.\n")
+        return 2
+
     if not os.path.isdir(args.out):
         os.makedirs(args.out)
     if args.diagrams:
@@ -319,8 +340,22 @@ def main():
 
     print("wrote %d page(s) to %s" % (len(rendered), args.out))
     if kept_index:
-        print("kept the existing %s; add these pages to its toctree yourself, "
-              "or rerun with --replace-index" % index_name)
+        entries = [page["id"] for page in pages]
+        if args.wire_toctree:
+            try:
+                changed, note = wire_toctree.wire(os.path.join(args.out, index_name),
+                                                  entries)
+            except wire_toctree.Refused as exc:
+                # The index is the author's, so a refusal leaves it untouched and the
+                # pages stand unwired rather than the file being guessed at.
+                sys.stderr.write("REFUSED  %s\n" % exc)
+                print("kept the existing %s unchanged; wire these in by hand: %s"
+                      % (index_name, ", ".join(entries)))
+            else:
+                print(note)
+        else:
+            print("kept the existing %s. Add these to its toctree, or rerun with "
+                  "--wire-toctree: %s" % (index_name, ", ".join(entries)))
     for page in doc.get("authored_pages", ()):
         print("not generated: %s%s (%s) -- no evidence in the graph for this page"
               % (page["id"], emitter.extension, page["title"]))

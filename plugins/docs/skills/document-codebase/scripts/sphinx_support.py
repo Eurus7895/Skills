@@ -308,6 +308,60 @@ def check(out_dir, extensions=(), policy="optional"):
     return _with_docutils(out_dir)
 
 
+CONF_EXTENSION = re.compile(r"""^\s*extensions\s*=""", re.MULTILINE)
+
+
+def project_at(directory):
+    """The project's own conf.py, or None. Read, never written."""
+    path = os.path.join(directory, "conf.py")
+    return path if os.path.isfile(path) else None
+
+
+def parser_enabled(conf_path, extension):
+    """Whether `conf.py` loads a parser extension.
+
+    Read as text rather than executed. Importing a stranger's `conf.py` runs whatever it
+    contains, and this is a read-only inspection of somebody else's project. The cost is
+    that a conf.py building its extension list at run time reads as "not enabled", which
+    is the safe direction: it produces a diagnostic asking for confirmation rather than
+    silently writing files Sphinx will not read.
+    """
+    try:
+        with open(conf_path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return False
+    return any(extension in line for line in text.splitlines()
+               if not line.lstrip().startswith("#"))
+
+
+def parser_installed(extension):
+    try:
+        __import__(extension)
+    except ImportError:
+        return False
+    return True
+
+
+def missing_parsers(directory, extensions):
+    """What stands between these pages and a project that can read them.
+
+    Writing MyST into a project that never enabled `myst_parser` produces files Sphinx
+    does not parse at all: the pages land, the toctree names them, and the build fails
+    over documents it cannot read. Nothing about the pages is wrong, so the diagnostic
+    has to name the configuration instead.
+    """
+    problems = []
+    conf_path = project_at(directory)
+    for extension in extensions:
+        if not parser_installed(extension):
+            problems.append("%s is not installed" % extension)
+        elif conf_path and not parser_enabled(conf_path, extension):
+            problems.append("%s is installed but %s does not enable it"
+                            % (extension, os.path.relpath(conf_path, directory)))
+    return problems
+
+
 def main():
     if len(sys.argv) != 2:
         sys.stderr.write("usage: sphinx_support.py <rendered-docs-directory>\n")
