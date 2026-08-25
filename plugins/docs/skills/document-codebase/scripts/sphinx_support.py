@@ -70,6 +70,23 @@ TOCTREE_GAP = (
     "is not included in any toctree",
 )
 
+# The two majors report a failing `-W` build differently, and neither format is
+# guaranteed to contain the word WARNING:
+#
+#   Sphinx 9   /x/orphan.rst: WARNING: document isn't included in any toctree [toc.…]
+#   Sphinx 7   Warning, treated as error:
+#              /x/orphan.rst:document isn't included in any toctree
+#
+# So the framing line is dropped and whatever remains is the warning. Filtering on the
+# literal "WARNING" instead reads Sphinx 7 as a builder that failed silently.
+FRAMING = ("warning, treated as error", "warnings, treated as errors")
+
+# Sphinx uses the same shape for its own failures. These are the builder not running,
+# not the document being wrong, and nothing was learned about the markup either way.
+FATAL_FRAMING = ("extension error", "configuration error", "theme error",
+                 "application error", "sphinx error", "exception occurred",
+                 "recursion error", "traceback (most recent call last)")
+
 REFERENCE_MARKERS = (
     "ref.doc", "ref.ref", "ref.any", "ref.python", "ref.undefined",
     "toc.not_readable", "image.not_readable", "download.not_readable",
@@ -103,6 +120,19 @@ def _tool():
     except ImportError:
         return None
     return "docutils"
+
+
+def warning_lines(output):
+    """The complaints in a failing build's output, in either major's format."""
+    lines = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if any(stripped.lower().startswith(marker) for marker in FRAMING):
+            continue
+        lines.append(stripped)
+    return lines
 
 
 def classify(warnings):
@@ -164,8 +194,10 @@ def _with_sphinx(out_dir, extensions):
         output = (proc.stderr or proc.stdout).strip()
         if proc.returncode == 0:
             return Result(PASSED, "sphinx-build -W reported no warnings")
-        warnings = [line for line in output.splitlines()
-                    if "WARNING" in line or "ERROR" in line]
+        warnings = warning_lines(output)
+        if any(marker in output.lower() for marker in FATAL_FRAMING):
+            return Result(RUNNER_FAILURE,
+                          "sphinx-build could not build: %s" % output[:800])
         if not warnings:
             # Non-zero with nothing to read is the builder itself failing, not the
             # document. Reporting it as bad markup sends the reader to the wrong file.
