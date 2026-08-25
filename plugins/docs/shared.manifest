@@ -13,6 +13,7 @@ scripts/query_graph.py           -> skills/document-codebase/scripts/query_graph
 scripts/verify_doc.py            -> skills/document-codebase/scripts/verify_doc.py
 scripts/build_document_model.py  -> skills/document-codebase/scripts/build_document_model.py
 scripts/render_docs.py           -> skills/document-codebase/scripts/render_docs.py
+scripts/sphinx_support.py        -> skills/document-codebase/scripts/sphinx_support.py
 scripts/build_class_graph.py     -> skills/document-codebase/scripts/build_class_graph.py
 scripts/build_diagrams.py        -> skills/document-codebase/scripts/build_diagrams.py
 scripts/validate_diagrams.py     -> skills/document-codebase/scripts/validate_diagrams.py
