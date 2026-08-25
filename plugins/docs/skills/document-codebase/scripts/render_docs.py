@@ -12,9 +12,11 @@ Headings, tables, references and escaping are this script's business and nobody 
 an agent writing directives by hand produces markup that builds today and breaks on the
 next directive it half-remembers.
 
---check validates the result as far as the machine allows. `sphinx-build -W` is used
-when Sphinx is installed; failing that, docutils parses each page; failing both, the
-check reports `skipped` and says so rather than passing quietly.
+--check validates the result as far as the machine allows, through `sphinx_support.py`:
+`sphinx-build -W` when Sphinx is installed, docutils failing that, and `skipped` failing
+both -- said out loud rather than passed over quietly. Its six outcomes separate a page
+that does not parse from a reference that does not resolve from a page nobody has wired
+into a toctree yet.
 
 This script never creates or edits a Sphinx `conf.py`. Wiring the output into a project's
 own documentation build is a separate, explicitly authorized step.
@@ -30,9 +32,9 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
-import tempfile
+
+import sphinx_support
 
 SUPPORTED_FORMAT = {1}
 
@@ -130,83 +132,6 @@ def render_index(doc, pages):
     # a page that exists but is not listed here is unreachable.
     parts.append("\n".join("   %s" % page["id"] for page in pages) + "\n")
     return "\n".join(parts)
-
-
-def check_build(out_dir):
-    """Return (status, detail).
-
-    status is 'passed', 'unwired', 'failed' or 'skipped'. `unwired` means the markup is
-    sound and the only complaint is that pages are in no toctree yet -- the state an
-    existing documentation tree is in until the generated pages are wired into its
-    index. It is reported, and it is not a failure.
-    """
-    if shutil.which("sphinx-build"):
-        work = tempfile.mkdtemp(prefix="render-docs-check-")
-        try:
-            # The pages are copied out and built in a temp tree with a conf.py of our
-            # own. Writing that conf.py into --out would overwrite a project's real
-            # Sphinx configuration -- and the documented invocation is `--out docs`,
-            # which is exactly where a project keeps it. A check must not be able to
-            # destroy the thing it is checking.
-            source = os.path.join(work, "source")
-            build = os.path.join(work, "build")
-            os.makedirs(source)
-            for name in sorted(os.listdir(out_dir)):
-                origin = os.path.join(out_dir, name)
-                if os.path.isdir(origin):
-                    shutil.copytree(origin, os.path.join(source, name))
-                elif name != "conf.py":
-                    shutil.copyfile(origin, os.path.join(source, name))
-            with open(os.path.join(source, "conf.py"), "w", encoding="utf-8") as fh:
-                fh.write("project = 'check'\nextensions = []\n"
-                         "master_doc = 'index'\nexclude_patterns = ['_build']\n")
-            proc = subprocess.run(
-                ["sphinx-build", "-W", "-q", "-b", "html", source, build],
-                capture_output=True, text=True, timeout=300)
-            if proc.returncode == 0:
-                return "passed", "sphinx-build -W reported no warnings"
-            output = (proc.stderr or proc.stdout).strip()
-            # A page that is in no toctree is not broken markup. It happens whenever the
-            # author's own index was kept, which is the documented behaviour, and calling
-            # it a failed check sends the reader looking for a defect in the page. The
-            # gap is real and worth naming; it is just a different thing.
-            warnings = [line for line in output.splitlines() if "WARNING" in line]
-            if warnings and all("toc.not_included" in line for line in warnings):
-                return "unwired", ("the markup builds, but %d page(s) are in no toctree "
-                                   "yet: %s" % (len(warnings), output[:1200]))
-            return "failed", output[:2000]
-        except (OSError, subprocess.SubprocessError) as exc:
-            return "failed", "sphinx-build could not be run: %s" % exc
-        finally:
-            shutil.rmtree(work, ignore_errors=True)
-
-    try:
-        from docutils.core import publish_doctree            # noqa: PLC0415
-        from docutils.utils import SystemMessage             # noqa: PLC0415
-    except ImportError:
-        return "skipped", ("neither sphinx-build nor docutils is installed; the markup "
-                           "was not parsed. Install either one to validate it.")
-
-    problems = []
-    # Recursive: a preset whose page ids contain a separator writes pages into
-    # subdirectories, and a flat listing parses none of them while still reporting that
-    # every page passed.
-    pages = []
-    for base, _, names in os.walk(out_dir):
-        pages.extend(os.path.join(base, name) for name in names if name.endswith(".rst"))
-    for path in sorted(pages):
-        name = os.path.relpath(path, out_dir)
-        with open(path, encoding="utf-8") as fh:
-            text = fh.read()
-        try:
-            publish_doctree(text, settings_overrides={
-                "report_level": 2, "halt_level": 2, "warning_stream": False})
-        except SystemMessage as exc:
-            problems.append("%s: %s" % (name, exc))
-    if problems:
-        return "failed", "\n".join(problems)[:2000]
-    return "passed", ("docutils parsed every page with no warnings. Note this is not a "
-                      "Sphinx build: cross-page references were not resolved.")
 
 
 def main():
@@ -313,9 +238,11 @@ def main():
 
     if not args.check:
         return 0
-    status, detail = check_build(args.out)
-    print("build check: %s -- %s" % (status, detail))
-    return 1 if status == "failed" else 0
+    result = sphinx_support.check(args.out)
+    print("build check: %s -- %s" % (result.status, result.detail))
+    # `unwired` and `skipped` are outcomes, not failures: one means an integration step
+    # has not run, the other that no builder was installed. Both are reported.
+    return 1 if result.failed else 0
 
 
 if __name__ == "__main__":

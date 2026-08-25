@@ -394,8 +394,20 @@ which pages you touched and which you did not.
 headings, tables, references, escaping and the toctree, and hand-written directives are how a build starts
 failing on markup nobody remembers adding.
 
-`--check` runs `sphinx-build -W` when Sphinx is installed, falls back to parsing each page with docutils, and
-reports `skipped` when neither is present. **`skipped` is not a pass** — say which one happened.
+`--check` runs `sphinx-build -W` when Sphinx is installed, falls back to docutils, and reports `skipped` when
+neither is present. It answers with one of six outcomes, and they are not interchangeable:
+
+| Outcome | Means | Next |
+| --- | --- | --- |
+| `passed` | builds, every reference resolves | nothing |
+| `unwired` | builds; some pages are in no toctree yet | wire them in, or say the document is not yet part of the project's index |
+| `invalid_markup` | a page does not parse | a defect — report the output |
+| `broken_reference` | parses, but points at something absent | fix the target or the reference |
+| `runner_failure` | the builder could not run | the check learned nothing about the markup |
+| `skipped` | no builder installed | **not a pass** — say so |
+
+`unwired` and `skipped` do not fail the run. Neither is a pass either, and reporting them as one is the
+failure this table exists to prevent.
 
 The renderer never creates or edits a `conf.py`. If the user wants these pages inside their existing Sphinx
 project, that is a separate step: show them the output first and ask.
@@ -423,6 +435,7 @@ the build check passed or was skipped, and that `.docs-build/` can be deleted.
 | `scripts/apply_layout_patch.py` | Step 7, only inside the visual loop |
 | `scripts/build_document_model.py` | Step 8 |
 | `scripts/render_docs.py` | Step 8 |
+| `scripts/sphinx_support.py` | Never directly — `render_docs.py --check` uses it |
 | `references/schemas.md` | Step 4, before emitting the first claim |
 | `references/presets.md` | Step 8, to choose a preset |
 | `references/diagram-policy.md` | Step 7, before drawing or reviewing a diagram |
