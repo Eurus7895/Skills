@@ -242,6 +242,44 @@ def main():
               "\\|" in table_text and "including" in table_text, table_text)
         check("the backtick is escaped", "\\`backticks\\`" in table_text, table_text)
 
+        # Escaping asserted against a real build rather than against the source text.
+        # Each of these came from a page that rendered, read correctly, and failed
+        # `sphinx-build -W`: `|x|` is a substitution reference, `ref_` is a reference,
+        # `[1]_` is a footnote, and an undefined one of any of them is a build error.
+        # Only table cells had ever escaped the pipe, and nothing escaped the underscore.
+        if shutil.which("sphinx-build"):
+            hostile = {
+                "substitution": "a |sub| and a bare | bar",
+                "trailing underscore": "see ref_ and snake_case_name and _leading",
+                "footnote": "[1]_ numbered and [#]_ auto and [x] plain",
+                "emphasis": "2*3*4 and **bold",
+                "role": "`x` and ``y``",
+                "all at once": "src/api.py:12 -> `Foo`_ |x| *y* [1]_ \\z",
+            }
+            for label, text in hostile.items():
+                doc = {"format_version": 1, "generator_version": "t",
+                       "preset": "onboarding", "source_revision": None,
+                       "source_dirty": True, "coverage": {}, "claims": [],
+                       "authored_pages": [],
+                       "pages": [{"id": "overview", "title": "T " + text, "order": 1,
+                                  "mandatory": True, "blocks": [
+                                      {"id": "block:p", "type": "prose", "text": text,
+                                       "claim_refs": []},
+                                      {"id": "block:t", "type": "table",
+                                       "columns": ["c"], "rows": [[text]],
+                                       "claim_refs": []}]}]}
+                slug = label.replace(" ", "-")
+                path = os.path.join(tmp, "hostile-%s.json" % slug)
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump(doc, fh)
+                code, output = run_renderer(path, os.path.join(tmp, "hostile-" + slug),
+                                            "--check")
+                check("%s survives a real Sphinx build, in prose, heading and cell"
+                      % label,
+                      code == 0 and "build check: passed" in output, output[-400:])
+        else:
+            print("skip hostile-escaping checks -- sphinx-build is not installed")
+
         # A model the renderer cannot trust.
         bad = os.path.join(tmp, "bad.json")
         with open(doc_path, encoding="utf-8") as fh:
