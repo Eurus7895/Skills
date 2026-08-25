@@ -80,25 +80,6 @@ section reads exactly like one with nothing to disclose.
 A page with no content to show says so in a sentence — "No import crosses a directory boundary in this
 repository" — rather than being dropped.
 
-## Markup formats
-
-`render_docs.py --format` emits `rst` or `myst` from the same `doc.json`. The document model carries no
-markup, so the two differ only in the emitter: the same pages, the same order, the same references, the same
-figures.
-
-RST is the default and is to be retired. Everything both formats need — block ordering, reference resolution,
-figure resolution, source-root addressing, the toctree contents, the rule that keeps an author's index — lives
-above the split, so retiring RST is deleting one class and one table entry rather than untangling a renderer.
-
-Escaping is the one place they genuinely disagree, because the same character means different things: `|x|` is
-a substitution in RST and a column separator in Markdown, `_y_` is a reference in RST and emphasis in
-Markdown. Each emitter escapes for its own format, and both are tested by building the result rather than by
-reading it.
-
-**MyST needs `myst_parser` enabled in the project it lands in.** Without it Sphinx does not read `.md` at all:
-the pages are written, the toctree names them, and the build fails over documents it cannot parse. A fixture
-with the extension enabled will never show this, so the check belongs against the real project.
-
 ## Adding a preset
 
 Presets live in `PRESETS` in `build_document_model.py`, as `(page_id, title, mandatory, builder)` rows.

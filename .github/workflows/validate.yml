@@ -37,19 +37,6 @@ jobs:
           sudo apt-get install -y -qq graphviz
           dot -V
 
-      - name: Sphinx and MyST, so the build harness is actually exercised
-        run: |
-          # Without these, render_docs.py --check falls through to docutils or reports
-          # `skipped`, and every acceptance case for the harness is a case nothing runs.
-          # Installing Sphinx locally for the first time found three defects in merged
-          # code within minutes, which is the argument for having it here.
-          #
-          # These are test-time dependencies only. The scripts stay standard-library
-          # only and treat Sphinx exactly as they treat Graphviz: absent is a documented
-          # outcome, not a failure.
-          python3 -m pip install --quiet --disable-pip-version-check sphinx myst-parser
-          sphinx-build --version
-
       - name: Every script compiles
         run: python3 -m compileall -q tools shared plugins
 

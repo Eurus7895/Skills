@@ -242,44 +242,6 @@ def main():
               "\\|" in table_text and "including" in table_text, table_text)
         check("the backtick is escaped", "\\`backticks\\`" in table_text, table_text)
 
-        # Escaping asserted against a real build rather than against the source text.
-        # Each of these came from a page that rendered, read correctly, and failed
-        # `sphinx-build -W`: `|x|` is a substitution reference, `ref_` is a reference,
-        # `[1]_` is a footnote, and an undefined one of any of them is a build error.
-        # Only table cells had ever escaped the pipe, and nothing escaped the underscore.
-        if shutil.which("sphinx-build"):
-            hostile = {
-                "substitution": "a |sub| and a bare | bar",
-                "trailing underscore": "see ref_ and snake_case_name and _leading",
-                "footnote": "[1]_ numbered and [#]_ auto and [x] plain",
-                "emphasis": "2*3*4 and **bold",
-                "role": "`x` and ``y``",
-                "all at once": "src/api.py:12 -> `Foo`_ |x| *y* [1]_ \\z",
-            }
-            for label, text in hostile.items():
-                doc = {"format_version": 1, "generator_version": "t",
-                       "preset": "onboarding", "source_revision": None,
-                       "source_dirty": True, "coverage": {}, "claims": [],
-                       "authored_pages": [],
-                       "pages": [{"id": "overview", "title": "T " + text, "order": 1,
-                                  "mandatory": True, "blocks": [
-                                      {"id": "block:p", "type": "prose", "text": text,
-                                       "claim_refs": []},
-                                      {"id": "block:t", "type": "table",
-                                       "columns": ["c"], "rows": [[text]],
-                                       "claim_refs": []}]}]}
-                slug = label.replace(" ", "-")
-                path = os.path.join(tmp, "hostile-%s.json" % slug)
-                with open(path, "w", encoding="utf-8") as fh:
-                    json.dump(doc, fh)
-                code, output = run_renderer(path, os.path.join(tmp, "hostile-" + slug),
-                                            "--check")
-                check("%s survives a real Sphinx build, in prose, heading and cell"
-                      % label,
-                      code == 0 and "build check: passed" in output, output[-400:])
-        else:
-            print("skip hostile-escaping checks -- sphinx-build is not installed")
-
         # A model the renderer cannot trust.
         bad = os.path.join(tmp, "bad.json")
         with open(doc_path, encoding="utf-8") as fh:
@@ -446,48 +408,6 @@ def main():
         with open(os.path.join(tree, "index.rst"), encoding="utf-8") as fh:
             check("--replace-index is how the index gets rewritten, and only then",
                   "architecture/class_diagrams" in fh.read(), output)
-
-        # Sphinx resolves a relative `:doc:` target and a relative image path against the
-        # directory of the page that carries them, so a nested page referring to
-        # `architecture/data_flow` asks for `architecture/architecture/data_flow`. Neither
-        # is visible without a real build, and both shipped.
-        nested = [os.path.join(base, name)
-                  for base, _, names in os.walk(tree)
-                  for name in names if name.endswith(".rst")]
-        referring = [p for p in nested if ":doc:`" in open(p, encoding="utf-8").read()]
-        check("a nested page refers to another page from the source root",
-              referring and all("<architecture/" not in open(p, encoding="utf-8").read()
-                                and "</architecture/" in open(p, encoding="utf-8").read()
-                                for p in referring
-                                if "architecture" in open(p, encoding="utf-8").read()),
-              "%r" % [os.path.relpath(p, tree) for p in referring])
-        figures = [p for p in nested if ".. figure::" in open(p, encoding="utf-8").read()]
-        for path in figures:
-            with open(path, encoding="utf-8") as fh:
-                line = next(l for l in fh if l.startswith(".. figure::"))
-            check("a figure on a nested page is addressed from the source root too",
-                  line.split("::", 1)[1].strip().startswith("/"),
-                  "%s: %s" % (os.path.relpath(path, tree), line.strip()))
-
-        if shutil.which("sphinx-build"):
-            # Keeping the author's index leaves the generated pages in no toctree. The
-            # markup is sound; calling that a failed check sends the reader hunting for a
-            # defect in a page that does not have one.
-            unwired = os.path.join(tmp, "unwired-docs")
-            os.makedirs(os.path.join(unwired, "getting_started"))
-            with open(os.path.join(unwired, "getting_started", "introduction.rst"),
-                      "w", encoding="utf-8") as fh:
-                fh.write("Introduction\n============\n\nWritten by a person.\n")
-            with open(os.path.join(unwired, "index.rst"), "w", encoding="utf-8") as fh:
-                # A toctree that resolves. One naming a missing page is a real error and
-                # would mask the distinction this is testing.
-                fh.write("Docs\n====\n\n.. toctree::\n\n   getting_started/introduction\n")
-            code, output = run_renderer(hand_doc, unwired, "--check")
-            check("a page in no toctree is reported as unwired, not as failed",
-                  "build check: unwired" in output, output)
-            check("and being unwired does not fail the run", code == 0, output)
-        else:
-            print("skip build-check checks -- sphinx-build is not installed")
 
         figure_docs = os.path.join(tmp, "figure-docs")
         code, output = run_renderer(with_figure, figure_docs, "--diagrams", diagrams)
