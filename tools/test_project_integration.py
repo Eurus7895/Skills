@@ -142,6 +142,41 @@ def main():
             check("and %s leaves the file byte for byte" % label,
                   read(path) == original)
 
+        # A directive's options must be separated from its content by a blank line.
+        # Where a toctree has options and no entries yet, appending straight onto the
+        # last option produces markup that no longer parses.
+        optioned = write(os.path.join(tmp, "optioned.rst"),
+                         "Docs\n====\n\n.. toctree::\n   :maxdepth: 2\n")
+        wire_toctree.wire(optioned, ["arch/key"])
+        body = read(optioned)
+        check("an entry added under bare options keeps the blank line between them",
+              ":maxdepth: 2\n\n   arch/key" in body, repr(body))
+        if HAVE_SPHINX:
+            # The proof that the separator matters: without it Sphinx rejects the file.
+            project = os.path.join(tmp, "optioned-build")
+            os.makedirs(project)
+            write(os.path.join(project, "index.rst"),
+                  "Docs\n====\n\n.. toctree::\n   :maxdepth: 2\n")
+            write(os.path.join(project, "arch.rst"), "A\n=\n\nx\n")
+            wire_toctree.wire(os.path.join(project, "index.rst"), ["arch"])
+            result = sphinx_support.check(project)
+            check("and the result actually builds",
+                  result.status in (sphinx_support.PASSED, sphinx_support.UNWIRED),
+                  "%s: %s" % (result.status, result.detail[:200]))
+
+        # Reading universally and writing "\n" converts a CRLF file line by line. The
+        # promise is that everything outside the entry list survives byte for byte, and
+        # a whole-file diff on a Windows checkout breaks that more thoroughly than a
+        # wrong entry would.
+        crlf = os.path.join(tmp, "crlf.rst")
+        with open(crlf, "wb") as fh:
+            fh.write(b"Docs\r\n====\r\n\r\n.. toctree::\r\n\r\n   a\r\n")
+        wire_toctree.wire(crlf, ["b"])
+        with open(crlf, "rb") as fh:
+            raw = fh.read()
+        check("a CRLF index keeps its line endings",
+              raw.count(b"\n") == raw.count(b"\r\n") and b"   b" in raw, repr(raw))
+
         missing = os.path.join(tmp, "not-there.rst")
         try:
             wire_toctree.wire(missing, ["x"])
@@ -164,7 +199,7 @@ def main():
 
             code, output = render(doc_path, rst_only, "--format", "myst")
             check("MyST into a project that never enabled the parser is refused",
-                  code == 2 and "does not enable it" in output, output)
+                  code == 2 and "does not enable myst_parser" in output, output)
             check("and not one page was written first",
                   sorted(os.listdir(rst_only)) == listing,
                   "%r" % sorted(os.listdir(rst_only)))
@@ -189,6 +224,72 @@ def main():
             code, output = render(doc_path, commented, "--format", "myst")
             check("an extension only mentioned in a comment does not count",
                   code == 2, output)
+
+            # A substring search reads the disabling comment as an enabling one, which
+            # is the wrong direction for a guard: it lets the pages through. The
+            # assignment is parsed instead of grepped.
+            trailing = write(os.path.join(tmp, "trailing-conf.py"),
+                             "extensions = []  # myst_parser intentionally disabled\n")
+            check("a trailing comment naming the extension does not enable it",
+                  sphinx_support.parser_enabled(trailing, "myst_parser") is False)
+            listed = write(os.path.join(tmp, "listed-conf.py"),
+                           "extensions = ['sphinx.ext.autodoc', 'myst_parser']\n")
+            check("an extension in the list does",
+                  sphinx_support.parser_enabled(listed, "myst_parser") is True)
+            computed = write(os.path.join(tmp, "computed-conf.py"),
+                             "exts = ['myst_parser']\nextensions = exts\n")
+            check("a list built at run time reads as not enabled, which is the safe way",
+                  sphinx_support.parser_enabled(computed, "myst_parser") is False)
+
+            # Rendering Markdown uses the standard library. With no conf.py there is no
+            # configuration to be wrong, so refusing would make the format unavailable
+            # on any machine that has not yet installed a builder it does not need.
+            installed = sphinx_support.parser_installed
+            try:
+                sphinx_support.parser_installed = lambda name: False
+                fresh = os.path.join(tmp, "fresh-tree")
+                check("a directory with no project is not gated on the parser",
+                      sphinx_support.missing_parsers(fresh, ("myst_parser",)) == [])
+                check("a project that does not enable it still is",
+                      sphinx_support.missing_parsers(commented, ("myst_parser",)) != [])
+            finally:
+                sphinx_support.parser_installed = installed
+
+            # The author's master document is whichever one their project has, and that
+            # has nothing to do with the suffix being emitted. Looking only for index.md
+            # writes a second master beside index.rst and leaves the generated pages out
+            # of the toctree anyone reads.
+            mixed = os.path.join(tmp, "mixed-index")
+            os.makedirs(mixed)
+            write(os.path.join(mixed, "conf.py"),
+                  "project = 'p'\nextensions = ['myst_parser']\nmaster_doc = 'index'\n")
+            write(os.path.join(mixed, "index.rst"),
+                  "Docs\n====\n\n.. toctree::\n\n   placeholder\n")
+            write(os.path.join(mixed, "placeholder.rst"), "P\n=\n\nx\n")
+            code, output = render(doc_path, mixed, "--format", "myst", "--wire-toctree")
+            check("MyST into a tree with index.rst writes no second index",
+                  code == 0 and not os.path.isfile(os.path.join(mixed, "index.md")),
+                  output)
+            check("and wires itself into the index the project already had",
+                  "overview" in read(os.path.join(mixed, "index.rst")),
+                  read(os.path.join(mixed, "index.rst")))
+
+            # docutils reads reStructuredText and nothing else. A MyST tree has no .rst
+            # in it, so a flat "parsed every page" would be a pass over a tree nothing
+            # had looked at.
+            real_tool = sphinx_support._tool
+            try:
+                sphinx_support._tool = lambda: "docutils"
+                markdown_only = os.path.join(tmp, "md-only")
+                os.makedirs(markdown_only)
+                write(os.path.join(markdown_only, "index.md"), "# Docs\n")
+                check("a Markdown tree is skipped by the docutils fallback, not passed",
+                      sphinx_support.check(markdown_only).status
+                      == sphinx_support.SKIPPED)
+                check("and so is a tree it can only half read",
+                      sphinx_support.check(mixed).status == sphinx_support.SKIPPED)
+            finally:
+                sphinx_support._tool = real_tool
         else:
             print("skip parser checks -- myst-parser is not installed")
 

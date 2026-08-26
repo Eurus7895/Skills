@@ -325,10 +325,21 @@ def main():
     # An index.rst that is already there is the author's table of contents, listing
     # pages this run knows nothing about. Replacing it silently is how a documentation
     # run deletes the navigation of the tree it was pointed at.
+    # The author's index is whichever master document their project already has, and
+    # that has nothing to do with the suffix being emitted now. Looking only for
+    # `index.md` while a tree holds `index.rst` writes a second master document beside
+    # the real one, leaves the generated pages out of the toctree anyone reads, and --
+    # with both suffixes enabled -- gives Sphinx two documents called `index`.
     kept_index = False
-    if os.path.isfile(os.path.join(args.out, index_name)) and not args.replace_index:
+    existing_index = None
+    for candidate in ("index" + emitter.extension, "index.rst", "index.md"):
+        if os.path.isfile(os.path.join(args.out, candidate)):
+            existing_index = candidate
+            break
+    if existing_index and not args.replace_index:
         del rendered[index_name]
         kept_index = True
+        index_name = existing_index
 
     for name, text in sorted(rendered.items()):
         path = os.path.join(args.out, name)

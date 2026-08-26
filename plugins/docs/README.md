@@ -29,8 +29,8 @@ copilot plugin install docs@CopilotBox
 
 - **`document-codebase`** — parses the repository with `scan_repo.py` (Python via `ast`, other languages by
   import regex), ranks modules by fan-in, sends each one to the model in a bounded context packet with its
-  real importers supplied, verifies every claim that comes back, and renders a multi-page RST document under
-  `docs/`. Fires on "document this repo", "write architecture docs", "explain how this codebase fits
+  real importers supplied, verifies every claim that comes back, and renders a multi-page RST or MyST document
+  under `docs/`. Fires on "document this repo", "write architecture docs", "explain how this codebase fits
   together", "map the dependencies".
 
 ## Scripts
@@ -48,7 +48,14 @@ copilot plugin install docs@CopilotBox
 | `validate_diagrams.py` | Checks the rendered diagram against the graph it claims to draw |
 | `apply_layout_patch.py` | Applies presentation-only fixes from a visual review; refuses anything structural |
 | `build_document_model.py` | Turns verified claims into pages and blocks, with no markup in them |
-| `render_docs.py` | Renders that to RST and validates the result with Sphinx or docutils |
+| `render_docs.py` | Renders that to RST or MyST, wires it into an existing Sphinx project, and checks the result |
+| `sphinx_support.py` | Runs the build and says which of six things went wrong, rather than "failed" |
+| `wire_toctree.py` | Adds the generated pages to an index someone else wrote, or refuses to touch it |
+
+**MyST needs `myst_parser` enabled in the project it lands in.** Sphinx does not read `.md` without it, so
+`render_docs.py --format myst` refuses to write into a `conf.py` that does not enable it rather than leaving a
+build failing over pages that are not at fault. A fresh directory with no `conf.py` has nothing to
+misconfigure and is written to normally.
 
 ## Notes
 

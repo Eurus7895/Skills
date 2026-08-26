@@ -37,8 +37,8 @@ Sphinx configuration; a check must not be able to destroy the thing it checks.
 Standard library only, plus Sphinx or docutils when they are installed.
 """
 
+import ast
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -256,6 +256,12 @@ def _with_docutils(out_dir):
 
     _teach_docutils_about_sphinx()
 
+    # docutils reads reStructuredText and nothing else. A MyST tree has no `.rst` in it
+    # at all, so the loop below would find no page, report that every page parsed, and
+    # pass a document nothing had looked at. Zero pages parsed is not a pass.
+    markdown = [name for _, _, names in os.walk(out_dir)
+                for name in names if name.endswith(".md")]
+
     # Recursive: a preset whose page ids contain a separator writes pages into
     # subdirectories, and a flat listing parses none of them while reporting a pass.
     pages = []
@@ -273,6 +279,17 @@ def _with_docutils(out_dir):
             problems.append("%s: %s" % (os.path.relpath(path, out_dir), exc))
     if problems:
         return Result(INVALID_MARKUP, "\n".join(problems)[:1600], problems)
+    if not pages:
+        return Result(SKIPPED,
+                      "nothing here is reStructuredText%s, and docutils reads nothing "
+                      "else. Install sphinx-build to check this tree."
+                      % (" -- %d Markdown page(s) went unread" % len(markdown)
+                         if markdown else ""))
+    if markdown:
+        return Result(SKIPPED,
+                      "docutils parsed %d reStructuredText page(s) and cannot read the "
+                      "%d Markdown one(s) beside them, so this is not a check of the "
+                      "tree. Install sphinx-build." % (len(pages), len(markdown)))
     return Result(PASSED, "docutils parsed %d page(s) with no warnings. This is not a "
                           "Sphinx build: cross-page references were not resolved, so a "
                           "broken one would not have been seen." % len(pages))
@@ -305,9 +322,6 @@ def check(out_dir, extensions=(), policy="optional"):
     return _with_docutils(out_dir)
 
 
-CONF_EXTENSION = re.compile(r"""^\s*extensions\s*=""", re.MULTILINE)
-
-
 def project_at(directory):
     """The project's own conf.py, or None. Read, never written."""
     path = os.path.join(directory, "conf.py")
@@ -317,19 +331,31 @@ def project_at(directory):
 def parser_enabled(conf_path, extension):
     """Whether `conf.py` loads a parser extension.
 
-    Read as text rather than executed. Importing a stranger's `conf.py` runs whatever it
-    contains, and this is a read-only inspection of somebody else's project. The cost is
-    that a conf.py building its extension list at run time reads as "not enabled", which
-    is the safe direction: it produces a diagnostic asking for confirmation rather than
-    silently writing files Sphinx will not read.
+    Parsed, not executed and not grepped. Importing a stranger's `conf.py` runs whatever
+    it contains, and this is a read-only inspection of somebody else's project; but a
+    substring search is worse than useless in the other direction -- `extensions = []
+    # myst_parser intentionally disabled` would read as enabled and defeat the whole
+    check. `ast` gives the literal assignment without running a line of it.
+
+    A conf.py that builds its extension list at run time has no literal to read and
+    comes back "not enabled". That is the safe direction: a diagnostic asking for
+    confirmation rather than files Sphinx will not read.
     """
     try:
         with open(conf_path, encoding="utf-8") as fh:
-            text = fh.read()
-    except OSError:
+            tree = ast.parse(fh.read())
+    except (OSError, SyntaxError, ValueError):
         return False
-    return any(extension in line for line in text.splitlines()
-               if not line.lstrip().startswith("#"))
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AugAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if not any(isinstance(t, ast.Name) and t.id == "extensions" for t in targets):
+            continue
+        for element in ast.walk(node.value):
+            if isinstance(element, ast.Constant) and element.value == extension:
+                return True
+    return False
 
 
 def parser_installed(extension):
@@ -341,21 +367,30 @@ def parser_installed(extension):
 
 
 def missing_parsers(directory, extensions):
-    """What stands between these pages and a project that can read them.
+    """What stands between these pages and the project they are being written into.
 
     Writing MyST into a project that never enabled `myst_parser` produces files Sphinx
     does not parse at all: the pages land, the toctree names them, and the build fails
     over documents it cannot read. Nothing about the pages is wrong, so the diagnostic
     has to name the configuration instead.
+
+    **Only a project can be misconfigured.** With no `conf.py` there is nothing to be
+    wrong with: rendering Markdown uses the standard library, and whoever builds the
+    tree later installs what they need. Refusing on a bare directory would make the
+    output format unavailable on any machine without a build-time dependency it does
+    not yet need.
     """
-    problems = []
     conf_path = project_at(directory)
+    if not conf_path:
+        return []
+    problems = []
     for extension in extensions:
-        if not parser_installed(extension):
-            problems.append("%s is not installed" % extension)
-        elif conf_path and not parser_enabled(conf_path, extension):
-            problems.append("%s is installed but %s does not enable it"
-                            % (extension, os.path.relpath(conf_path, directory)))
+        if not parser_enabled(conf_path, extension):
+            problems.append(
+                "%s does not enable %s%s"
+                % (os.path.relpath(conf_path, directory), extension,
+                   "" if parser_installed(extension)
+                   else " (and %s is not installed here either)" % extension))
     return problems
 
 

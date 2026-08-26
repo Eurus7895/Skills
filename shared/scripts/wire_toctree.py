@@ -98,8 +98,13 @@ def wire(path, entries):
     """Add `entries` to the single toctree in `path`. Returns (changed, note)."""
     if not os.path.isfile(path):
         raise Refused("no such index: %s" % path)
-    with open(path, encoding="utf-8") as fh:
+    # Read without newline translation. Reading universally and writing "\n" would
+    # convert a CRLF file line by line: the promise is that everything outside the entry
+    # list survives byte for byte, and a whole-file diff on a Windows checkout breaks it
+    # more thoroughly than any wrong entry would.
+    with open(path, encoding="utf-8", newline="") as fh:
         text = fh.read()
+    ending = "\r\n" if "\r\n" in text else "\n"
     lines = text.splitlines()
 
     blocks = _blocks(lines)
@@ -131,16 +136,21 @@ def wire(path, entries):
     insert = len(body)
     while insert > 0 and not body[insert - 1].strip():
         insert -= 1
-    updated = body[:insert] + [indent + entry for entry in missing] + body[insert:]
-    if not any(line.strip() for line in body):
-        # An empty body: the entries need a blank line after the options block.
-        updated = [""] + [indent + entry for entry in missing]
+    # A directive's options must be separated from its content by a blank line. Where
+    # the toctree has options and no entries yet, the span ends at the last option, so
+    # appending straight onto it produces `:maxdepth: 2` followed by a page name and a
+    # directive that no longer parses. `body` is not empty in that case -- the options
+    # are in it -- so emptiness is the wrong test; having no entry is the right one.
+    entries_present = [line for line in body if line.strip() and not OPTION.match(line)]
+    separator = [] if entries_present else [""]
+    updated = (body[:insert] + separator
+               + [indent + entry for entry in missing] + body[insert:])
 
     rebuilt = lines[:body_start] + updated + lines[body_end:]
-    output = "\n".join(rebuilt)
-    if text.endswith("\n"):
-        output += "\n"
-    with open(path, "w", encoding="utf-8") as fh:
+    output = ending.join(rebuilt)
+    if text.endswith(("\n", "\r")):
+        output += ending
+    with open(path, "w", encoding="utf-8", newline="") as fh:
         fh.write(output)
     return True, "added %d page(s) to the toctree in %s: %s" % (
         len(missing), os.path.basename(path), ", ".join(missing))

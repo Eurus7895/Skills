@@ -24,7 +24,7 @@
       "name": "docs",
       "source": "plugins/docs",
       "description": "Generate architecture documentation for a repository from a parsed dependency graph rather than from memory: symbols, imports, classes and base classes come from a scanner, every module is described with its real neighbours supplied, and each structural claim is checked against the graph before it ships. Produces docs/ with file:line citations.",
-      "version": "0.2.0"
+      "version": "0.3.0"
     }
   ]
 }
