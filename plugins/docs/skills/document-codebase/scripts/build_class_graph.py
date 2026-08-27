@@ -8,8 +8,8 @@
         --claims .docs-build/claims.verified.jsonl --detail public \\
         --out .docs-build/class-graph.json
 
-`class-graph.json` is the single source every diagram is drawn from. Draw.io and SVG are
-render products of it; if they disagree with this file, they are wrong. Nothing here
+`class-graph.json` is the single source every diagram is drawn from. The rendered SVG is
+a product of it; if it disagrees with this file, the drawing is wrong. Nothing here
 depends on Graphviz being installed, so the graph exists and can be checked even where
 no diagram can be drawn.
 

@@ -5,7 +5,7 @@ Stdlib only, no test framework -- see tools/test_check_env.py for why.
 
 Graphviz is not required to run these. Layout needs `dot`; everything after it does
 not, and the tests are built around that split: the render path, the equivalence between
-Draw.io and SVG, and every validation finding are driven from the checked-in diagram
+the rendered SVG, and every validation finding are driven from the checked-in diagram
 model in tests/contracts/. Where `dot` is present the layout path is exercised too, and
 where it is absent only the policy branches are.
 
@@ -174,9 +174,9 @@ def main():
         code, output = render(MODEL, good)
         check("rendering from an existing model succeeds", code == 0, output)
         written = sorted(os.listdir(good))
-        check("both formats and the manifest are written",
+        check("the model, the drawing and the manifest are written",
               written == ["diagram-manifest.json", "full-repository-model.json",
-                          "full-repository.drawio", "full-repository.svg"],
+                          "full-repository.svg"],
               "%r" % written)
 
         code, report = validate(good)
@@ -190,14 +190,12 @@ def main():
                    for n in written)
         check("rendering the same model twice gives the same bytes", same)
 
-        with open(os.path.join(good, "full-repository.drawio"), encoding="utf-8") as fh:
-            drawio = fh.read()
-        check("the Draw.io file is native mxGraph, not an image wrapper",
-              "<mxGraphModel" in drawio and "mxGeometry" in drawio)
-        check("class boxes are separate cells a person can drag",
-              drawio.count('vertex="1"') >= 3, drawio[:200])
-        check("edges carry the ids the model uses",
-              "edge:inheritance:class:pkg/models.py:Order" in drawio)
+        with open(os.path.join(good, "full-repository.svg"), encoding="utf-8") as fh:
+            svg = fh.read()
+        check("every box carries the id the model uses, so a checker can find it",
+              'id="class:pkg/models.py:Order"' in svg)
+        check("and so does every edge",
+              'id="edge:inheritance:class:pkg/models.py:Order' in svg)
 
         # A render-only pass rebuilds one view. Rewriting the manifest from that single
         # entry would drop every other view from the record while its files sit on disk,
@@ -255,9 +253,9 @@ def main():
 
         broken = os.path.join(tmp, "broken-xml")
         shutil.copytree(good, broken)
-        with open(os.path.join(broken, "full-repository.drawio"), "w",
+        with open(os.path.join(broken, "full-repository.svg"), "w",
                   encoding="utf-8") as fh:
-            fh.write("<mxfile><unclosed>")
+            fh.write("<svg><unclosed>")
         code, report = validate(broken)
         check("malformed XML is caught", code == 1 and "G006" in codes(report),
               "%r" % report)

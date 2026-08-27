@@ -228,11 +228,8 @@ def main():
                         "--out", styled_docs], capture_output=True, text=True)
         svg = open(os.path.join(styled_docs, "full-repository.svg"),
                    encoding="utf-8").read()
-        drawio = open(os.path.join(styled_docs, "full-repository.drawio"),
-                      encoding="utf-8").read()
-        check("and both renderers actually use the colour it set",
-              "#112233" in svg and "#112233" in drawio,
-              "svg %s / drawio %s" % ("#112233" in svg, "#112233" in drawio))
+        check("and the renderer actually uses the colour it set",
+              "#112233" in svg, svg[:200])
 
         old = os.path.join(tmp, "old-patch.json")
         with open(old, "w", encoding="utf-8") as fh:

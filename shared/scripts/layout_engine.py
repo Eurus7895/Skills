@@ -5,10 +5,10 @@
     placement = layout_engine.place(graph, spec, labels, sizes)
 
 Graphviz does exactly one thing for this pipeline: it turns a graph into coordinates.
-Everything after that -- the model, the Draw.io and SVG emitters, previews, the
-structural checks, layout patches, detail views -- is already ours. This is the same one
-thing, in the standard library, so a machine with no `dot` gets a diagram rather than a
-line of prose explaining that it does not.
+Everything after that -- the model, the SVG emitter, previews, the structural checks,
+layout patches, detail views -- is already ours. This is the same one thing, in the
+standard library, so a machine with no `dot` gets a diagram rather than a line of prose
+explaining that it does not.
 
 **Laid out by container, not by global rank.** The obvious approach is to rank every
 class at once and hope the clusters fall out; they do not, which is why Graphviz needs
@@ -168,7 +168,7 @@ def place(graph, spec, labels, sizes):
     """Coordinates for every class, container and edge this view draws.
 
     Returns the same shape the Graphviz path produces after normalisation: top-left
-    origins, y increasing downwards, ready for either renderer.
+    origins, y increasing downwards, ready for the renderer.
     """
     layers = set(spec.get("layers", ()))
     edges = _visible_class_edges(graph, layers)

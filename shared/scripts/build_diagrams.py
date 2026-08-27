@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lay out the class graph with Graphviz, then render Draw.io and SVG from one geometry.
+"""Lay out the class graph, then render SVG from that one geometry.
 
     python3 scripts/build_diagrams.py --class-graph .docs-build/class-graph.json \\
         --view-spec .docs-build/view-spec.json --policy optional \\
@@ -9,15 +9,14 @@ Two stages, deliberately separable:
 
     layout    needs `dot`. Produces one <view>-model.json per view: normalized
               coordinates pinned to the class graph's structure hash
-    render    needs nothing. Turns those models into .drawio and .svg
+    render    needs nothing. Turns those models into .svg
 
 One run can produce several views. `diagram-manifest.json` lists them all; each view
 owns its own model and its own pair of rendered files, named from the view.
 
 `--render-only` runs the second stage against an existing model. That is not a test
-hatch: it is the path taken after a layout patch is applied, and it is what keeps the
-two output formats honest -- both are generated from the same coordinates, so they
-cannot drift into showing different things.
+hatch: it is the path taken after a layout patch is applied, and it is why the renderer
+stays checkable on a machine that cannot lay a diagram out.
 
 A view specification may choose presentation -- detail level, which layers are visible,
 which packages to emphasise. It may not add a class, remove one, or change what connects
@@ -67,7 +66,7 @@ POINTS_PER_INCH = 72.0
 DENSITY_CLASSES = 60
 DENSITY_MEMBERS = 400
 
-# Edge styling per layer, kept here so Draw.io and SVG cannot disagree about it.
+# Edge styling per layer.
 LAYER_STYLE = {
     "inheritance": {"dash": None, "arrow": "block", "colour": "#333333"},
     "composition": {"dash": None, "arrow": "diamond", "colour": "#2f6f4f"},
@@ -267,9 +266,8 @@ def parse_point(text):
 def normalize(laid_out, graph, spec, labels, sizes, cluster_index):
     """Graphviz coordinates -> a model with the Y axis the way a canvas expects it.
 
-    Graphviz measures from the bottom left; Draw.io and SVG both measure from the top
-    left. Flipping once here is what lets the two renderers share a geometry instead of
-    each doing its own conversion and drifting apart.
+    Graphviz measures from the bottom left; a canvas measures from the top left.
+    Flipping once here means the renderer never has to think about it.
     """
     bounding = laid_out.get("bb")
     if not bounding:
@@ -385,101 +383,13 @@ def override(item, field, fallback):
     return ((item.get("style") or {}).get(field)) or fallback
 
 
-def drawio_style(kind, layer=None, stereotype=None, external=False):
-    if kind == "package":
-        return ("rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#999999;"
-                "verticalAlign=top;align=left;spacingLeft=8;dashed=0;")
-    if kind == "module":
-        return ("rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#BBBBBB;"
-                "verticalAlign=top;align=left;spacingLeft=8;dashed=1;")
-    if kind == "node":
-        if external:
-            # A neighbour, drawn so the boundary is visible. Greyed and dashed so nobody
-            # reads it as a class this view is describing.
-            return ("rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=top;"
-                    "fillColor=#F4F4F4;strokeColor=#999999;dashed=1;spacing=4;")
-        fill = {"exception": "#FDF0EF", "abstract": "#F2F0FA",
-                "enum": "#F0F6FD", "dataclass": "#F1FAF3"}.get(stereotype, "#FFFFFF")
-        return ("rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=top;"
-                "fillColor=%s;strokeColor=#333333;spacing=4;" % fill)
-    style = LAYER_STYLE.get(layer, LAYER_STYLE["inheritance"])
-    return ("endArrow=%s;html=1;rounded=0;strokeColor=%s;%s"
-            % (style["arrow"], style["colour"],
-               "dashed=1;" if style["dash"] else "dashed=0;"))
-
-
-def render_drawio(model):
-    """Native Draw.io XML. Editable, and carrying the ids the model uses."""
-    mxfile = ET.Element("mxfile", {"host": "docs-plugin"})
-    diagram = ET.SubElement(mxfile, "diagram", {"name": model["view"]})
-    root_model = ET.SubElement(diagram, "mxGraphModel", {
-        "dx": "0", "dy": "0", "grid": "0", "page": "1",
-        "pageWidth": str(int(model["bounds"]["width"]) + 40),
-        "pageHeight": str(int(model["bounds"]["height"]) + 40)})
-    root = ET.SubElement(root_model, "root")
-    ET.SubElement(root, "mxCell", {"id": "0"})
-    ET.SubElement(root, "mxCell", {"id": "1", "parent": "0"})
-
-    # Packages before modules before classes: Draw.io needs a parent cell to exist
-    # before a child references it.
-    for container in sorted(model["containers"], key=lambda c: c["kind"] != "package"):
-        parent = "1"
-        cell = ET.SubElement(root, "mxCell", {
-            "id": container["id"], "value": container["label"],
-            "style": drawio_style(container["kind"]), "vertex": "1", "parent": parent})
-        ET.SubElement(cell, "mxGeometry", {
-            "x": str(container["x"]), "y": str(container["y"]),
-            "width": str(container["width"]), "height": str(container["height"]),
-            "as": "geometry"})
-
-    for node in model["nodes"]:
-        style = drawio_style("node", stereotype=node.get("stereotype"),
-                             external=node.get("external"))
-        fill = override(node, "fill", None)
-        stroke = override(node, "stroke", None)
-        if fill:
-            style = re.sub(r"fillColor=[^;]*;", "fillColor=%s;" % fill, style)
-        if stroke:
-            style = re.sub(r"strokeColor=[^;]*;", "strokeColor=%s;" % stroke, style)
-        if node.get("link"):
-            # Draw.io carries a link by wrapping the cell, which is why the cell's id
-            # moves out to the wrapper: the id must stay on the outermost element or
-            # nothing referencing this node resolves.
-            holder = ET.SubElement(root, "UserObject", {
-                "id": node["id"], "label": "\n".join(node["label"]),
-                "link": node["link"]})
-            cell = ET.SubElement(holder, "mxCell", {
-                "style": style, "vertex": "1", "parent": "1"})
-        else:
-            cell = ET.SubElement(root, "mxCell", {
-                "id": node["id"], "value": "\n".join(node["label"]),
-                "style": style, "vertex": "1", "parent": "1"})
-        ET.SubElement(cell, "mxGeometry", {
-            "x": str(node["x"]), "y": str(node["y"]),
-            "width": str(node["width"]), "height": str(node["height"]),
-            "as": "geometry"})
-
-    for edge in model["edges"]:
-        cell = ET.SubElement(root, "mxCell", {
-            "id": edge["id"], "value": edge.get("label", ""),
-            "style": drawio_style("edge", layer=edge["layer"]), "edge": "1",
-            "parent": "1", "source": edge["source"], "target": edge["target"]})
-        geometry = ET.SubElement(cell, "mxGeometry", {"relative": "1", "as": "geometry"})
-        if edge.get("points"):
-            array = ET.SubElement(geometry, "Array", {"as": "points"})
-            for x, y in edge["points"][1:-1]:
-                ET.SubElement(array, "mxPoint", {"x": str(x), "y": str(y)})
-
-    return ET.tostring(mxfile, encoding="unicode")
-
-
 def svg_escape(text):
     return (str(text).replace("&", "&amp;").replace("<", "&lt;")
             .replace(">", "&gt;").replace('"', "&quot;"))
 
 
 def render_svg(model):
-    """The same coordinates as the Draw.io file, drawn directly."""
+    """The model's coordinates, drawn directly."""
     width = model["bounds"]["width"] + 40
     height = model["bounds"]["height"] + 40
     out = ['<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" '
@@ -671,11 +581,6 @@ def write_outputs(model, out_dir, previews):
     with open(model_path, "w", encoding="utf-8") as fh:
         json.dump(model, fh, indent=2, sort_keys=True)
     written["%s-model.json" % stem] = model_path
-
-    drawio_path = os.path.join(out_dir, "%s.drawio" % stem)
-    with open(drawio_path, "w", encoding="utf-8") as fh:
-        fh.write(render_drawio(model))
-    written["%s.drawio" % stem] = drawio_path
 
     svg_path = os.path.join(out_dir, "%s.svg" % stem)
     with open(svg_path, "w", encoding="utf-8") as fh:

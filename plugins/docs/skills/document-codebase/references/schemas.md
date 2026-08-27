@@ -171,7 +171,7 @@ One run may draw several views. `diagram-manifest.json` is the index of them:
   "scope": {"kind": "repository"}, "source_graph_hash": "sha256:...", "nodes": ["..."]}]}
 ```
 
-Each view owns `<stem>-model.json` (the geometry), `<stem>.drawio`, `<stem>.svg`, and with `--previews` a
+Each view owns `<stem>-model.json` (the geometry), `<stem>.svg`, and with `--previews` a
 `<stem>-preview.png`. `scope.kind` is `repository`, `package` or `module`, with `scope.id` naming the container
 for the latter two.
 

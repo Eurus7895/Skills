@@ -24,12 +24,11 @@ What is checked:
     geometry    finite, non-zero, and no two sibling boxes overlapping. Nesting a
                 class inside its module is not an overlap; two classes sharing the
                 same space is
-    equivalence Draw.io and SVG contain the same nodes and edges. They are generated
-                from one geometry, so a difference means one of them was edited or
-                one renderer has drifted
+    rendered    the SVG contains exactly the nodes and edges the model declares --
+                no fewer, and none the class graph never backed
 
 Finding codes: G001 coverage, G002 identity, G003 integrity, G004 geometry,
-G005 equivalence, G006 malformed output, G007 view set, G008 empty view,
+G005 rendered artifact, G006 malformed output, G007 view set, G008 empty view,
 G009 broken link between views.
 
 Exit codes: 0 no findings, 1 findings, 2 input error, 3 internal error.
@@ -297,29 +296,6 @@ def _finite(value):
     return value == value and value not in (float("inf"), float("-inf"))
 
 
-def parse_drawio(path, findings):
-    """Node and edge ids from the Draw.io file, or None when it will not parse."""
-    try:
-        root = ET.parse(path).getroot()
-    except (OSError, ET.ParseError) as exc:
-        findings.add("G006", "%s is not well-formed XML: %s" % (os.path.basename(path), exc))
-        return None, None
-    # A linked node is a UserObject wrapping its mxCell, and the id lives on the wrapper.
-    # Reading only mxCell would report every linked class as missing from the Draw.io.
-    wrapped = {}
-    for holder in root.iter("UserObject"):
-        for cell in holder.iter("mxCell"):
-            wrapped[id(cell)] = holder.get("id")
-    nodes, edges = set(), set()
-    for cell in root.iter("mxCell"):
-        cell_id = wrapped.get(id(cell), cell.get("id"))
-        if cell.get("edge") == "1":
-            edges.add(cell_id)
-        elif cell.get("vertex") == "1":
-            nodes.add(cell_id)
-    return nodes, edges
-
-
 def parse_svg(path, findings):
     try:
         root = ET.parse(path).getroot()
@@ -339,52 +315,47 @@ def parse_svg(path, findings):
     return nodes, edges
 
 
-def check_equivalence(model, out_dir, findings):
-    stem = view_stem(model["view"])
-    drawio_path = os.path.join(out_dir, "%s.drawio" % stem)
-    svg_path = os.path.join(out_dir, "%s.svg" % stem)
-    for path in (drawio_path, svg_path):
-        if not os.path.isfile(path):
-            findings.add("G006", "%s was not rendered" % os.path.basename(path))
-            return
+def check_rendered(model, out_dir, findings):
+    """Does the drawn file say what the model says?
 
-    drawio_nodes, drawio_edges = parse_drawio(drawio_path, findings)
-    svg_nodes, svg_edges = parse_svg(svg_path, findings)
-    if drawio_nodes is None or svg_nodes is None:
+    This used to compare two rendered formats against each other as well. There is one
+    format now, so the question that remains is the one that always mattered: whether
+    what was drawn matches what the model declares. A format disagreeing with a sibling
+    format was only ever a proxy for that.
+    """
+    stem = view_stem(model["view"])
+    svg_path = os.path.join(out_dir, "%s.svg" % stem)
+    if not os.path.isfile(svg_path):
+        findings.add("G006", "%s was not rendered" % os.path.basename(svg_path))
         return
 
-    expected_nodes = {n["id"] for n in model["nodes"]} | {c["id"] for c in model["containers"]}
+    found_nodes, found_edges = parse_svg(svg_path, findings)
+    if found_nodes is None:
+        return
+
+    expected_nodes = ({n["id"] for n in model["nodes"]}
+                      | {c["id"] for c in model["containers"]})
     expected_edges = {e["id"] for e in model["edges"] if e.get("points")}
 
     # Both directions. Checking only what is missing lets an artifact grow a node or an
     # edge that no class graph backs -- a picture asserting something the source never
     # said, which is the failure the whole gate exists to catch.
-    for label, found in (("Draw.io", drawio_nodes), ("SVG", svg_nodes)):
-        missing = sorted(expected_nodes - found)
-        if missing:
-            findings.add("G005", "%s is missing %d node(s) the model declares: %s"
-                         % (label, len(missing), ", ".join(missing[:5])))
-        extra = sorted(found - expected_nodes)
-        if extra:
-            findings.add("G005", "%s contains %d node(s) the model does not declare: %s"
-                         % (label, len(extra), ", ".join(extra[:5])))
-    for label, found in (("Draw.io", drawio_edges), ("SVG", svg_edges)):
-        missing = sorted(expected_edges - found)
-        if missing:
-            findings.add("G005", "%s is missing %d edge(s) the model declares: %s"
-                         % (label, len(missing), ", ".join(missing[:5])))
-        extra = sorted(found - {e["id"] for e in model["edges"]})
-        if extra:
-            findings.add("G005", "%s contains %d edge(s) the model does not declare: %s"
-                         % (label, len(extra), ", ".join(extra[:5])))
-
-    # The two formats come from one geometry, so a difference between them means one was
-    # edited by hand or one renderer has drifted from the other.
-    only_drawio = sorted(drawio_nodes - svg_nodes)
-    only_svg = sorted(svg_nodes - drawio_nodes)
-    if only_drawio or only_svg:
-        findings.add("G005", "Draw.io and SVG disagree: %r only in Draw.io, %r only in SVG"
-                     % (only_drawio[:3], only_svg[:3]))
+    missing = sorted(expected_nodes - found_nodes)
+    if missing:
+        findings.add("G005", "the SVG is missing %d node(s) the model declares: %s"
+                     % (len(missing), ", ".join(missing[:5])))
+    extra = sorted(found_nodes - expected_nodes)
+    if extra:
+        findings.add("G005", "the SVG contains %d node(s) the model does not declare: %s"
+                     % (len(extra), ", ".join(extra[:5])))
+    missing = sorted(expected_edges - found_edges)
+    if missing:
+        findings.add("G005", "the SVG is missing %d edge(s) the model declares: %s"
+                     % (len(missing), ", ".join(missing[:5])))
+    extra = sorted(found_edges - {e["id"] for e in model["edges"]})
+    if extra:
+        findings.add("G005", "the SVG contains %d edge(s) the model does not declare: %s"
+                     % (len(extra), ", ".join(extra[:5])))
 
 
 def main():
@@ -435,7 +406,7 @@ def main():
         check_coverage(model, graph, findings)
         check_integrity(model, graph, findings)
         check_geometry(model, findings)
-        check_equivalence(model, args.out_dir, findings)
+        check_rendered(model, args.out_dir, findings)
     check_view_set(models, graph, findings)
     check_links(models, args.out_dir, findings)
 
@@ -452,9 +423,9 @@ def main():
         print("FAIL  %d finding(s)" % len(findings))
     else:
         for model in models:
-            print("ok  %s: %d node(s), %d edge(s), %d container(s); Draw.io and SVG "
-                  "agree" % (model["view"], len(model["nodes"]), len(model["edges"]),
-                             len(model["containers"])))
+            print("ok  %s: %d node(s), %d edge(s), %d container(s); the SVG "
+                  "matches the model" % (model["view"], len(model["nodes"]),
+                                     len(model["edges"]), len(model["containers"])))
     return 1 if findings else 0
 
 

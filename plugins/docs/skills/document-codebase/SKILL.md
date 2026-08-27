@@ -278,9 +278,8 @@ budget from step 3 and usually reintroduces claims that already passed.
 
 - **Run** the three commands below in order: build the graph, lay it out and render, then check the render.
 - **Writes** `.docs-build/class-graph.json`, and into `docs/_diagrams/`: one
-  `diagram-manifest.json` listing every view produced, plus per view a `<view>-model.json`, a `.drawio`, an
-  `.svg`, and with `--previews` a `<view>-preview.png`. The repository view is always called
-  `full-repository`.
+  `diagram-manifest.json` listing every view produced, plus per view a `<view>-model.json`, an `.svg`, and
+  with `--previews` a `<view>-preview.png`. The repository view is always called `full-repository`.
 - **Read** whether layout ran or was skipped for a missing `dot`, and every `G0xx` finding from the validator.
 - **Decide** whether the document gets a figure at all. A skipped diagram is a documented outcome; a failed
   structural check is not — fix it or drop the figure.
@@ -305,8 +304,7 @@ wastes a retry on every machine without Graphviz.
     --class-graph .docs-build/class-graph.json
 ```
 
-`class-graph.json` is the canonical source; the `.drawio` and `.svg` are render products
-of it. Layout needs Graphviz — under `--policy optional` a missing `dot` skips the
+`class-graph.json` is the canonical source; the `.svg` is a render product of it. Layout needs Graphviz — under `--policy optional` a missing `dot` skips the
 diagram and the document is generated without one. **`skipped` is not `passed`**: say
 which happened.
 

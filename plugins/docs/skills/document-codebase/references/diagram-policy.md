@@ -1,8 +1,8 @@
 # Diagram policy
 
 The full-repository class diagram is the primary diagram deliverable, and it is a claim
-like any other: it says these classes exist, in these packages, related this way. Draw.io
-and SVG are render products of `class-graph.json`; if they disagree with it, they are
+like any other: it says these classes exist, in these packages, related this way. The SVG
+is a render product of `class-graph.json`; if it disagrees with the graph, the drawing is
 wrong and `validate_diagrams.py` says so.
 
 ## What is drawn, and how well it is known
@@ -167,5 +167,5 @@ again after every patch:
   container (`G003`);
 - geometry finite and non-zero; no two boxes overlapping unless one is a container
   (`G004`);
-- Draw.io and SVG contain the same nodes and edges (`G005`);
+- the SVG contains exactly the nodes and edges the model declares (`G005`);
 - both files are well-formed XML (`G006`).
