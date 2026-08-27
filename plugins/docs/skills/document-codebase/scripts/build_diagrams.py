@@ -222,12 +222,8 @@ def main():
     parser.add_argument("--class-graph", required=True)
     parser.add_argument("--view-spec")
     parser.add_argument("--out", default="docs/_diagrams")
-    parser.add_argument("--policy", default="required", choices=("required", "disabled"))
     parser.add_argument("--detail-views", action="store_true")
     args = parser.parse_args()
-    if args.policy == "disabled":
-        print("diagrams: disabled by policy; nothing generated")
-        return 0
     graph, error = load_json(args.class_graph, "class graph")
     if error:
         return fail(error)

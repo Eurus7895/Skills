@@ -101,11 +101,6 @@ def main():
         check("malformed PlantUML boundaries are caught", code == 1 and not result["passed"],
               repr(result))
 
-        disabled = os.path.join(work, "disabled")
-        code, output = run(BUILD, "--class-graph", GRAPH, "--out", disabled,
-                           "--policy", "disabled")
-        check("disabled policy writes nothing", code == 0 and not os.path.exists(disabled), output)
-
         invalid = os.path.join(work, "invalid")
         code, output = run(BUILD, "--class-graph", GRAPH, "--view-spec",
                            os.path.join(REPO, "tests", "contracts",
