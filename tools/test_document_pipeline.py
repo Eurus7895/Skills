@@ -334,14 +334,15 @@ def main():
               and open(os.path.join(existing, "conf.py"),
                        encoding="utf-8").read() == marker, output)
 
-        # Diagrams are optional, so the two cases that matter are "there is one" and
-        # "there is not" -- and neither may produce a page pointing at a missing file.
+        # PlantUML is the canonical Diagram as Code artifact. The document model points
+        # at that source; Sphinx and PlantUML render it later.
         contracts = os.path.join(REPO, "tests", "contracts")
         diagrams = os.path.join(tmp, "_diagrams")
         subprocess.run([sys.executable,
                         os.path.join(REPO, "shared", "scripts", "build_diagrams.py"),
-                        "--render-only",
-                        os.path.join(contracts, "diagram-model-v1-valid.json"),
+                        "--class-graph",
+                        os.path.join(contracts, "class-graph-v1-minimal.json"),
+                        "--detail-views",
                         "--out", diagrams], capture_output=True, text=True)
         code, doc6, output, with_figure = run_builder(
             tmp, index, CLAIMS, FRAGMENTS, name="figure", preset="architecture")
@@ -352,32 +353,21 @@ def main():
              "--fragments", os.path.join(tmp, "figure-fragments.jsonl"),
              "--preset", "architecture", "--diagrams", diagrams,
              "--out", with_figure], capture_output=True, text=True)
-        check("a document can reference a rendered diagram", proc.returncode == 0,
+        check("a document can reference generated PlantUML", proc.returncode == 0,
               proc.stdout + proc.stderr)
         with open(with_figure, encoding="utf-8") as fh:
             doc6 = json.load(fh)
-        figures = [b for p in doc6["pages"] for b in p["blocks"] if b["type"] == "image"]
-        check("the figure lands on the pages about structure",
+        figures = [b for p in doc6["pages"] for b in p["blocks"]
+                   if b["type"] == "plantuml"]
+        check("the diagram lands on the pages about structure",
               {b["id"].split("-diagram-")[0] for b in figures}
               == {"block:architecture", "block:class-views"}, "%r" % figures)
-        check("and every figure has alt text",
+        check("and every diagram has descriptive text",
               all(b.get("alt") for b in figures), "%r" % figures)
 
         # A preset with no page for classes still has to give the detail views a home.
         # Rendering seven views into _diagrams/ and referencing one leaves the rest as
         # files the reader has no route to.
-        detail_model = os.path.join(tmp, "detail-view-model.json")
-        with open(os.path.join(contracts, "diagram-model-v1-valid.json"),
-                  encoding="utf-8") as fh:
-            detail = json.load(fh)
-        detail["view"] = "package_pkg"
-        detail["scope"] = {"kind": "package", "id": "package:pkg"}
-        with open(detail_model, "w", encoding="utf-8") as fh:
-            json.dump(detail, fh)
-        subprocess.run([sys.executable,
-                        os.path.join(REPO, "shared", "scripts", "build_diagrams.py"),
-                        "--render-only", detail_model, "--out", diagrams],
-                       capture_output=True, text=True)
         onboarding_doc = os.path.join(tmp, "onboarding-figure-doc.json")
         proc = subprocess.run(
             [sys.executable, BUILDER, "--index", index,
@@ -389,9 +379,9 @@ def main():
               proc.stdout + proc.stderr)
         with open(onboarding_doc, encoding="utf-8") as fh:
             shown = {b["src"] for p in json.load(fh)["pages"] for b in p["blocks"]
-                     if b["type"] == "image"}
+                     if b["type"] == "plantuml"}
         check("a preset without a class page still shows the detail views",
-              shown == {"_diagrams/full-repository.svg", "_diagrams/package-pkg.svg"},
+              shown == {"_diagrams/full-repository.puml", "_diagrams/package-pkg.puml"},
               "%r" % sorted(shown))
 
         # -- a preset that matches an existing documentation tree -------------------
@@ -493,7 +483,7 @@ def main():
         code, output = run_renderer(with_figure, figure_docs, "--diagrams", diagrams)
         check("rendering copies the diagrams in beside the pages",
               code == 0 and os.path.isfile(
-                  os.path.join(figure_docs, "_diagrams", "full-repository.svg")), output)
+                  os.path.join(figure_docs, "_diagrams", "full-repository.puml")), output)
         code, output = run_renderer(with_figure, os.path.join(tmp, "no-figures"))
         check("a figure with nowhere to resolve stops the render", code == 2, output)
 
@@ -507,7 +497,7 @@ def main():
                                     "--diagrams", os.path.join(in_place, "_diagrams"))
         check("rendering into the directory the diagrams already live in keeps them",
               code == 0 and os.path.isfile(
-                  os.path.join(in_place, "_diagrams", "full-repository.svg")), output)
+                  os.path.join(in_place, "_diagrams", "full-repository.puml")), output)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -27,15 +27,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Graphviz, so the diagram layout is actually exercised
+      - name: PlantUML, so Diagram as Code rendering is exercised
         run: |
-          # Without `dot`, tools/test_diagrams.py skips every layout assertion and the
-          # primary diagram deliverable ships unverified. The scripts still treat
-          # Graphviz as optional at runtime; this is about the tests having something
-          # to check.
           sudo apt-get update -qq
-          sudo apt-get install -y -qq graphviz
-          dot -V
+          sudo apt-get install -y -qq plantuml
+          plantuml -version
 
       - name: Sphinx and MyST, so the build harness is actually exercised
         run: |
@@ -45,9 +41,8 @@ jobs:
           # code within minutes, which is the argument for having it here.
           #
           # These are test-time dependencies only. The scripts stay standard-library
-          # only and treat Sphinx exactly as they treat Graphviz: absent is a documented
-          # outcome, not a failure.
-          python3 -m pip install --quiet --disable-pip-version-check sphinx myst-parser
+          # only. CI installs them so the shipped Sphinx integration is exercised.
+          python3 -m pip install --quiet --disable-pip-version-check sphinx myst-parser sphinxcontrib-plantuml
           sphinx-build --version
 
       - name: Every script compiles

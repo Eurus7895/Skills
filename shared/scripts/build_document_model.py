@@ -37,7 +37,7 @@ import sys
 FORMAT_VERSION = 1
 GENERATOR_VERSION = "0.2.0-dev"
 SUPPORTED_SCHEMA = {2}
-SUPPORTED_MANIFEST_SCHEMA = {2}
+SUPPORTED_MANIFEST_SCHEMA = {3}
 
 PROSE_STATUSES = ("verified", "supported_inference")
 LIMITATION_STATUSES = ("candidate", "unsupported", "needs_context")
@@ -134,8 +134,8 @@ def table(block_id, columns, rows, claim_refs=()):
             "rows": [list(r) for r in rows], "claim_refs": sorted(claim_refs)}
 
 
-def image(block_id, src, alt):
-    return {"id": block_id, "type": "image", "src": src, "alt": alt}
+def diagram(block_id, src, alt):
+    return {"id": block_id, "type": "plantuml", "src": src, "alt": alt}
 
 
 def cite(path, line):
@@ -143,23 +143,18 @@ def cite(path, line):
 
 
 def diagram_blocks(diagrams, page_id):
-    """An image block per rendered diagram, or nothing at all.
-
-    A page never claims a diagram that was not produced. Graphviz is optional, so the
-    common case on a machine without it is that these blocks simply do not exist -- and
-    the reader sees a page with no picture rather than a broken image.
-    """
+    """A PlantUML directive block per generated Diagram as Code source."""
     if not diagrams:
         return []
     blocks = []
     for name, alt in diagrams.get(page_id, ()):
-        blocks.append(image("block:%s-diagram-%s" % (page_id, os.path.splitext(name)[0]),
-                            "_diagrams/%s" % name, alt))
+        blocks.append(diagram("block:%s-diagram-%s" % (page_id, os.path.splitext(name)[0]),
+                              "_diagrams/%s" % name, alt))
     return blocks
 
 
 def find_diagrams(directory, page_ids=()):
-    """Which rendered diagrams exist, mapped to the pages that should show them."""
+    """Which generated PlantUML views exist, mapped to documentation pages."""
     if not directory or not os.path.isdir(directory):
         return {}
     manifest_path = os.path.join(directory, "diagram-manifest.json")
@@ -176,9 +171,9 @@ def find_diagrams(directory, page_ids=()):
 
     overview, details = [], []
     for entry in manifest.get("views", ()):
-        stem = entry.get("stem") or str(entry.get("view", "")).replace("_", "-")
-        svg = "%s.svg" % stem
-        if not stem or not os.path.isfile(os.path.join(directory, svg)):
+        source = entry.get("file")
+        if not source or not source.endswith(".puml") \
+                or not os.path.isfile(os.path.join(directory, source)):
             continue
         scope = entry.get("scope") or {"kind": "repository"}
         layers = " and ".join(entry.get("layers", ())) or "no"
@@ -186,13 +181,13 @@ def find_diagrams(directory, page_ids=()):
         own = entry.get("scope_nodes")
         count = len(own if own is not None else entry.get("nodes", ()))
         if scope.get("kind") == "repository":
-            overview.append((svg, "Class diagram of the whole repository: %d class(es) "
+            overview.append((source, "Class diagram of the whole repository: %d class(es) "
                                   "grouped by package and module, showing %s "
                                   "relationships" % (count, layers)))
         else:
             name = str(scope.get("id", "")).split(":", 1)[-1]
             neighbours = len(entry.get("nodes", ())) - count
-            details.append((svg, "Class diagram of %s: %d class(es)%s, showing %s "
+            details.append((source, "Class diagram of %s: %d class(es)%s, showing %s "
                                  "relationships"
                             % (name or "one scope", count,
                                " plus %d neighbour(s) outside it" % neighbours
@@ -626,8 +621,8 @@ def main():
     if args.diagrams and not diagrams:
         # Asked for, not found: say so rather than producing a document that quietly
         # has no picture in it.
-        sys.stderr.write("WARN  %s holds no rendered diagram; the pages will have no "
-                         "figure\n" % args.diagrams)
+        sys.stderr.write("WARN  %s holds no generated PlantUML diagram; the pages will "
+                         "have no diagram\n" % args.diagrams)
     doc = build(index, fragments, claims, args.preset, diagrams)
     problems = validate(doc)
     if problems:
