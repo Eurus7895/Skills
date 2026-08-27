@@ -46,6 +46,8 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 
+import layout_engine
+
 SCHEMA_VERSION = 1
 SUPPORTED_GRAPH_SCHEMA = {1}
 
@@ -343,6 +345,22 @@ def normalize(laid_out, graph, spec, labels, sizes, cluster_index):
         edges[position]["target"] = index_to_name.get(edge.get("head"), "")
         edges[position]["layer"] = layer_of.get(edges[position]["id"], "inheritance")
 
+    placement = {
+        "containers": sorted(containers, key=lambda c: c["id"]),
+        "nodes": sorted(nodes, key=lambda n: n["id"]),
+        "edges": sorted(edges, key=lambda e: e["id"]),
+        "bounds": {"width": round(page_width, 2), "height": round(page_height, 2)},
+    }
+    return placement, None
+
+
+def assemble_model(placement, graph, spec, engine):
+    """Wrap coordinates in the model both renderers read.
+
+    Everything here is engine-independent: which view this is, what it is answerable
+    for, which layers are on. Only `layout_engine` says who produced the coordinates,
+    which is what makes the two paths comparable in the artefact rather than in prose.
+    """
     model = {
         "schema_version": SCHEMA_VERSION,
         "source_graph_hash": graph["source_graph_hash"],
@@ -354,13 +372,10 @@ def normalize(laid_out, graph, spec, labels, sizes, cluster_index):
         "scope": dict(spec.get("scope") or {"kind": "repository"}),
         "detail": spec.get("detail") or graph["detail"],
         "layers": list(spec.get("layers", DEFAULT_LAYERS)),
-        "layout_engine": {"name": "graphviz", "version": graphviz_version()},
-        "containers": sorted(containers, key=lambda c: c["id"]),
-        "nodes": sorted(nodes, key=lambda n: n["id"]),
-        "edges": sorted(edges, key=lambda e: e["id"]),
-        "bounds": {"width": round(page_width, 2), "height": round(page_height, 2)},
+        "layout_engine": engine,
     }
-    return model, None
+    model.update(placement)
+    return model
 
 
 # -- rendering -------------------------------------------------------------------------
@@ -824,13 +839,19 @@ def effective_detail(graph, spec, warn=True):
     return detail
 
 
-def lay_out_view(graph, spec, dot_source_path=None):
-    """One view: DOT, Graphviz, then normalized geometry."""
+def lay_out_view(graph, spec, engine="graphviz", dot_source_path=None):
+    """One view, through whichever engine: coordinates, then the shared model."""
     # The effective level is part of the view, so it belongs in the spec that gets
     # hashed -- a diagram drawn at summary is a different view from one drawn at public.
     spec["detail"] = effective_detail(graph, spec)
     labels = {c["id"]: node_label(c, spec["detail"]) for c in graph["classes"]}
     sizes = {c["id"]: size_for(labels[c["id"]]) for c in graph["classes"]}
+
+    if engine == "builtin":
+        placement = layout_engine.place(graph, spec, labels, sizes)
+        return assemble_model(placement, graph, spec,
+                              {"name": "builtin", "version": None}), None
+
     source, cluster_index = build_dot(graph, spec, labels, sizes)
     if dot_source_path:
         with open(dot_source_path, "w", encoding="utf-8") as fh:
@@ -839,7 +860,11 @@ def lay_out_view(graph, spec, dot_source_path=None):
     laid_out, error = run_dot(source)
     if error:
         return None, error
-    return normalize(laid_out, graph, spec, labels, sizes, cluster_index)
+    placement, error = normalize(laid_out, graph, spec, labels, sizes, cluster_index)
+    if error:
+        return None, error
+    return assemble_model(placement, graph, spec,
+                          {"name": "graphviz", "version": graphviz_version()}), None
 
 
 def link_to_details(overview, detail_models):
@@ -893,6 +918,11 @@ def main():
                         help="also rasterize a PNG for visual review")
     parser.add_argument("--render-only", metavar="MODEL",
                         help="skip layout and render this existing diagram model")
+    parser.add_argument("--layout", default="auto",
+                        choices=("auto", "graphviz", "builtin"),
+                        help="which engine computes coordinates. `auto` prefers "
+                             "Graphviz and falls back to the built-in one; `builtin` "
+                             "never looks for Graphviz")
     parser.add_argument("--detail-views", action="store_true",
                         help="draw a per-package view as well, even below the density "
                              "threshold where the full canvas already shows members")
@@ -938,11 +968,24 @@ def main():
     if args.policy == "disabled":
         print("diagrams: disabled by policy; nothing attempted")
         return 0
-    if shutil.which("dot") is None:
-        message = "Graphviz (`dot`) is not installed, so no layout can be computed"
+
+    # Which engine draws this. Graphviz is preferred where it is installed -- it routes
+    # edges around boxes and the built-in one does not -- but a machine without it now
+    # gets a diagram instead of a sentence explaining that it does not.
+    engine = args.layout
+    have_dot = shutil.which("dot") is not None
+    if engine == "auto":
+        engine = "graphviz" if have_dot else "builtin"
+        if engine == "builtin":
+            sys.stderr.write("WARN  Graphviz (`dot`) is not installed; laying out with "
+                             "the built-in engine, which does not route edges around "
+                             "boxes\n")
+    if engine == "graphviz" and not have_dot:
+        message = "Graphviz (`dot`) is not installed, so it cannot lay anything out"
         if args.policy == "required":
             return fail("--policy required but %s" % message)
-        sys.stderr.write("WARN  %s; skipping diagrams\n" % message)
+        sys.stderr.write("WARN  %s; skipping diagrams. Pass --layout builtin for a "
+                         "diagram without it\n" % message)
         print("diagrams: skipped -- %s" % message)
         return 0
 
@@ -951,7 +994,7 @@ def main():
         return 0
 
     planned = plan_views(graph, spec, args.detail_views)
-    models, engine = [], None
+    models, engine_note = [], engine
     for view_graph, view_spec in planned:
         # One DOT file per view, so --dot-source on a multi-view run does not leave the
         # last view's source pretending to be the whole run's.
@@ -960,11 +1003,12 @@ def main():
             base, extension = os.path.splitext(dot_source)
             dot_source = "%s-%s%s" % (base, view_stem(view_spec["view"]),
                                       extension or ".dot")
-        model, error = lay_out_view(view_graph, view_spec, dot_source)
+        model, error = lay_out_view(view_graph, view_spec, engine, dot_source)
         if error:
             return fail(error)
         models.append(model)
-        engine = model["layout_engine"]["version"] or "graphviz"
+        engine_note = (model["layout_engine"]["version"]
+                       or model["layout_engine"]["name"])
 
     # Linking needs every view laid out, so it happens between layout and writing: a
     # model is written once, already carrying the links, and --render-only reproduces
@@ -987,7 +1031,7 @@ def main():
 
     write_manifest(args.out, entries)
     print("wrote %d view(s) to %s" % (len(entries), args.out))
-    print("layout engine: %s" % engine)
+    print("layout engine: %s" % engine_note)
     return 0
 
 

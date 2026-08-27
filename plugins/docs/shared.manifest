@@ -17,6 +17,7 @@ scripts/sphinx_support.py        -> skills/document-codebase/scripts/sphinx_supp
 scripts/wire_toctree.py          -> skills/document-codebase/scripts/wire_toctree.py
 scripts/build_class_graph.py     -> skills/document-codebase/scripts/build_class_graph.py
 scripts/build_diagrams.py        -> skills/document-codebase/scripts/build_diagrams.py
+scripts/layout_engine.py         -> skills/document-codebase/scripts/layout_engine.py
 scripts/validate_diagrams.py     -> skills/document-codebase/scripts/validate_diagrams.py
 scripts/apply_layout_patch.py    -> skills/document-codebase/scripts/apply_layout_patch.py
 scripts/assemble.py              -> skills/document-codebase/scripts/assemble.py
