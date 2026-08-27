@@ -3,7 +3,7 @@ name: document-codebase
 description: Generate architecture documentation for a repository of any size by parsing its structure with a
   scanner first — symbols, imports, classes, dependency graph, fan-in ranking — then describing each module
   with its real neighbours supplied, and checking every claim against the graph and the source before it is
-  written. Produces a multi-page RST document under docs/ with file:line citations.
+  written. Produces a multi-page RST or MyST document under docs/ with file:line citations.
   Use for "document this repo", "write architecture docs",
   "explain how this codebase fits together", "what calls what", "onboard someone to this project", "map the
   dependencies", or when an unfamiliar repository needs a written overview. The scanner reads Python,
@@ -390,15 +390,43 @@ For those authored pages the work is an **update, not a generation**: read what 
 status boundary. Anything you cannot check against the graph, leave as the author wrote it, and say in step 9
 which pages you touched and which you did not.
 
-`doc.json` contains no markup. **Do not write RST or Sphinx directives yourself** — the renderer owns
+`doc.json` contains no markup. **Do not write RST, MyST or Sphinx directives yourself** — the renderer owns
 headings, tables, references, escaping and the toctree, and hand-written directives are how a build starts
 failing on markup nobody remembers adding.
 
-`--check` runs `sphinx-build -W` when Sphinx is installed, falls back to parsing each page with docutils, and
-reports `skipped` when neither is present. **`skipped` is not a pass** — say which one happened.
+`--format` chooses the markup: `rst` (the default) or `myst`. The same `doc.json` renders to both, page for
+page and reference for reference; only the emitter differs. **MyST needs the target project to enable
+`myst_parser`** — Markdown pages in a project that has not are files Sphinx will not read, and the build fails
+for a reason that is nothing to do with the pages.
 
-The renderer never creates or edits a `conf.py`. If the user wants these pages inside their existing Sphinx
-project, that is a separate step: show them the output first and ask.
+`--check` runs `sphinx-build -W` when Sphinx is installed, falls back to docutils, and reports `skipped` when
+neither is present. It answers with one of six outcomes, and they are not interchangeable:
+
+| Outcome | Means | Next |
+| --- | --- | --- |
+| `passed` | builds, every reference resolves | nothing |
+| `unwired` | builds; some pages are in no toctree yet | wire them in, or say the document is not yet part of the project's index |
+| `invalid_markup` | a page does not parse | a defect — report the output |
+| `broken_reference` | parses, but points at something absent | fix the target or the reference |
+| `runner_failure` | the builder could not run | the check learned nothing about the markup |
+| `skipped` | no builder installed | **not a pass** — say so |
+
+`unwired` and `skipped` do not fail the run. Neither is a pass either, and reporting them as one is the
+failure this table exists to prevent.
+
+**Writing into a project someone else owns.** The renderer never creates or edits a `conf.py`. Two flags
+cover the rest, and both are off by default because both touch what the author wrote:
+
+- `--wire-toctree` adds the generated pages to an index that already exists. It is idempotent, keeps every
+  entry and every line of prose that was there, and **refuses** an index with no toctree, with more than one,
+  or that it cannot parse — leaving the file untouched and naming the pages to add by hand. Without the flag
+  the pages are written and the run prints what is missing; the build check then reports `unwired`, and
+  wiring is what turns that into `passed`.
+- `--assume-parser` writes MyST into a project whose `conf.py` does not visibly enable `myst_parser`.
+  Without it that is refused before anything is written, because Markdown in such a project is a file Sphinx
+  will not read: the pages land, the toctree names them, and the build fails over documents that are not at
+  fault. `conf.py` is read as text, never imported — running a stranger's configuration to find out what it
+  configures is not a check, it is execution.
 
 ### 9. Report
 
@@ -423,6 +451,7 @@ the build check passed or was skipped, and that `.docs-build/` can be deleted.
 | `scripts/apply_layout_patch.py` | Step 7, only inside the visual loop |
 | `scripts/build_document_model.py` | Step 8 |
 | `scripts/render_docs.py` | Step 8 |
+| `scripts/sphinx_support.py` | Never directly — `render_docs.py --check` uses it |
 | `references/schemas.md` | Step 4, before emitting the first claim |
 | `references/presets.md` | Step 8, to choose a preset |
 | `references/diagram-policy.md` | Step 7, before drawing or reviewing a diagram |
