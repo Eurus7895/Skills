@@ -65,6 +65,7 @@ def main():
             "doc-v1-dangling-ref.json", "unsupported-version.json",
             "class-graph-v1-minimal.json", "view-spec-v1-valid.json",
             "view-spec-v1-structural-mutation.json",
+            "module-analysis-v1-valid.jsonl", "module-analysis-v1-invalid.jsonl",
         ]
         missing = [n for n in expected if not os.path.isfile(fixture(n))]
         check("every named fixture is present", not missing, "missing %r" % missing)
@@ -194,6 +195,16 @@ def main():
                            fixture("view-spec-v1-structural-mutation.json"),
                            "--out", os.path.join(tmp, "mutated"))
         check("a view specification that changes the graph is refused", code == 1, output)
+
+        # -- module analysis ---------------------------------------------------
+        code, output = run("validate_analysis.py",
+                           fixture("module-analysis-v1-valid.jsonl"),
+                           "--index", fixture("structure-v2-minimal.json"))
+        check("analysis written against the index fixture is accepted", code == 0, output)
+        code, output = run("validate_analysis.py",
+                           fixture("module-analysis-v1-invalid.jsonl"),
+                           "--index", fixture("structure-v2-minimal.json"))
+        check("and the defective one is refused with findings", code == 1, output)
 
         # -- unsupported versions ----------------------------------------------
         for script, args in (

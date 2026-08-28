@@ -156,6 +156,53 @@ is false. Collapsing any pair of them either discards true claims or retries hop
 Only `rejected` and `needs_context` make `verify_doc.py` exit `1`. A run whose worst outcome is `unsupported`
 has finished: the claim is recorded, labelled, and reported in the limitations.
 
+## `module-analysis.jsonl` — analysis_version 1
+
+One row per module the run actually read. It sits **beside** `claims.jsonl`, not in place of it: a claim
+states a fact about structure that the source can contradict, a statement states what a module is for and
+nothing can. Keeping both means the run has a floor that can be proven wrong and a ceiling that carries
+meaning; collapsing them would put an interpretation in the same column as a verified fact.
+
+```json
+{"analysis_version": 1, "path": "src/api.py", "source_hash": "sha256:…", "index_hash": "sha256:…",
+ "role": "Exposes the HTTP boundary and delegates to application services.",
+ "statements": [{"id": "api-s1", "kind": "responsibility", "status": "observed",
+   "text": "Validates the request body before any service call, so a malformed payload never reaches the store.",
+   "evidence": [{"path": "src/api.py", "line_start": 34, "line_end": 51, "symbol": "create_order"}]}]}
+```
+
+`kind` is `responsibility`, `state`, `interface`, `interaction`, `failure` or `rationale`. `role` stays what
+it has always been — a navigation label, not the analysis.
+
+| `status` | Means |
+| --- | --- |
+| `declared` | the repository states it: an ADR, a design document, a docstring |
+| `observed` | visible in the code, with no reason given for it |
+| `inferred` | the model's reading, supported by more than one place |
+| `unknown` | the repository does not say, and the document must not pretend otherwise |
+
+There is no confidence field. Nothing can contradict a model's assessment of its own certainty, so it would
+be a number no check could ever disagree with.
+
+`validate_analysis.py` cannot ask whether a reading is right. It asks whether one happened:
+
+| Code | Meaning |
+| --- | --- |
+| `A002` | a row or statement is missing a required field |
+| `A003` | the module is not in the index |
+| `A004` | written against a different version of the file |
+| `A005` | carried over from a different scan |
+| `A006` / `A007` / `A008` | evidence names a file, a line range or a symbol that is not there |
+| `A009` / `A010` | unknown statement kind or status |
+| `A011` | a statement id used twice |
+| `A012` | the same statement made about two modules — it was about neither |
+| `A013` | two statements differing only in their nouns; past a fifth of the set, one template |
+| `A014` | the statement names nothing that is in the module it describes |
+
+`A013` between one pair and `A014` are **advisory**: they do not fail the run, they stop the statement
+counting as analysis. A document made of anchorless prose then falls to `derived_only` on its own, without
+an argument about whether one sentence was too abstract.
+
 ## `doc.json` — format_version 1
 
 Pages and blocks, with no markup in it. Block types are `prose`, `table`, `image`, `plantuml` and `ref`. Page ids, block
