@@ -5,11 +5,36 @@
 """Validate generated PlantUML views against their class graph and manifest."""
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import sys
 
 SUPPORTED_MANIFEST_SCHEMA = {3}
+
+# The generator writes one operator per layer; the validator has to know them to tell a
+# drawn relationship from a declared one.
+OPERATORS = {"inheritance": "--|>", "composition": "*-->", "association": "-->",
+             "calls": "..>", "inference": "..>"}
+
+# The generated subset, spelled exactly. A declaration is `class "Name" as n_… `, and a
+# relationship joins two such aliases. Anything class-shaped or arrow-shaped that does
+# not fit these is reported rather than ignored: the point of the check is that what the
+# renderer draws is what the metadata declares, and a line nobody parses is a line that
+# could draw anything.
+DECLARATION = re.compile(r'^(?:abstract class|class|enum)\s+"(?:[^"\\]|\\.)*"'
+                         r'\s+as\s+(n_\w+)(?:\s|$)')
+CLASS_SHAPED = re.compile(r"^(?:abstract class|class|enum)\b")
+RELATION = re.compile(r"^(n_\w+)\s+(--\|>|\*-->|-->|\.\.>)\s+(n_\w+)\s*(?::|$)")
+ARROW_SHAPED = re.compile(r"--\|>|\*-->|-->|\.\.>")
+
+
+def alias(identifier):
+    """The node alias the generator derives from an entity id. Kept in step with it."""
+    readable = re.sub(r"[^A-Za-z0-9_]", "_", str(identifier)).strip("_")[-48:]
+    suffix = hashlib.sha256(str(identifier).encode("utf-8")).hexdigest()[:10]
+    return "n_%s_%s" % (readable or "item", suffix)
 
 
 def load_json(path, label):
@@ -32,23 +57,43 @@ def parse_source(path):
         return None, "must contain exactly one @startuml and @enduml"
     if text.index("@startuml") > text.index("@enduml"):
         return None, "@enduml appears before @startuml"
-    parsed = {"diagram": None, "nodes": [], "edges": []}
+    parsed = {"diagram": None, "nodes": [], "edges": [],
+              "declared": [], "relations": [], "defects": []}
     for number, line in enumerate(text.splitlines(), 1):
         stripped = line.strip()
-        for marker, key in (("' @diagram ", "diagram"), ("' @node ", "nodes"),
-                            ("' @edge ", "edges")):
-            if not stripped.startswith(marker):
-                continue
-            try:
-                value = json.loads(stripped[len(marker):])
-            except ValueError as exc:
-                return None, "line %d has malformed %s metadata: %s" % (number, key, exc)
-            if key == "diagram":
-                if parsed[key] is not None:
-                    return None, "contains duplicate diagram metadata"
-                parsed[key] = value
+        if stripped.startswith("'"):
+            for marker, key in (("' @diagram ", "diagram"), ("' @node ", "nodes"),
+                                ("' @edge ", "edges")):
+                if not stripped.startswith(marker):
+                    continue
+                try:
+                    value = json.loads(stripped[len(marker):])
+                except ValueError as exc:
+                    return None, ("line %d has malformed %s metadata: %s"
+                                  % (number, key, exc))
+                if key == "diagram":
+                    if parsed[key] is not None:
+                        return None, "contains duplicate diagram metadata"
+                    parsed[key] = value
+                else:
+                    parsed[key].append(value)
+            continue
+        if CLASS_SHAPED.match(stripped):
+            match = DECLARATION.match(stripped)
+            if match is None:
+                parsed["defects"].append(
+                    "line %d declares a class outside the generated form" % number)
             else:
-                parsed[key].append(value)
+                parsed["declared"].append(match.group(1))
+        elif stripped.startswith("|"):
+            continue                              # a legend row, not a relationship
+        elif ARROW_SHAPED.search(stripped):
+            match = RELATION.match(stripped)
+            if match is None:
+                parsed["defects"].append(
+                    "line %d draws a relationship outside the generated form" % number)
+            else:
+                parsed["relations"].append(match.groups())
     if parsed["diagram"] is None:
         return None, "contains no diagram metadata"
     return parsed, None
@@ -121,6 +166,23 @@ def validate_view(entry, parsed, graph, findings):
         if edge != expected_edge:
             add(findings, "G003", "relationship %r changes its type or endpoints" %
                 edge.get("id"), view)
+
+    # The checks above compare metadata to the graph. These compare what PlantUML will
+    # actually draw to that same metadata -- otherwise a class or an arrow added to the
+    # source by hand appears in the rendered diagram while every check passes, which is
+    # the one thing a diagram-as-a-claim may not do.
+    for defect in parsed["defects"]:
+        add(findings, "G006", defect, view)
+    if sorted(parsed["declared"]) != sorted(alias(identifier) for identifier in node_ids):
+        add(findings, "G005", "the drawn classes are not the ones the metadata declares",
+            view)
+    drawn = sorted(parsed["relations"])
+    declared_relations = sorted(
+        (alias(edge.get("from")), OPERATORS[edge["layer"]], alias(edge.get("to")))
+        for edge in parsed["edges"] if edge.get("layer") in OPERATORS)
+    if drawn != declared_relations:
+        add(findings, "G005",
+            "the drawn relationships are not the ones the metadata declares", view)
 
 
 def main():

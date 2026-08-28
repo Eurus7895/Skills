@@ -3,6 +3,7 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -89,6 +90,34 @@ def main():
             fh.write(text)
         code, result = report(broken)
         check("a removed class declaration is caught", code == 1 and not result["passed"], repr(result))
+
+        # What PlantUML draws is what a reader believes. A class or an arrow added to
+        # the source without the matching metadata renders like any other, so the
+        # validator has to read the drawing, not only the comments describing it.
+        ghost = os.path.join(work, "ghost")
+        shutil.copytree(out, ghost)
+        path = os.path.join(ghost, "full-repository.puml")
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text.replace("legend right",
+                                  'class "GhostAdmin" as n_ghost\n\nlegend right', 1))
+        code, result = report(ghost)
+        check("a class drawn without metadata is caught", code == 1 and not result["passed"],
+              repr(result))
+
+        extra = os.path.join(work, "extra-edge")
+        shutil.copytree(out, extra)
+        path = os.path.join(extra, "full-repository.puml")
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        aliases = sorted(set(re.findall(r"n_class_\w+", text)))
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text.replace("legend right", "%s --|> %s\n\nlegend right"
+                                  % (aliases[0], aliases[1]), 1))
+        code, result = report(extra)
+        check("a relationship drawn without metadata is caught",
+              code == 1 and not result["passed"], repr(result))
 
         malformed = os.path.join(work, "malformed")
         shutil.copytree(out, malformed)
