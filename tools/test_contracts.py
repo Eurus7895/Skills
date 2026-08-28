@@ -63,6 +63,8 @@ def main():
             "fragment-v1-valid.jsonl", "fragment-v1-invalid-reference.jsonl",
             "claims-v1-valid.jsonl", "doc-v1-minimal.json", "doc-v1-full.json",
             "doc-v1-dangling-ref.json", "unsupported-version.json",
+            "class-graph-v1-minimal.json", "view-spec-v1-valid.json",
+            "view-spec-v1-structural-mutation.json",
         ]
         missing = [n for n in expected if not os.path.isfile(fixture(n))]
         check("every named fixture is present", not missing, "missing %r" % missing)
@@ -156,6 +158,31 @@ def main():
         check("and writes nothing",
               not os.path.isdir(dangling_out) or not os.listdir(dangling_out),
               "%r" % (os.path.isdir(dangling_out) and os.listdir(dangling_out)))
+
+        # -- diagrams ----------------------------------------------------------
+        graph = load(fixture("class-graph-v1-minimal.json"))
+        check("the class-graph fixture declares the schema version it was written for",
+              graph["schema_version"] == 1, "%r" % graph.get("schema_version"))
+        views = os.path.join(tmp, "views")
+        code, output = run("build_diagrams.py", "--class-graph",
+                           fixture("class-graph-v1-minimal.json"), "--view-spec",
+                           fixture("view-spec-v1-valid.json"), "--out", views)
+        check("a presentation-only view specification is accepted", code == 0, output)
+        manifest = load(os.path.join(views, "diagram-manifest.json"))
+        check("the manifest declares the version this validator reads",
+              manifest["schema_version"] == 3, "%r" % manifest.get("schema_version"))
+        entry = manifest["views"][0]
+        check("every view names its file and the classes it is answerable for",
+              entry.get("file", "").endswith(".puml") and entry["scope_nodes"]
+              == sorted(c["id"] for c in graph["classes"]), "%r" % entry)
+        code, output = run("validate_diagrams.py", views, "--class-graph",
+                           fixture("class-graph-v1-minimal.json"))
+        check("and the generated view validates against the graph", code == 0, output)
+        code, output = run("build_diagrams.py", "--class-graph",
+                           fixture("class-graph-v1-minimal.json"), "--view-spec",
+                           fixture("view-spec-v1-structural-mutation.json"),
+                           "--out", os.path.join(tmp, "mutated"))
+        check("a view specification that changes the graph is refused", code == 1, output)
 
         # -- unsupported versions ----------------------------------------------
         for script, args in (

@@ -158,22 +158,31 @@ has finished: the claim is recorded, labelled, and reported in the limitations.
 
 ## `doc.json` — format_version 1
 
-Pages and blocks, with no markup in it. Block types are `prose`, `table`, `image` and `ref`. Page ids, block
+Pages and blocks, with no markup in it. Block types are `prose`, `table`, `image`, `plantuml` and `ref`. Page ids, block
 ids, `ref` targets and `claim_refs` must all resolve before the model is written; a `claim_ref` to anything
 that is not `verified` or `supported_inference` is a build failure, not a warning.
 
-## Diagram artifacts — manifest_version 2
+## PlantUML diagram artifacts — manifest_version 3
 
 One run may draw several views. `diagram-manifest.json` is the index of them:
 
 ```json
-{"schema_version": 2, "views": [{"view": "full_repository", "stem": "full-repository",
-  "scope": {"kind": "repository"}, "source_graph_hash": "sha256:...", "nodes": ["..."]}]}
+{"schema_version": 3, "views": [{"view": "full_repository",
+  "file": "full-repository.puml", "scope": {"kind": "repository"},
+  "source_graph_hash": "sha256:...", "nodes": ["..."], "scope_nodes": ["..."],
+  "edges": ["..."]}]}
 ```
 
-Each view owns `<stem>-model.json` (the geometry), `<stem>.drawio`, `<stem>.svg`, and with `--previews` a
-`<stem>-preview.png`. `scope.kind` is `repository`, `package` or `module`, with `scope.id` naming the container
-for the latter two.
+`nodes` is every class the view draws; `scope_nodes` is the subset it is answerable for. A detail view also
+draws the far end of any relationship that leaves its scope, so on a package view the two differ, and whoever
+writes a caption counts `scope_nodes` — counting `nodes` describes a package as holding classes that belong to
+its neighbours.
+
+Each view owns one `.puml` source file. PlantUML and Sphinx derive SVG/HTML during the
+documentation build; those rendered files are not the canonical diagram artifact.
+`scope.kind` is `repository`, `package` or `module`, with `scope.id` naming the container
+for the latter two. Machine-readable `@diagram`, `@node`, and `@edge` comments let the
+validator check the generated PlantUML subset without parsing arbitrary PlantUML.
 
 **Scope is what a view is answerable for.** A checker holds a view to the classes in its scope, not to the
 whole graph — otherwise a view of one package reads as a repository view that lost most of its boxes. Scope is

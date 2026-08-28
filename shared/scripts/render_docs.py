@@ -105,6 +105,9 @@ class Rst(object):
     def image(self, src, alt):
         return ".. figure:: %s\n   :alt: %s\n" % (absolute(src), self.escape(alt))
 
+    def plantuml(self, src, alt):
+        return ".. uml:: %s\n   :caption: %s\n" % (absolute(src), self.escape(alt))
+
     def ref(self, title, target):
         return "Next: :doc:`%s <%s>`\n" % (self.escape(title), absolute(target))
 
@@ -165,6 +168,9 @@ class Myst(object):
     def image(self, src, alt):
         return "```{figure} %s\n:alt: %s\n```\n" % (absolute(src), self.escape(alt))
 
+    def plantuml(self, src, alt):
+        return "```{uml} %s\n:caption: %s\n```\n" % (absolute(src), self.escape(alt))
+
     def ref(self, title, target):
         return "Next: {doc}`%s <%s>`\n" % (self.escape(title), absolute(target))
 
@@ -186,6 +192,8 @@ def render_block(block, titles, emitter):
         return emitter.table(block["columns"], block["rows"])
     if kind == "image":
         return emitter.image(block["src"], block.get("alt", ""))
+    if kind == "plantuml":
+        return emitter.plantuml(block["src"], block.get("alt", ""))
     if kind == "ref":
         target = block["target"]
         if target not in titles:
@@ -280,7 +288,8 @@ def main():
     # A figure pointing at a file that is not there renders as a broken image and
     # fails a Sphinx build with a message about the page, not about the picture. Check
     # it here, where the message can name what is missing and nothing has been written.
-    wanted = [b["src"] for page in pages for b in page["blocks"] if b["type"] == "image"]
+    wanted = [b["src"] for page in pages for b in page["blocks"]
+              if b["type"] in ("image", "plantuml")]
     if wanted and not args.diagrams:
         sys.stderr.write("FAIL  the model references %d figure(s) but --diagrams was "
                          "not given: %s\n" % (len(wanted), ", ".join(wanted[:3])))
@@ -295,6 +304,20 @@ def main():
 
     # A format the target project cannot read is a configuration problem, and writing
     # the pages anyway leaves a build failing over documents that are not at fault.
+    #
+    # The diagram extension is not in that class. Without `myst_parser` a MyST page is
+    # not read at all; without `sphinxcontrib-plantuml` every page still builds and one
+    # figure is missing, and the `.puml` beside it is the deliverable either way. So it
+    # is reported and the pages are written -- the reader installs it when they want the
+    # picture, which may be never.
+    has_plantuml = any(b["type"] == "plantuml" for page in pages for b in page["blocks"])
+    required_extensions = emitter.build_extensions + (("sphinxcontrib.plantuml",)
+                                                       if has_plantuml else ())
+    if has_plantuml:
+        for advisory in sphinx_support.missing_parsers(args.out,
+                                                       ("sphinxcontrib.plantuml",)):
+            sys.stderr.write("WARN  %s; the diagram source is written either way, and "
+                             "renders once the extension is enabled\n" % advisory)
     blockers = sphinx_support.missing_parsers(args.out, emitter.build_extensions)
     if blockers and not args.assume_parser:
         sys.stderr.write("FAIL  %s cannot be read by the project at %s:\n"
@@ -370,7 +393,7 @@ def main():
 
     if not args.check:
         return 0
-    result = sphinx_support.check(args.out, extensions=emitter.build_extensions)
+    result = sphinx_support.check(args.out, extensions=required_extensions)
     print("build check: %s -- %s" % (result.status, result.detail))
     # `unwired` and `skipped` are outcomes, not failures: one means an integration step
     # has not run, the other that no builder was installed. Both are reported.

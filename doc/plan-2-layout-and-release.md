@@ -27,7 +27,7 @@ rejected is in the decision table above.
 
 The dependency is narrower than it looks. Graphviz does exactly one thing here: it turns a
 DOT document into coordinates. Normalisation, the Y-axis flip, `diagram-model.json`, the
-Draw.io and SVG emitters, previews, `validate_diagrams.py`, layout patches and the detail
+SVG emitter, previews, `validate_diagrams.py`, layout patches and the detail
 views are all already ours.
 
 **Shape.** One internal contract with two implementations:

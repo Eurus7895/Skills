@@ -274,16 +274,14 @@ finding explaining anything that is not the first two.
 Revise the affected fragment only. Re-analysing the whole repository because one claim failed wastes the
 budget from step 3 and usually reintroduces claims that already passed.
 
-### 7. Draw the class diagram, if the tools are there
+### 7. Generate the PlantUML class diagram
 
-- **Run** the three commands below in order: build the graph, lay it out and render, then check the render.
+- **Run** the three commands below in order: build the graph, generate PlantUML, then validate it.
 - **Writes** `.docs-build/class-graph.json`, and into `docs/_diagrams/`: one
-  `diagram-manifest.json` listing every view produced, plus per view a `<view>-model.json`, a `.drawio`, an
-  `.svg`, and with `--previews` a `<view>-preview.png`. The repository view is always called
-  `full-repository`.
-- **Read** whether layout ran or was skipped for a missing `dot`, and every `G0xx` finding from the validator.
-- **Decide** whether the document gets a figure at all. A skipped diagram is a documented outcome; a failed
-  structural check is not — fix it or drop the figure.
+  `diagram-manifest.json` plus a `.puml` file for every view. The repository view is always
+  `full-repository.puml`.
+- **Read** every `G0xx` finding from the validator.
+- **Decide** which relationship layers and detail level the view needs. PlantUML owns layout.
 
 ```bash
 python3 scripts/build_class_graph.py --index .docs-build/structure.json \
@@ -291,24 +289,18 @@ python3 scripts/build_class_graph.py --index .docs-build/structure.json \
     --out .docs-build/class-graph.json
 
 python3 scripts/build_diagrams.py --class-graph .docs-build/class-graph.json \
-    --out docs/_diagrams --policy optional --previews
+    --out docs/_diagrams
 ```
 
-**Run the validator only if the build actually drew something.** Under `--policy optional`
-a missing `dot` prints `diagrams: skipped` and exits `0` without creating `docs/_diagrams/`,
-and the validator then exits `2` on a directory that is not there. That exit code means
-"you invoked me wrongly", not "the diagram is wrong", and treating it as a failed check
-wastes a retry on every machine without Graphviz.
-
 ```bash
-[ -d docs/_diagrams ] && python3 scripts/validate_diagrams.py docs/_diagrams \
+python3 scripts/validate_diagrams.py docs/_diagrams \
     --class-graph .docs-build/class-graph.json
 ```
 
-`class-graph.json` is the canonical source; the `.drawio` and `.svg` are render products
-of it. Layout needs Graphviz — under `--policy optional` a missing `dot` skips the
-diagram and the document is generated without one. **`skipped` is not `passed`**: say
-which happened.
+`class-graph.json` is structural truth; `.puml` is the canonical Diagram as Code
+presentation. Generation uses only the Python standard library and always writes a
+diagram for a valid graph, including an explicit empty-state diagram when no class was
+found. Sphinx with `sphinxcontrib-plantuml` renders the source to SVG for HTML output.
 
 **Past the density threshold you get more than one picture.** The overview drops to
 class names only, so the run also draws one view per package at full member detail, and
@@ -319,37 +311,9 @@ document while each remaining view still looks complete.
 
 You may write a `view-spec.json` first to choose the detail level, which layers are
 visible, and what to emphasise. You may **not** use it to add a class, drop one, or
-change what connects to what — `build_diagrams.py` refuses such a spec before laying
+change what connects to what — `build_diagrams.py` refuses such a spec before writing
 anything out. See [`references/diagram-policy.md`](references/diagram-policy.md) for the
-layers, the density threshold, and the severity mapping.
-
-**The visual review loop, when a preview exists.** Read
-`docs/_diagrams/full-repository-preview.png` and judge only what a picture shows:
-overlap, clipped labels, spacing, edge crossings, dense regions. Write your findings and
-a candidate patch to `docs/_diagrams/layout-patch.json` — the five permitted operations
-and their fields are listed in
-[`references/diagram-policy.md`](references/diagram-policy.md) — then:
-
-```bash
-python3 scripts/apply_layout_patch.py \
-    --model docs/_diagrams/full-repository-model.json \
-    --patch docs/_diagrams/layout-patch.json
-python3 scripts/build_diagrams.py \
-    --render-only docs/_diagrams/full-repository-model.json \
-    --out docs/_diagrams --previews
-python3 scripts/validate_diagrams.py docs/_diagrams \
-    --class-graph .docs-build/class-graph.json
-```
-
-One patch, one view: name the model of the view whose preview you looked at. Rerendering
-one view leaves the others as they were.
-
-A patch may move, resize, reroute, restyle and re-wrap. It may not change what exists or
-what connects to what, and a patch that tries is refused with the model left untouched.
-**Every patch is followed by a rerender and the full structural check** — a patch is not
-accepted until those pass again. Stop after two attempts, or the moment the same finding
-repeats: the loop is not converging and a third attempt costs the same and finds the
-same thing.
+layers, the density threshold, and what the checks guarantee.
 
 ### 8. Build the document model and render
 
@@ -373,8 +337,11 @@ python3 scripts/render_docs.py --doc .docs-build/doc.json --out docs \
     --diagrams docs/_diagrams --check
 ```
 
-Drop both `--diagrams` flags when no diagram was produced. A page never references a
-figure that is not there; the renderer refuses rather than emitting a broken image.
+The `.puml` source is always present after a valid Step 7 run. Turning it into a picture
+needs `sphinxcontrib-plantuml` and a PlantUML command, and that is **optional**: a
+project without them still gets every page, the renderer warns which extension to
+enable, and the build check accepts the directive without drawing it. Report that
+warning; do not treat it as a failed step.
 
 Presets are described in [`references/presets.md`](references/presets.md). `onboarding` is the default;
 `architecture` is denser and assumes the reader already knows the domain.
@@ -446,9 +413,8 @@ the build check passed or was skipped, and that `.docs-build/` can be deleted.
 | `scripts/assemble.py` | Step 5, always — before verifying |
 | `scripts/verify_doc.py` | Step 6, always — before writing anything |
 | `scripts/build_class_graph.py` | Step 7, when diagrams are wanted |
-| `scripts/build_diagrams.py` | Step 7, and again after every layout patch |
-| `scripts/validate_diagrams.py` | Step 7, after every render |
-| `scripts/apply_layout_patch.py` | Step 7, only inside the visual loop |
+| `scripts/build_diagrams.py` | Step 7, always |
+| `scripts/validate_diagrams.py` | Step 7, after generation |
 | `scripts/build_document_model.py` | Step 8 |
 | `scripts/render_docs.py` | Step 8 |
 | `scripts/sphinx_support.py` | Never directly — `render_docs.py --check` uses it |

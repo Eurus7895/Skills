@@ -162,6 +162,45 @@ def main():
         else:
             print("skip docutils fallback checks -- docutils is not installed")
 
+        # `uml` comes from an optional extension. Whether or not it is installed, a page
+        # carrying it has to come back as good markup: with the extension Sphinx draws
+        # the diagram, without it the directive is accepted and nothing is drawn. The one
+        # answer that must never appear is "this page does not parse".
+        usable, stubbed = sphinx_support._resolve(("myst_parser",
+                                                   "sphinxcontrib.plantuml"))
+        installed = sphinx_support.parser_installed("sphinxcontrib.plantuml")
+        check("an installed optional extension is loaded, a missing one is stubbed",
+              ("sphinxcontrib.plantuml" in usable) == installed
+              and (stubbed == [] if installed else stubbed == ["uml"]),
+              "%r / %r (installed=%r)" % (usable, stubbed, installed))
+        illustrated = {"index.rst": INDEX,
+                       "a.rst": "A\n=\n\n.. uml:: full-repository.puml\n"
+                                "   :caption: Class diagram\n",
+                       "full-repository.puml": "@startuml\nclass A\n@enduml\n"}
+        if HAVE_SPHINX:
+            result = sphinx_support.check(tree(tmp, "uml", illustrated),
+                                          extensions=("sphinxcontrib.plantuml",))
+            check("a diagram directive builds whether or not its extension is there",
+                  result.status == sphinx_support.PASSED,
+                  "%r: %s" % (result.status, result.detail[:200]))
+        if HAVE_DOCUTILS:
+            fallback = sphinx_support._with_docutils(tree(tmp, "umlfb", illustrated))
+            check("and the docutils fallback does not reject it either",
+                  fallback.status == sphinx_support.PASSED, fallback.detail[:200])
+
+        # The extension installed with no working command behind it. Sphinx reports that
+        # against the page holding the directive, so without this it reads as "the page
+        # does not build" -- blaming markup for a tool nobody installed.
+        unavailable = ("/x/overview.rst:: WARNING: plantuml command 'plantuml' "
+                       "cannot be run [plantuml]")
+        check("a renderer with nothing behind it is not a markup defect",
+              sphinx_support.renderer_advisory(unavailable)
+              and not sphinx_support.renderer_advisory(
+                  "a.rst:3: WARNING: Unknown directive type \"nosuch\""),
+              unavailable)
+        check("and on its own it would otherwise have been called invalid markup",
+              sphinx_support.classify([unavailable]) == sphinx_support.INVALID_MARKUP)
+
         result = sphinx_support.check(os.path.join(tmp, "not-a-directory"))
         check("a directory that is not there does not pass",
               result.status != sphinx_support.PASSED, "%r" % result.status)

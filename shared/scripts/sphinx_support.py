@@ -132,6 +132,21 @@ def warning_lines(output):
     return lines
 
 
+# An optional renderer that is wired up but has nothing behind it: the Python extension
+# is installed, the command it shells out to is not. Sphinx reports that against the page
+# holding the directive, so `-W` turns a missing tool into "this page does not build" --
+# the misdiagnosis this module exists to prevent. It is the same case as the extension
+# being absent altogether: the markup is fine and the picture was not drawn.
+RENDERER_UNAVAILABLE = (("plantuml command", "cannot be run"),)
+
+
+def renderer_advisory(line):
+    """Whether a warning is an optional renderer missing, rather than a defect."""
+    lowered = line.lower()
+    return any(all(fragment in lowered for fragment in fragments)
+               for fragments in RENDERER_UNAVAILABLE)
+
+
 def classify(warnings):
     """Which outcome a set of Sphinx warnings amounts to.
 
@@ -154,6 +169,48 @@ def classify(warnings):
     return PASSED
 
 
+# A directive that comes from an extension the reader may never install. The `.puml`
+# source is the deliverable; `sphinxcontrib-plantuml` only turns it into a picture. So a
+# machine without it must still be able to check the markup: without the stub below,
+# `uml` is an unknown directive, `-W` turns that into an error, and every page fails over
+# a renderer that was optional all along.
+OPTIONAL_DIRECTIVES = {"sphinxcontrib.plantuml": ("uml",)}
+
+STUB_MODULE = "_optional_directives"
+STUB_SOURCE = '''"""Written by sphinx_support for one check. Never part of a project."""
+from docutils.parsers.rst import Directive, directives
+
+
+class _Ignored(Directive):
+    has_content = True
+    optional_arguments = 9
+    final_argument_whitespace = True
+    option_spec = {"caption": directives.unchanged, "alt": directives.unchanged,
+                   "align": directives.unchanged, "width": directives.unchanged,
+                   "height": directives.unchanged, "scale": directives.unchanged}
+
+    def run(self):
+        return []
+
+
+def setup(app):
+    for name in %r:
+        app.add_directive(name, _Ignored)
+    return {"parallel_read_safe": True, "parallel_write_safe": True}
+'''
+
+
+def _resolve(extensions):
+    """Split the extensions Sphinx can load here from the directives to stub instead."""
+    usable, stubbed = [], []
+    for extension in extensions:
+        if extension in OPTIONAL_DIRECTIVES and not parser_installed(extension):
+            stubbed.extend(OPTIONAL_DIRECTIVES[extension])
+        else:
+            usable.append(extension)
+    return usable, sorted(set(stubbed))
+
+
 def _stage(out_dir, work, extensions):
     """Copy the pages somewhere they can be built without touching the original."""
     source = os.path.join(work, "source")
@@ -164,19 +221,35 @@ def _stage(out_dir, work, extensions):
             shutil.copytree(origin, os.path.join(source, name))
         elif name != "conf.py":
             shutil.copyfile(origin, os.path.join(source, name))
-    settings = ["project = 'check'",
-                "extensions = %r" % (list(extensions),),
+    usable, stubbed = _resolve(extensions)
+    settings = ["import os, sys",
+                "sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))",
+                "project = 'check'",
                 "master_doc = 'index'",
                 "exclude_patterns = ['_build']"]
+    if stubbed:
+        with open(os.path.join(source, STUB_MODULE + ".py"), "w", encoding="utf-8") as fh:
+            fh.write(STUB_SOURCE % (list(stubbed),))
+        usable = usable + [STUB_MODULE]
+    settings.insert(2, "extensions = %r" % (list(usable),))
     with open(os.path.join(source, "conf.py"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(settings) + "\n")
-    return source
+    return source, stubbed
+
+
+def _note(detail, stubbed):
+    if not stubbed:
+        return detail
+    return ("%s. The %s directive(s) were accepted without rendering: %s is not "
+            "installed here, so the diagram source was checked as markup and not drawn"
+            % (detail, ", ".join("`%s`" % name for name in stubbed),
+               ", ".join(sorted(OPTIONAL_DIRECTIVES))))
 
 
 def _with_sphinx(out_dir, extensions):
     work = tempfile.mkdtemp(prefix="sphinx-support-")
     try:
-        source = _stage(out_dir, work, extensions)
+        source, stubbed = _stage(out_dir, work, extensions)
         build = os.path.join(work, "build")
         try:
             proc = subprocess.run(
@@ -190,11 +263,16 @@ def _with_sphinx(out_dir, extensions):
 
         output = (proc.stderr or proc.stdout).strip()
         if proc.returncode == 0:
-            return Result(PASSED, "sphinx-build -W reported no warnings")
+            return Result(PASSED, _note("sphinx-build -W reported no warnings", stubbed))
         warnings = warning_lines(output)
         if any(marker in output.lower() for marker in FATAL_FRAMING):
             return Result(RUNNER_FAILURE,
                           "sphinx-build could not build: %s" % output[:800])
+        advisories = [line for line in warnings if renderer_advisory(line)]
+        warnings = [line for line in warnings if not renderer_advisory(line)]
+        if advisories and not warnings:
+            return Result(PASSED, _note("sphinx-build -W reported no defect", stubbed)
+                          + ". A diagram was not drawn: %s" % advisories[0])
         if not warnings:
             # Non-zero with nothing to read is the builder itself failing, not the
             # document. Reporting it as bad markup sends the reader to the wrong file.
@@ -225,6 +303,10 @@ def _teach_docutils_about_sphinx():
     the index of a document that is perfectly good. The fallback then fails whatever it
     is given, which is worse than not running: it accuses correct output.
 
+    `uml` joins them for the same reason one step further out: it comes from an optional
+    extension, and a machine with neither Sphinx nor that extension would otherwise fail
+    a page over a picture it was never going to draw.
+
     The list is deliberately short. It covers what the renderers write and nothing else,
     so a directive nobody meant to emit still comes back as an error.
     """
@@ -246,6 +328,8 @@ def _teach_docutils_about_sphinx():
         return [nodes.literal(rawtext, text)], []
 
     directives.register_directive("toctree", Ignored)
+    for name in sorted(set(sum((list(v) for v in OPTIONAL_DIRECTIVES.values()), []))):
+        directives.register_directive(name, Ignored)
     for role in ("doc", "ref", "any", "download"):
         roles.register_local_role(role, reference)
 
