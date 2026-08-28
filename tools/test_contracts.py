@@ -71,6 +71,17 @@ def main():
         if missing:
             return 1
 
+        # The layered fixture is a contract too: `tools/test_analysis_depth.py` reads
+        # its shape, not just its existence. Three directories that are nearly the
+        # layering, one entry point, and evidence the scanner does not index yet --
+        # remove any of those and the test that uses it stops testing anything.
+        layered = fixture("layered-repo")
+        wanted = ["README.md", "pyproject.toml", ".github/workflows/ci.yml",
+                  "src/app/api/cli.py", "src/app/core/service.py",
+                  "src/app/infra/store.py"]
+        absent = [n for n in wanted if not os.path.isfile(os.path.join(layered, n))]
+        check("the layered fixture keeps its shape", not absent, "missing %r" % absent)
+
         # -- structure ---------------------------------------------------------
         index = load(fixture("structure-v2-minimal.json"))
         check("the index fixture declares the schema version it was written for",
