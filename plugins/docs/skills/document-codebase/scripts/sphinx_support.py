@@ -135,6 +135,21 @@ def warning_lines(output):
     return lines
 
 
+# An optional renderer that is wired up but has nothing behind it: the Python extension
+# is installed, the command it shells out to is not. Sphinx reports that against the page
+# holding the directive, so `-W` turns a missing tool into "this page does not build" --
+# the misdiagnosis this module exists to prevent. It is the same case as the extension
+# being absent altogether: the markup is fine and the picture was not drawn.
+RENDERER_UNAVAILABLE = (("plantuml command", "cannot be run"),)
+
+
+def renderer_advisory(line):
+    """Whether a warning is an optional renderer missing, rather than a defect."""
+    lowered = line.lower()
+    return any(all(fragment in lowered for fragment in fragments)
+               for fragments in RENDERER_UNAVAILABLE)
+
+
 def classify(warnings):
     """Which outcome a set of Sphinx warnings amounts to.
 
@@ -256,6 +271,11 @@ def _with_sphinx(out_dir, extensions):
         if any(marker in output.lower() for marker in FATAL_FRAMING):
             return Result(RUNNER_FAILURE,
                           "sphinx-build could not build: %s" % output[:800])
+        advisories = [line for line in warnings if renderer_advisory(line)]
+        warnings = [line for line in warnings if not renderer_advisory(line)]
+        if advisories and not warnings:
+            return Result(PASSED, _note("sphinx-build -W reported no defect", stubbed)
+                          + ". A diagram was not drawn: %s" % advisories[0])
         if not warnings:
             # Non-zero with nothing to read is the builder itself failing, not the
             # document. Reporting it as bad markup sends the reader to the wrong file.

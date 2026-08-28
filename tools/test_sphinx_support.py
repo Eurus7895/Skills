@@ -188,6 +188,19 @@ def main():
             check("and the docutils fallback does not reject it either",
                   fallback.status == sphinx_support.PASSED, fallback.detail[:200])
 
+        # The extension installed with no working command behind it. Sphinx reports that
+        # against the page holding the directive, so without this it reads as "the page
+        # does not build" -- blaming markup for a tool nobody installed.
+        unavailable = ("/x/overview.rst:: WARNING: plantuml command 'plantuml' "
+                       "cannot be run [plantuml]")
+        check("a renderer with nothing behind it is not a markup defect",
+              sphinx_support.renderer_advisory(unavailable)
+              and not sphinx_support.renderer_advisory(
+                  "a.rst:3: WARNING: Unknown directive type \"nosuch\""),
+              unavailable)
+        check("and on its own it would otherwise have been called invalid markup",
+              sphinx_support.classify([unavailable]) == sphinx_support.INVALID_MARKUP)
+
         result = sphinx_support.check(os.path.join(tmp, "not-a-directory"))
         check("a directory that is not there does not pass",
               result.status != sphinx_support.PASSED, "%r" % result.status)

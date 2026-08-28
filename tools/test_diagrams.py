@@ -130,6 +130,35 @@ def main():
         check("malformed PlantUML boundaries are caught", code == 1 and not result["passed"],
               repr(result))
 
+        # `emphasis` is a presentation control the policy promises. It changes how a box
+        # is filled and nothing else -- so it has to actually change it.
+        stressed = os.path.join(work, "emphasis.json")
+        with open(SPEC, encoding="utf-8") as fh:
+            spec = json.load(fh)
+        with open(stressed, "w", encoding="utf-8") as fh:
+            json.dump(dict(spec, emphasis=["class:pkg/base.py:Record", "package:pkg"]), fh)
+        stressed_out = os.path.join(work, "emphasised")
+        code, output = run(BUILD, "--class-graph", GRAPH, "--view-spec", stressed,
+                           "--out", stressed_out)
+        with open(os.path.join(stressed_out, "full-repository.puml"), encoding="utf-8") as fh:
+            emphasised = fh.read()
+        check("an emphasised class and package are marked in the source",
+              code == 0 and "<<emphasis>>" in emphasised
+              and emphasised.count("#FFF3C4") >= 2, output + emphasised[:400])
+        code, result = report(stressed_out)
+        check("and emphasis does not change what the diagram claims",
+              code == 0 and result.get("passed"), repr(result))
+
+        # Scope comes from the package structure. A spec that could set it would be
+        # `remove_classes` under another name, so it is refused rather than ignored.
+        scoped = os.path.join(work, "scoped.json")
+        with open(scoped, "w", encoding="utf-8") as fh:
+            json.dump(dict(spec, scope={"kind": "package", "id": "package:pkg"}), fh)
+        code, output = run(BUILD, "--class-graph", GRAPH, "--view-spec", scoped,
+                           "--out", os.path.join(work, "scoped-out"))
+        check("a view specification that chooses its own scope is refused",
+              code == 1 and "scope" in output, output)
+
         invalid = os.path.join(work, "invalid")
         code, output = run(BUILD, "--class-graph", GRAPH, "--view-spec",
                            os.path.join(REPO, "tests", "contracts",

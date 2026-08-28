@@ -22,6 +22,10 @@ ALL_LAYERS = ("inheritance", "composition", "association", "calls", "inference")
 DENSITY_CLASSES = 60
 DENSITY_MEMBERS = 400
 
+# What `emphasis` in a view specification does. It changes how a box is filled and
+# nothing else: an emphasised class is the same class, related to the same classes.
+EMPHASIS_FILL = "#FFF3C4"
+
 
 def fail(message, code=2):
     sys.stderr.write("FAIL  %s\n" % message)
@@ -70,7 +74,10 @@ def is_dense(graph):
 
 
 def check_spec(spec, graph):
-    allowed = {"view", "detail", "layers", "emphasis", "rankdir", "scope"}
+    # `scope` is deliberately absent: which classes a view holds comes from the package
+    # structure, and a spec that could set it would be `remove_classes` under another
+    # name. Refused rather than silently overridden, so nobody believes it took effect.
+    allowed = {"view", "detail", "layers", "emphasis", "rankdir"}
     problems = ["unknown view-spec field %r" % key for key in sorted(set(spec) - allowed)]
     problems.extend("unknown relationship layer %r" % layer
                     for layer in spec.get("layers", DEFAULT_LAYERS)
@@ -158,19 +165,27 @@ def render(graph, spec):
     meta = {"schema_version": 1, "source_graph_hash": graph["source_graph_hash"],
             "view_spec_hash": digest(spec), "view": spec["view"], "scope": spec["scope"],
             "detail": detail, "layers": sorted(layers)}
+    emphasis = set(spec.get("emphasis", ()))
     lines = ["@startuml", "' Generated from class-graph.json; do not edit by hand.",
              "hide empty members", "skinparam classAttributeIconSize 0",
              "left to right direction" if spec.get("rankdir") == "LR"
              else "top to bottom direction",
+             "skinparam class {", "  BackgroundColor<<emphasis>> %s" % EMPHASIS_FILL, "}",
              "' @diagram %s" % json.dumps(meta, sort_keys=True, separators=(",", ":"))]
     classes = {c["id"]: c for c in graph["classes"]}
     modules = {m["id"]: m for m in graph["modules"]}
+    def fill(identifier):
+        return " %s" % EMPHASIS_FILL if identifier in emphasis else ""
+
     for package in sorted(graph["packages"], key=lambda x: x["id"]):
-        lines.append("package %s as %s {" % (quote(package["name"]), alias(package["id"])))
+        lines.append("package %s as %s%s {" % (quote(package["name"]),
+                                               alias(package["id"]),
+                                               fill(package["id"])))
         for module_id in sorted(package["modules"]):
             module = modules[module_id]
-            lines.append("  package %s as %s {" %
-                         (quote(module["name"].rsplit("/", 1)[-1]), alias(module_id)))
+            lines.append("  package %s as %s%s {" %
+                         (quote(module["name"].rsplit("/", 1)[-1]), alias(module_id),
+                          fill(module_id)))
             for class_id in sorted(module["classes"]):
                 cls = classes[class_id]
                 keyword = "enum" if cls.get("stereotype") == "enum" else (
@@ -180,6 +195,8 @@ def render(graph, spec):
                     stereotypes.append(cls["stereotype"])
                 if cls.get("external"):
                     stereotypes.append("external")
+                if class_id in emphasis:
+                    stereotypes.append("emphasis")
                 suffix = " " + " ".join("<<%s>>" % s for s in stereotypes) if stereotypes else ""
                 head = "    %s %s as %s%s" % (keyword, quote(cls["name"]), alias(class_id), suffix)
                 class_members = members_of(cls, detail)

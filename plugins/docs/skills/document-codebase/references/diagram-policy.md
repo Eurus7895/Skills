@@ -33,8 +33,12 @@ them. The generator emits a legend so the rendered view is interpretable without
 
 ## Presentation controls
 
-A view spec may select `detail`, `layers`, `emphasis`, and `rankdir`. It may not add or
-remove classes, change containment, alter relationship endpoints, or fabricate layers.
+A view spec may select `detail`, `layers`, `emphasis`, and `rankdir`. `emphasis` names
+graph ids and changes how those boxes are filled — an emphasised class is the same class,
+related to the same classes. It may not add or remove classes, change containment, alter
+relationship endpoints, or fabricate layers, and it may not set `scope`: which classes a
+view holds comes from the package structure, so a spec naming its own scope is refused
+rather than quietly overridden.
 PlantUML owns geometry; coordinate patches, route patches, and manual SVG editing are not
 part of this pipeline.
 
