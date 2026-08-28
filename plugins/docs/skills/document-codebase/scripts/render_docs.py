@@ -307,10 +307,21 @@ def main():
 
     # A format the target project cannot read is a configuration problem, and writing
     # the pages anyway leaves a build failing over documents that are not at fault.
+    #
+    # The diagram extension is not in that class. Without `myst_parser` a MyST page is
+    # not read at all; without `sphinxcontrib-plantuml` every page still builds and one
+    # figure is missing, and the `.puml` beside it is the deliverable either way. So it
+    # is reported and the pages are written -- the reader installs it when they want the
+    # picture, which may be never.
     has_plantuml = any(b["type"] == "plantuml" for page in pages for b in page["blocks"])
     required_extensions = emitter.build_extensions + (("sphinxcontrib.plantuml",)
                                                        if has_plantuml else ())
-    blockers = sphinx_support.missing_parsers(args.out, required_extensions)
+    if has_plantuml:
+        for advisory in sphinx_support.missing_parsers(args.out,
+                                                       ("sphinxcontrib.plantuml",)):
+            sys.stderr.write("WARN  %s; the diagram source is written either way, and "
+                             "renders once the extension is enabled\n" % advisory)
+    blockers = sphinx_support.missing_parsers(args.out, emitter.build_extensions)
     if blockers and not args.assume_parser:
         sys.stderr.write("FAIL  %s cannot be read by the project at %s:\n"
                          % (args.format, args.out))

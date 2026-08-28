@@ -47,15 +47,25 @@ part of this pipeline.
 - containment, endpoints, relationship types, and unique ids remain intact (`G003`);
 - the PlantUML source and manifest declare identical nodes and relationships (`G005`);
 - the source has valid document boundaries and machine metadata (`G006`);
-- the manifest contains a unique repository view and collision-free files (`G007`).
+- the manifest contains a unique repository view, collision-free files, and an own-class
+  list matching each view's scope (`G007`).
 
 The metadata comments are part of the generated contract. They let the validator check
 the constrained PlantUML subset without pretending to parse arbitrary user-written
-PlantUML.
+PlantUML. **The declarations themselves are checked too**, not only the comments
+describing them: the classes and arrows PlantUML will draw must be exactly the ones the
+metadata declares, and a class- or arrow-shaped line outside the generated form is a
+finding. Otherwise a class added to a `.puml` by hand renders like any other while every
+check passes.
 
 ## Rendering
 
 Sphinx integrates the source through `sphinxcontrib-plantuml`; PlantUML performs layout
-and SVG rendering. The target documentation project must enable the extension and expose
-a working PlantUML command. CI must exercise the real render path. `.puml` generation is
-still independent of that runtime, so Diagram as Code remains available everywhere.
+and SVG rendering. CI exercises that real render path.
+
+**The extension is optional, and not in the way a parser is.** Without `myst_parser` a
+MyST page is not read at all; without `sphinxcontrib-plantuml` every page still builds
+and one picture is missing. So a project that has not enabled it still gets its
+documentation, with a warning naming what to enable, and the build check accepts the
+`uml` directive without drawing it rather than failing the page over a renderer nobody
+installed. The `.puml` is the artifact either way — reading it needs no runtime at all.

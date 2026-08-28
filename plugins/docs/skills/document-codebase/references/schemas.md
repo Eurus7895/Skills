@@ -169,8 +169,14 @@ One run may draw several views. `diagram-manifest.json` is the index of them:
 ```json
 {"schema_version": 3, "views": [{"view": "full_repository",
   "file": "full-repository.puml", "scope": {"kind": "repository"},
-  "source_graph_hash": "sha256:...", "nodes": ["..."], "edges": ["..."]}]}
+  "source_graph_hash": "sha256:...", "nodes": ["..."], "scope_nodes": ["..."],
+  "edges": ["..."]}]}
 ```
+
+`nodes` is every class the view draws; `scope_nodes` is the subset it is answerable for. A detail view also
+draws the far end of any relationship that leaves its scope, so on a package view the two differ, and whoever
+writes a caption counts `scope_nodes` — counting `nodes` describes a package as holding classes that belong to
+its neighbours.
 
 Each view owns one `.puml` source file. PlantUML and Sphinx derive SVG/HTML during the
 documentation build; those rendered files are not the canonical diagram artifact.

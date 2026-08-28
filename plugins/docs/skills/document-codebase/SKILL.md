@@ -313,7 +313,7 @@ You may write a `view-spec.json` first to choose the detail level, which layers 
 visible, and what to emphasise. You may **not** use it to add a class, drop one, or
 change what connects to what — `build_diagrams.py` refuses such a spec before writing
 anything out. See [`references/diagram-policy.md`](references/diagram-policy.md) for the
-layers, the density threshold, and the severity mapping.
+layers, the density threshold, and what the checks guarantee.
 
 ### 8. Build the document model and render
 
@@ -337,8 +337,11 @@ python3 scripts/render_docs.py --doc .docs-build/doc.json --out docs \
     --diagrams docs/_diagrams --check
 ```
 
-The `.puml` source is always present after a valid Step 7 run. A project that renders it
-must enable `sphinxcontrib-plantuml` and configure its PlantUML command.
+The `.puml` source is always present after a valid Step 7 run. Turning it into a picture
+needs `sphinxcontrib-plantuml` and a PlantUML command, and that is **optional**: a
+project without them still gets every page, the renderer warns which extension to
+enable, and the build check accepts the directive without drawing it. Report that
+warning; do not treat it as a failed step.
 
 Presets are described in [`references/presets.md`](references/presets.md). `onboarding` is the default;
 `architecture` is denser and assumes the reader already knows the domain.

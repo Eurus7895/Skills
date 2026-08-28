@@ -193,6 +193,32 @@ def main():
                            capture_output=True, text=True)
             with open(index, encoding="utf-8") as fh:
                 check("and --replace-index replaces it", fh.read() != "mine\n")
+
+        # The diagram extension is optional in a way a parser is not: without it every
+        # page still builds and one picture is missing, and the `.puml` beside the page
+        # is the artifact either way. A project that has not enabled it yet -- or never
+        # will -- must still get its documentation.
+        diagrams = os.path.join(tmp, "_diagrams")
+        os.makedirs(diagrams)
+        with open(os.path.join(diagrams, "full-repository.puml"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("@startuml\n@enduml\n")
+        illustrated = model([
+            {"id": "overview", "title": "Overview", "order": 1, "mandatory": True,
+             "blocks": [prose("plain"),
+                        {"id": "block:d", "type": "plantuml",
+                         "src": "_diagrams/full-repository.puml",
+                         "alt": "Class diagram"}]}])
+        plain_project = os.path.join(tmp, "optional-rst")
+        os.makedirs(plain_project)
+        with open(os.path.join(plain_project, "conf.py"), "w", encoding="utf-8") as fh:
+            fh.write("project = 'p'\nextensions = []\n")
+        code, output, out = render(tmp, illustrated, "optional", "rst",
+                                   "--diagrams", diagrams)
+        check("a project without the diagram extension still gets its pages",
+              code == 0 and pages_in(out) == {"overview", "index"}, output)
+        check("and is told what to enable to see the picture",
+              "sphinxcontrib.plantuml" in output and "WARN" in output, output)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -245,11 +245,17 @@ def main():
         filename = "%s.puml" % view_stem(view_spec["view"])
         with open(os.path.join(args.out, filename), "w", encoding="utf-8") as fh:
             fh.write(source)
-        entries.append(dict(meta, file=filename,
-                            nodes=sorted(c["id"] for c in view_graph["classes"]),
-                            edges=sorted(edges)))
+        entries.append(dict(
+            meta, file=filename,
+            nodes=sorted(c["id"] for c in view_graph["classes"]),
+            # Classes this view is answerable for. `nodes` also holds the neighbours
+            # drawn to show a crossed boundary, and counting those as the package's own
+            # overstates what it contains.
+            scope_nodes=sorted(c["id"] for c in view_graph["classes"]
+                               if not c.get("external")),
+            edges=sorted(edges)))
         print("%s: %d class(es), %d relationship(s)" %
-              (view_spec["view"], len(entries[-1]["nodes"]), len(edges)))
+              (view_spec["view"], len(entries[-1]["scope_nodes"]), len(edges)))
     with open(os.path.join(args.out, "diagram-manifest.json"), "w", encoding="utf-8") as fh:
         json.dump({"schema_version": MANIFEST_SCHEMA, "views": entries}, fh,
                   indent=2, sort_keys=True)

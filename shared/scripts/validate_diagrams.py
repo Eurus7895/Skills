@@ -137,6 +137,11 @@ def validate_view(entry, parsed, graph, findings):
         missing = sorted(expected - set(node_ids))
         if missing:
             add(findings, "G001", "omits in-scope classes: %s" % ", ".join(missing[:5]), view)
+        # Whoever writes a caption from the manifest counts these. If they drift from the
+        # scope, a package is described as holding classes that belong to its neighbours.
+        if sorted(entry.get("scope_nodes", ())) != sorted(expected & set(node_ids)):
+            add(findings, "G007", "the manifest's own-class list does not match the "
+                                  "classes in this view's scope", view)
     owners = {c["id"]: c["module"] for c in graph["classes"]}
     for node in parsed["nodes"]:
         if owners.get(node.get("id")) != node.get("module"):
