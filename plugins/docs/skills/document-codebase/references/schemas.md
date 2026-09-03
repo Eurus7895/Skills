@@ -203,6 +203,38 @@ be a number no check could ever disagree with.
 counting as analysis. A document made of anchorless prose then falls to `derived_only` on its own, without
 an argument about whether one sentence was too abstract.
 
+## `generation-report.json` — schema_version 1
+
+Written by `quality_docs.py`. It is the only artefact that says **how much of the document was read and how
+much was copied**, and it exists because no other check can tell the difference: a claim derived from the index
+and checked against the index agrees with itself, so a document made entirely of them passes every other stage.
+
+```json
+{"schema_version": 1, "analysis_mode": "per_module", "status": "passed", "reasons": [],
+ "modules": {"budget_from": "units.txt", "in_budget": 25, "analysed": 24, "coverage": 0.96,
+             "out_of_budget": 310, "unanalysed": ["…"]},
+ "statements": {"total": 61, "valid": 58, "unanchored": 2, "near_duplicate": 1, "rejected": 0,
+                "with_valid_evidence": 61, "by_kind": {}, "by_status": {}}}
+```
+
+| `analysis_mode` | Coverage of the budget |
+| --- | --- |
+| `per_module` | 0.90 and above |
+| `partial` | 0.50 to 0.90 |
+| `derived_only` | below 0.50, or no statement was written at all |
+
+**`passed` is impossible under `derived_only`**, whatever else is green. Such a run is not broken — every
+sentence in it checks out — so it is reported as `partial` with the count that produced it, never as a failure
+of the tooling and never as a success.
+
+`status` is `failed` when a statement or a claim was rejected, a mandatory page is missing, or no diagram
+covers the repository; `partial` when the mode is `partial` or `derived_only`; `passed` otherwise. `--require`
+chooses which of those still exits `0`, defaulting to `partial`.
+
+**Coverage is measured against the budget, not the repository.** `units.txt` names the modules the run paid to
+read; everything else is covered in a line and counted in `out_of_budget`. A run that read everything it
+undertook to read is `per_module` on four files and on four thousand.
+
 ## `doc.json` — format_version 1
 
 Pages and blocks, with no markup in it. Block types are `prose`, `table`, `image`, `plantuml` and `ref`. Page ids, block

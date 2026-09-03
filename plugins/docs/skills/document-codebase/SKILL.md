@@ -397,10 +397,31 @@ cover the rest, and both are off by default because both touch what the author w
 
 ### 9. Report
 
-State, from the artefacts rather than from memory: files scanned and skipped, the fan-in cutoff used, how many
-modules were described, how many claims were verified, how many are candidates or unsupported and why, whether
-a diagram was generated or skipped and for what reason, how many visual findings were left unresolved, whether
-the build check passed or was skipped, and that `.docs-build/` can be deleted.
+- **Run** the gate, then read what it says about your own run.
+- **Writes** `.docs-build/generation-report.json`.
+- **Read** `analysis_mode` first, then `status` and its `reasons`.
+- **Decide** nothing: this is the one number you do not get to argue with.
+
+```bash
+python3 scripts/quality_docs.py --index .docs-build/structure.json \
+    --analysis .docs-build/module-analysis.jsonl --units .docs-build/units.txt \
+    --claims .docs-build/claims.verified.jsonl --doc .docs-build/doc.json \
+    --diagrams docs/_diagrams --out .docs-build/generation-report.json
+```
+
+**`analysis_mode` is the honest summary of the run**, and it is the one thing no other
+check can produce. Every other stage passes on a document derived entirely from
+`structure.json`, because a claim taken out of the index and checked against the index
+agrees with itself. `derived_only` means fewer than half the modules in the budget carry
+a statement that survived; such a run is never `passed`, however green everything else is.
+
+Modules outside `units.txt` are counted apart and never lower the coverage. Staying
+inside the budget is the plan, not a shortfall.
+
+Then state, from the artefacts rather than from memory: files scanned and skipped, the
+fan-in cutoff used, `analysis_mode` and the module counts behind it, how many claims were
+verified, how many are candidates or unsupported and why, whether a diagram was generated,
+whether the build check passed or was skipped, and that `.docs-build/` can be deleted.
 
 ## Bundled resources
 

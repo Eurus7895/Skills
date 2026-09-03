@@ -42,10 +42,12 @@ copilot plugin install docs@CopilotBox
 | `annotate_import_usage.py` | Optional Ruff F401 pass, report-only, marking bindings nothing reads |
 | `query_graph.py` | Builds one bounded context packet per scope, partitioning rather than truncating |
 | `verify_doc.py` | Decides every claim against the graph and the source; never rewrites prose |
+| `validate_analysis.py` | Cannot ask whether a reading is right, so asks whether one was made: evidence, anchoring, repetition |
 | `assemble.py` | Fails the run when a dispatched module returned no row, or every row says the same thing |
 | `build_class_graph.py` | Builds the canonical class graph: packages, modules, classes, relationships in layers |
 | `build_diagrams.py` | Generates deterministic PlantUML Diagram as Code from the class graph |
 | `validate_diagrams.py` | Checks PlantUML declarations and relationships against the graph |
+| `quality_docs.py` | Says how much of the document was read and how much was copied; a derived-only run is never `passed` |
 | `build_document_model.py` | Turns verified claims into pages and blocks, with no markup in them |
 | `render_docs.py` | Renders that to RST or MyST, wires it into an existing Sphinx project, and checks the result |
 | `sphinx_support.py` | Runs the build and says which of six things went wrong, rather than "failed" |

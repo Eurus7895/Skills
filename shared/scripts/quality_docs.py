@@ -1,0 +1,303 @@
+#!/usr/bin/env python3
+"""Say what the run actually produced, and refuse to call the shortcut a success.
+
+    python3 scripts/quality_docs.py --index .docs-build/structure.json \\
+        --analysis .docs-build/module-analysis.jsonl \\
+        --units .docs-build/units.txt --doc .docs-build/doc.json \\
+        --out .docs-build/generation-report.json
+
+Every other check in this pipeline asks whether an artifact is internally consistent.
+They all pass on a document derived entirely from `structure.json`, because a claim
+taken out of the index and checked against the index agrees with itself. This one asks
+the question none of them can: **how much of this was read, and how much was copied?**
+
+    per_module     nine in ten modules in the budget carry a statement that survived
+    partial        between half and nine in ten did
+    derived_only   fewer than half, or no statement was written at all
+
+`passed` is impossible under `derived_only`, whatever else is green. A document with no
+reading in it can still be true -- it is `structure.json` in prose, and every sentence
+checks out -- so nothing else in the pipeline has grounds to reject it. That is exactly
+why the count has to be stated rather than inferred from an absence of complaints.
+
+**The budget is not a failure.** `units.txt` names the modules a run pays to read, and
+everything outside it is covered in a line. Those modules are counted separately and
+never drag the coverage down; a run that analysed everything it set out to analyse is
+`per_module` on a repository of four files and on one of four thousand.
+
+Standard library only, plus this directory's own `validate_analysis`. Reads; writes only
+where `--out` says to.
+
+Exit codes: 0 ok, 1 the run does not meet the policy asked for, 2 input error,
+3 internal error.
+"""
+
+import argparse
+import json
+import os
+import sys
+
+import validate_analysis
+from build_document_model import PRESETS
+
+REPORT_VERSION = 1
+
+PER_MODULE = "per_module"
+PARTIAL = "partial"
+DERIVED_ONLY = "derived_only"
+
+PASSED, STATUS_PARTIAL, FAILED = "passed", "partial", "failed"
+
+# Where the two lines sit. Nine in ten leaves room for a module whose only honest
+# statement was unanchored; half is where a document stops being an account of the
+# repository and starts being an index with sentences around it.
+PER_MODULE_COVERAGE = 0.90
+PARTIAL_COVERAGE = 0.50
+
+# Rejections that mean the evidence could not be looked at, as opposed to the statement
+# being malformed. Reported apart because they call for a different fix.
+EVIDENCE_CODES = ("A004", "A006", "A007", "A008", "A015")
+
+RANK = {FAILED: 0, STATUS_PARTIAL: 1, PASSED: 2}
+MODE_RANK = {DERIVED_ONLY: 0, PARTIAL: 1, PER_MODULE: 2}
+
+
+def fail(message, code=2):
+    sys.stderr.write("FAIL  %s\n" % message)
+    return code
+
+
+def load_json(path, label):
+    if not os.path.isfile(path):
+        return None, "no such %s: %s" % (label, path)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh), None
+    except (OSError, ValueError) as exc:
+        return None, "cannot read %s: %s" % (path, exc)
+
+
+def load_jsonl(path):
+    rows = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+    return rows
+
+
+def budget_of(index, units_path):
+    """The modules this run undertook to read.
+
+    With no `units.txt` the budget is every non-test module, which is what a small
+    repository does anyway. The report says which of the two it was, because
+    `coverage: 1.0` means different things under each.
+    """
+    modules = [record["path"] for record in index.get("files", ())
+               if not record.get("is_test") and record.get("symbols")]
+    if not units_path:
+        return sorted(modules), "every non-test module (no units.txt given)"
+    known = set(modules) | {record["path"] for record in index.get("files", ())}
+    with open(units_path, encoding="utf-8") as fh:
+        wanted = [line.strip() for line in fh if line.strip()]
+    unknown = [path for path in wanted if path not in known]
+    if unknown:
+        raise ValueError("units.txt names %d path(s) the index does not hold: %s"
+                         % (len(unknown), ", ".join(sorted(unknown)[:3])))
+    return sorted(set(wanted)), "units.txt"
+
+
+def analyse(index, analysis_path):
+    """Run C2's checker and turn its verdicts into counts."""
+    rows = load_jsonl(analysis_path)
+    checker = validate_analysis.Checker(index)
+    verdicts, seen = {}, set()
+    for row in rows:
+        verdicts.update(checker.check_row(row, seen))
+    checker.check_repetition(rows, verdicts)
+
+    evidence_failures = {finding["statement"] for finding in checker.findings
+                         if finding["code"] in EVIDENCE_CODES and finding["statement"]}
+    by_kind, by_status = {}, {}
+    analysed = set()
+    for row in rows:
+        for statement in row.get("statements", ()):
+            if not isinstance(statement, dict):
+                continue
+            by_kind[statement.get("kind")] = by_kind.get(statement.get("kind"), 0) + 1
+            by_status[statement.get("status")] = by_status.get(
+                statement.get("status"), 0) + 1
+            if verdicts.get(statement.get("id")) == "valid":
+                analysed.add(row.get("path"))
+
+    tally = {"total": len(verdicts), "valid": 0, "unanchored": 0,
+             "near_duplicate": 0, "rejected": 0}
+    for verdict in verdicts.values():
+        tally[verdict] = tally.get(verdict, 0) + 1
+    tally["with_valid_evidence"] = tally["total"] - len(evidence_failures)
+    tally["by_kind"] = by_kind
+    tally["by_status"] = by_status
+    return analysed, tally, checker.findings
+
+
+def mode_of(coverage, statements):
+    if not statements:
+        return DERIVED_ONLY
+    if coverage >= PER_MODULE_COVERAGE:
+        return PER_MODULE
+    if coverage >= PARTIAL_COVERAGE:
+        return PARTIAL
+    return DERIVED_ONLY
+
+
+def page_report(doc):
+    preset = doc.get("preset")
+    pages = {page["id"] for page in doc.get("pages", ())}
+    required = [page_id for page_id, _, mandatory, _ in PRESETS.get(preset, ())
+                if mandatory]
+    return {"preset": preset, "generated": len(pages), "mandatory": len(required),
+            "missing": sorted(set(required) - pages)}
+
+
+def diagram_report(directory):
+    manifest, error = load_json(os.path.join(directory, "diagram-manifest.json"),
+                                "diagram manifest")
+    if error:
+        return {"views": 0, "repository_view": False, "error": error}
+    views = manifest.get("views", ())
+    return {"views": len(views),
+            "repository_view": any((view.get("scope") or {}).get("kind") == "repository"
+                                   for view in views)}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--index", required=True, help="path to structure.json")
+    parser.add_argument("--analysis", help="module-analysis.jsonl")
+    parser.add_argument("--units", help="units.txt: the modules this run paid to read")
+    parser.add_argument("--claims", help="claims.verified.jsonl")
+    parser.add_argument("--doc", help="doc.json")
+    parser.add_argument("--diagrams", help="directory holding diagram-manifest.json")
+    parser.add_argument("--require", default=STATUS_PARTIAL,
+                        choices=(PASSED, STATUS_PARTIAL, FAILED),
+                        help="lowest status that still exits 0 (default: partial)")
+    parser.add_argument("--out", help="where to write the report; stdout either way")
+    args = parser.parse_args()
+
+    index, error = load_json(args.index, "index")
+    if error:
+        return fail(error)
+    if index.get("schema_version") != 2:
+        return fail("unsupported index schema_version %r" % index.get("schema_version"))
+
+    try:
+        budget, budget_source = budget_of(index, args.units)
+    except (OSError, ValueError) as exc:
+        return fail(str(exc))
+
+    reasons, findings = [], []
+    if args.analysis:
+        if not os.path.isfile(args.analysis):
+            return fail("no such analysis file: %s" % args.analysis)
+        try:
+            analysed, statements, findings = analyse(index, args.analysis)
+        except ValueError as exc:
+            return fail("cannot read %s: %s" % (args.analysis, exc))
+    else:
+        analysed, statements = set(), {"total": 0, "valid": 0, "unanchored": 0,
+                                       "near_duplicate": 0, "rejected": 0,
+                                       "with_valid_evidence": 0,
+                                       "by_kind": {}, "by_status": {}}
+        reasons.append("no module analysis was supplied, so nothing was read")
+
+    in_budget = set(budget)
+    analysed_in_budget = analysed & in_budget
+    coverage = (len(analysed_in_budget) / float(len(in_budget))) if in_budget else 0.0
+    mode = mode_of(coverage, statements["total"])
+
+    report = {
+        "schema_version": REPORT_VERSION,
+        "index_hash": index.get("index_hash"),
+        "analysis_mode": mode,
+        "modules": {
+            "budget_from": budget_source,
+            "in_budget": len(in_budget),
+            "analysed": len(analysed_in_budget),
+            "coverage": round(coverage, 4),
+            # Outside the budget by design: covered in a line, never read in full. They
+            # are not failures and must not move the coverage above.
+            "out_of_budget": len([record["path"] for record in index.get("files", ())
+                                  if not record.get("is_test")
+                                  and record["path"] not in in_budget]),
+            "unanalysed": sorted(in_budget - analysed_in_budget)[:20],
+        },
+        "statements": statements,
+        "findings": findings,
+    }
+
+    status = PASSED
+    if statements["rejected"]:
+        status = FAILED
+        reasons.append("%d statement(s) were rejected outright"
+                       % statements["rejected"])
+    if mode == DERIVED_ONLY:
+        # The rule this file exists for. A derived-only document is not broken, so it is
+        # not `failed`; it is a document with no reading in it, so it is never `passed`.
+        status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
+        reasons.append("analysis mode is derived_only: %d of %d module(s) in the budget "
+                       "carry a statement that survived"
+                       % (len(analysed_in_budget), len(in_budget)))
+    elif mode == PARTIAL:
+        status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
+        reasons.append("analysis mode is partial: %d of %d module(s) in the budget were "
+                       "read" % (len(analysed_in_budget), len(in_budget)))
+
+    if args.claims:
+        try:
+            claims = load_jsonl(args.claims)
+        except (OSError, ValueError) as exc:
+            return fail("cannot read %s: %s" % (args.claims, exc))
+        by_status = {}
+        for claim in claims:
+            by_status[claim.get("status")] = by_status.get(claim.get("status"), 0) + 1
+        report["claims"] = {"total": len(claims), "by_status": by_status}
+        # The floor the statements sit on: structural facts the source could have
+        # contradicted and did not.
+        if by_status.get("rejected"):
+            status = FAILED
+            reasons.append("%d claim(s) were rejected" % by_status["rejected"])
+
+    if args.doc:
+        doc, error = load_json(args.doc, "document model")
+        if error:
+            return fail(error)
+        report["pages"] = page_report(doc)
+        if report["pages"]["missing"]:
+            status = FAILED
+            reasons.append("the %s preset requires pages that were not generated: %s"
+                           % (report["pages"]["preset"],
+                              ", ".join(report["pages"]["missing"])))
+
+    if args.diagrams:
+        report["diagrams"] = diagram_report(args.diagrams)
+        if not report["diagrams"]["repository_view"]:
+            status = FAILED
+            reasons.append("no diagram covers the whole repository")
+
+    report["status"] = status
+    report["reasons"] = reasons
+    body = json.dumps(report, indent=2, sort_keys=True)
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as fh:
+            fh.write(body + "\n")
+    print(body)
+    return 0 if RANK[status] >= RANK[args.require] else 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write("ERROR %s\n" % exc)
+        sys.exit(3)

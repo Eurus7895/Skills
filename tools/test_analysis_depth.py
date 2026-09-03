@@ -36,6 +36,31 @@ FIXTURE = os.path.join(REPO, "tests", "contracts", "layered-repo")
 # none of them. Detector A of plan 3 is what will eventually reject it.
 GENERIC_ROLE = "Provides functionality for the application."
 
+# The other half of the experiment: six readings of the same fixture, each naming
+# something that is actually in the file it describes. Written out rather than generated
+# so that they read like sentences a person would write, which is the case the gate has
+# to accept.
+READINGS = (
+    ("src/app/api/cli.py", "Command line entry point.",
+     "main builds an OrderService and hands it the arguments, so the command line does "
+     "no work of its own beyond argv."),
+    ("src/app/api/http.py", "HTTP boundary.",
+     "Handler.post rejects a body with no sku before touching OrderService, so a "
+     "malformed request never reaches storage."),
+    ("src/app/core/models.py", "Domain types.",
+     "Order derives from Record and adds sku, while total is computed rather than "
+     "stored."),
+    ("src/app/core/service.py", "Application workflow.",
+     "OrderService.record wraps each sku in an Order and puts it in the Store, owning "
+     "no persistence itself."),
+    ("src/app/infra/store.py", "Persistence.",
+     "Store keeps rows in a list in memory and loads its settings once at "
+     "construction."),
+    ("src/app/infra/config.py", "Configuration loading.",
+     "load reads ORDERLOG_PATH from the environment and falls back to a fixed file "
+     "name."),
+)
+
 FAILURES = []
 
 
@@ -180,20 +205,55 @@ def main():
         code, output = run("render_docs.py", "--doc", doc_path, "--out", docs)
         check("and renders to a full set of pages", code == 0, output)
 
-        # CHANGES AT C3. Nothing produced anywhere states how the document was made.
-        produced = ([os.path.join(base, name) for base, _, names in os.walk(build)
-                     for name in names]
-                    + [os.path.join(base, name) for base, _, names in os.walk(docs)
-                       for name in names])
-        check("no artifact reports how much of this was analysis",
-              not [p for p in produced
-                   if os.path.basename(p) == "generation-report.json"],
-              "%r" % sorted(os.path.basename(p) for p in produced))
-        with open(doc_path, encoding="utf-8") as fh:
-            doc = json.load(fh)
-        check("and the document model records no analysis mode",
-              not [key for key in doc.get("coverage", {}) if "analysis" in key],
-              "%r" % sorted(doc.get("coverage", {})))
+        # This is what C3 changed. Every check above still passes -- the shortcut is
+        # still internally consistent, because it always was. The gate is the one stage
+        # that asks a question the others cannot, so it is the one that catches it.
+        report_path = os.path.join(build, "generation-report.json")
+        code, output = run("quality_docs.py", "--index", index_path,
+                           "--doc", doc_path, "--out", report_path)
+        with open(report_path, encoding="utf-8") as fh:
+            report = json.load(fh)
+        check("the gate names the run derived_only",
+              report["analysis_mode"] == "derived_only", output)
+        check("and refuses to call it passed",
+              report["status"] != "passed" and code == 0, repr(report["status"]))
+        code, _ = run("quality_docs.py", "--index", index_path, "--doc", doc_path,
+                      "--require", "passed")
+        check("so a run held to per-module analysis fails on it", code == 1)
+        check("and it says which modules nobody read",
+              report["modules"]["analysed"] == 0
+              and report["modules"]["in_budget"] == 6,
+              repr(report["modules"]))
+
+        # The other side of the same instrument. Give it six modules that were actually
+        # read -- each statement naming something that is in the file it describes --
+        # and the same gate reports per_module and passes.
+        analysis_path = os.path.join(build, "module-analysis.jsonl")
+        rows = []
+        for path, role, text in READINGS:
+            record = next(r for r in index["files"] if r["path"] == path)
+            rows.append({
+                "analysis_version": 1, "path": path,
+                "source_hash": record["source_hash"],
+                "index_hash": index["index_hash"], "role": role,
+                "statements": [{
+                    "id": "%s-s1" % os.path.basename(path).split(".")[0],
+                    "kind": "responsibility", "status": "observed", "text": text,
+                    "evidence": [{"path": path, "line_start": 1,
+                                  "line_end": record["loc"]}]}]})
+        write_rows(analysis_path, rows)
+        code, output = run("quality_docs.py", "--index", index_path,
+                           "--analysis", analysis_path, "--doc", doc_path,
+                           "--require", "passed", "--out", report_path)
+        with open(report_path, encoding="utf-8") as fh:
+            read_report = json.load(fh)
+        check("six modules read gives per_module and passes",
+              code == 0 and read_report["analysis_mode"] == "per_module"
+              and read_report["status"] == "passed", output)
+        check("and the statements are counted by kind and status",
+              read_report["statements"]["valid"] == 6
+              and read_report["statements"]["by_status"] == {"observed": 6},
+              repr(read_report["statements"]))
 
         # Freshness already works, and plan 3 relies on it rather than rebuilding it:
         # evidence that no longer describes the file is uncheckable, not false.
