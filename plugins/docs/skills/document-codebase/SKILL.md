@@ -209,10 +209,19 @@ the derived claims it stands on — flat JSON, one object per line, no array:
 A `calls` claim is the one kind still worth writing by hand: it needs a call site you
 actually read, and the derivation above cannot produce it.
 
-How to read a packet, what to do when one is partitioned, the other query modes, and the
-append discipline that keeps two writers from corrupting a JSONL file are in
-[`references/context-policy.md`](references/context-policy.md). Entity ids and claim kinds
-are in [`references/schemas.md`](references/schemas.md).
+Three rules hold for every row you write, whatever else you skip:
+
+- **If the packet says `partitioned: true`, fetch every part** with `--part '<id>'` before
+  describing the module. A part you did not read is a part you are describing blind.
+- **Copy `index_hash` verbatim** from step 1 into every row, so a row left in `.docs-build/`
+  by an earlier run cannot pass for one written a minute ago.
+- **You do the appending.** Create both files empty, then one scope, one append. If the
+  analysis is fanned out, each parallel task returns its lines *to you*: two writers on one
+  JSONL file interleave into corrupt lines, and it surfaces much later as a parse error.
+
+Why each of those matters, how to read a packet and its omission manifest, and the other
+query modes are in [`references/context-policy.md`](references/context-policy.md). Entity
+ids and claim kinds are in [`references/schemas.md`](references/schemas.md).
 
 ### 5. Gate the fragments before verifying
 
