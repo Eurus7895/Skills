@@ -152,12 +152,19 @@ evidence of that, it is absence of work.
 ### C1. Make the shortcut visible before fixing it
 
 `tests/contracts/` gains a fixture repository with layers, a CLI entry point, a CI
-workflow, and no stated rationale — plus a second copy with one source file modified after
-analysis. A test asserts that a run carrying only index-derived claims is **detected**, not
-that it is rejected: nothing rejects it yet.
+workflow, and no stated rationale. A test takes the shortcut deliberately — claims derived
+from the index and nothing else — and asserts **that nothing notices**: identical prose on
+every module goes unchallenged, no artifact reports an analysis mode, and non-source
+evidence is not in the index at all. Staleness is exercised by editing a file in a copy of
+the fixture after the scan, so there is no second tree to keep in step with the first.
 
-*Done when* the new test fails against `main` for the right reason and the fixtures are
-loaded by `tools/test_contracts.py` like every other contract.
+It is written as a **passing** test, not a failing one. A suite that stays red until some
+later commit lands teaches everyone to stop reading it, and this repository keeps CI green.
+Each assertion that a later commit will invert carries a comment naming that commit, so the
+lines to change are found by reading rather than by watching what breaks.
+
+*Done when* the characterisation runs green, every inverting assertion is marked, and the
+fixture is held to its shape by `tools/test_contracts.py` like every other contract.
 
 ### C2. `module-analysis.jsonl` and `validate_analysis.py`
 
@@ -250,5 +257,7 @@ started without saying so first.
 
 ## Branch
 
-`docs/documentation-analysis-plan` from `origin/dev`, this document only. Implementation
-branches follow it one commit at a time, per `AGENTS.md`.
+This document travels with the commits it plans rather than on a branch of its own: a plan
+merged ahead of the work describes a repository that does not exist yet, and one merged
+behind it is a record. `C1` and `C2` land beside it here; `C3` onward follow one commit at
+a time from `origin/dev`, per `AGENTS.md`.
