@@ -8,6 +8,7 @@
 
 scripts/scan_repo.py             -> skills/document-codebase/scripts/scan_repo.py
 scripts/validate_index.py        -> skills/document-codebase/scripts/validate_index.py
+scripts/derive_claims.py         -> skills/document-codebase/scripts/derive_claims.py
 scripts/validate_analysis.py     -> skills/document-codebase/scripts/validate_analysis.py
 scripts/annotate_import_usage.py -> skills/document-codebase/scripts/annotate_import_usage.py
 scripts/query_graph.py           -> skills/document-codebase/scripts/query_graph.py

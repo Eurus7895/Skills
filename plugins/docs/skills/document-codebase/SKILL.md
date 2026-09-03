@@ -160,11 +160,38 @@ difference between a documentation run and an unbounded one; raise it deliberate
 
 ### 4. Analyse one scope at a time, from a context packet
 
-- **Run** `query_graph.py --packet` once per path in `units.txt`.
-- **Writes** nothing on its own — the packet goes to stdout. **You** are what writes this step's output.
+- **Run** the derivation below once, then `query_graph.py --packet` once per path in `units.txt`.
+- **Writes** `claims.jsonl` mechanically; the packets go to stdout. **You** write
+  `fragments.jsonl` and `module-analysis.jsonl`.
 - **Read** the packet: source, symbols, edges both ways with the line that proves each, neighbours' public
   interfaces, and the manifest of what was left out.
-- **Decide** the module's role, then append your fragment and its claims to the two files below.
+- **Decide** what the module is *for*, and append a statement saying so.
+
+**Do not hand-write a `defines`, `imports`, `inherits` or `contains` claim.** Every one of
+them is already in `structure.json`, so writing them out spends model budget copying a
+table and adds a chance of copying it wrong. Derive them once:
+
+```bash
+python3 scripts/derive_claims.py --index .docs-build/structure.json \
+    --units .docs-build/units.txt --out .docs-build/claims.jsonl
+```
+
+**Your budget buys what a script cannot produce**: what each module is for, what it owns,
+how it fails, and why a boundary is where it is. Those go in
+`.docs-build/module-analysis.jsonl`, one row per module, and they are the only part of
+this run that carries understanding — `quality_docs.py` in step 9 counts them and calls a
+document with too few of them `derived_only`.
+
+The row shape, the six `kind`s and the four `status`es are in
+[`references/schemas.md`](references/schemas.md). Two rules decide whether a statement
+counts. **It must name something that is in the module it describes** — a sentence true of
+every module in the repository is about none of them. And `unknown` is a real answer:
+where the repository never says why, say that instead of inventing a reason.
+
+```bash
+python3 scripts/validate_analysis.py .docs-build/module-analysis.jsonl \
+    --index .docs-build/structure.json
+```
 
 For each in-scope file:
 
@@ -192,13 +219,15 @@ python3 scripts/query_graph.py --index .docs-build/structure.json --call-candida
 Call candidates always come back `verified: false`. They tell you where to look; only reading the line
 promotes them.
 
-Each scope produces **one fragment line** in `.docs-build/fragments.jsonl` and **one line per claim** in
-`.docs-build/claims.jsonl` — flat JSON, one object per line, no array, no pretty-printing:
+Each scope also produces **one fragment line** in `.docs-build/fragments.jsonl`, naming
+the derived claims it stands on — flat JSON, one object per line, no array:
 
 ```json
-{"fragment_id": "fragment:src/api.py", "source": "src/api.py", "role": "Exposes the HTTP boundary and delegates to application services.", "claim_ids": ["claim:api-imports-service"], "status": "candidate", "index_hash": "sha256:…"}
-{"id": "claim:api-imports-service", "kind": "imports", "subject": "module:src/api.py", "object": "module:src/service.py", "evidence": [{"path": "src/api.py", "line_start": 5, "line_end": 5}], "index_hash": "sha256:…"}
+{"fragment_id": "fragment:src/api.py", "source": "src/api.py", "role": "Exposes the HTTP boundary and delegates to application services.", "claim_ids": ["claim:imports:src/api.py:src/service.py"], "status": "candidate", "index_hash": "sha256:…"}
 ```
+
+A `calls` claim is the one kind still worth writing by hand: it needs a call site you
+actually read, and the derivation above cannot produce it.
 
 **Every row carries `index_hash`** — the value the scanner printed in step 1, copied
 verbatim. It is what says which scan the row was written against. `.docs-build/` survives

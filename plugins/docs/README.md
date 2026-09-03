@@ -42,6 +42,7 @@ copilot plugin install docs@CopilotBox
 | `annotate_import_usage.py` | Optional Ruff F401 pass, report-only, marking bindings nothing reads |
 | `query_graph.py` | Builds one bounded context packet per scope, partitioning rather than truncating |
 | `verify_doc.py` | Decides every claim against the graph and the source; never rewrites prose |
+| `derive_claims.py` | Writes the structural claims the index already holds, so no model budget is spent copying a table |
 | `validate_analysis.py` | Cannot ask whether a reading is right, so asks whether one was made: evidence, anchoring, repetition |
 | `assemble.py` | Fails the run when a dispatched module returned no row, or every row says the same thing |
 | `build_class_graph.py` | Builds the canonical class graph: packages, modules, classes, relationships in layers |
