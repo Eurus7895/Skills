@@ -199,26 +199,6 @@ For each in-scope file:
 python3 scripts/query_graph.py --index .docs-build/structure.json --packet src/api.py
 ```
 
-The packet carries the file's source, its symbols and classes, every edge in and out with the line that proves
-it, its neighbours' public interfaces, and a **manifest naming what was left out**. Read the manifest — a
-scope described from a packet whose omissions you ignored is a scope described from half the evidence.
-
-If `partitioned` is `true`, the file was too big to send whole. Fetch each part by id with
-`--part '<id>'` and analyse them separately. Nothing is ever silently truncated, so a missing part is always
-visible in the manifest.
-
-Other queries, for when a finding asks for something specific:
-
-```bash
-python3 scripts/query_graph.py --index .docs-build/structure.json --inheritance src/models.py
-python3 scripts/query_graph.py --index .docs-build/structure.json --cross-dir-edges
-python3 scripts/query_graph.py --index .docs-build/structure.json --clusters
-python3 scripts/query_graph.py --index .docs-build/structure.json --call-candidates src/api.py --to src/db.py
-```
-
-Call candidates always come back `verified: false`. They tell you where to look; only reading the line
-promotes them.
-
 Each scope also produces **one fragment line** in `.docs-build/fragments.jsonl`, naming
 the derived claims it stands on — flat JSON, one object per line, no array:
 
@@ -229,22 +209,10 @@ the derived claims it stands on — flat JSON, one object per line, no array:
 A `calls` claim is the one kind still worth writing by hand: it needs a call site you
 actually read, and the derivation above cannot produce it.
 
-**Every row carries `index_hash`** — the value the scanner printed in step 1, copied
-verbatim. It is what says which scan the row was written against. `.docs-build/` survives
-between runs, and a fragment left there by an earlier one parses, names a real file, and
-may even verify against today's index; nothing else tells it apart from one you wrote a
-minute ago. `verify_doc.py` rejects a row whose hash does not match, and rejects one that
-carries no hash at all.
-
-**Create both files empty before the first scope, then append** — one scope, one append, so a crash midway
-leaves the scopes already done intact and `assemble.py` in step 5 names exactly the ones missing.
-
-If you fan the analysis out to parallel tasks, each task returns its lines **to you** and you do the
-appending. Two writers on one JSONL file interleave into corrupt lines, and the failure surfaces much later as
-a parse error in `verify_doc.py`.
-
-Entity ids and claim kinds are defined in [`references/schemas.md`](references/schemas.md). Cite only lines
-the packet gave you or lines you read in the packet's source; never invent a location.
+How to read a packet, what to do when one is partitioned, the other query modes, and the
+append discipline that keeps two writers from corrupting a JSONL file are in
+[`references/context-policy.md`](references/context-policy.md). Entity ids and claim kinds
+are in [`references/schemas.md`](references/schemas.md).
 
 ### 5. Gate the fragments before verifying
 
@@ -327,22 +295,18 @@ python3 scripts/validate_diagrams.py docs/_diagrams \
 ```
 
 `class-graph.json` is structural truth; `.puml` is the canonical Diagram as Code
-presentation. Generation uses only the Python standard library and always writes a
-diagram for a valid graph, including an explicit empty-state diagram when no class was
-found. Sphinx with `sphinxcontrib-plantuml` renders the source to SVG for HTML output.
+presentation. Generation uses only the standard library and always writes a diagram for a
+valid graph, including an explicit empty-state one when no class was found.
 
-**Past the density threshold you get more than one picture.** The overview drops to
-class names only, so the run also draws one view per package at full member detail, and
-each box on the overview links to the package view that shows it. Read the run's output
-for how many views were produced; every one of them is checked, and the checker also
-holds them together — a package left without a view takes its members out of the
-document while each remaining view still looks complete.
+**Past the density threshold you get more than one picture** — the overview drops to class
+names and the run adds a view per package. Read the run's output for how many were
+produced; the checker holds the set together as well as each view.
 
-You may write a `view-spec.json` first to choose the detail level, which layers are
-visible, and what to emphasise. You may **not** use it to add a class, drop one, or
-change what connects to what — `build_diagrams.py` refuses such a spec before writing
-anything out. See [`references/diagram-policy.md`](references/diagram-policy.md) for the
-layers, the density threshold, and what the checks guarantee.
+A `view-spec.json` may choose the detail level, the visible layers and what to emphasise.
+It may **not** add a class, drop one, change what connects to what, or set its own scope;
+`build_diagrams.py` refuses such a spec before writing anything. The layers, the threshold
+and what the checks guarantee are in
+[`references/diagram-policy.md`](references/diagram-policy.md).
 
 ### 8. Build the document model and render
 
@@ -366,63 +330,19 @@ python3 scripts/render_docs.py --doc .docs-build/doc.json --out docs \
     --diagrams docs/_diagrams --check
 ```
 
-The `.puml` source is always present after a valid Step 7 run. Turning it into a picture
-needs `sphinxcontrib-plantuml` and a PlantUML command, and that is **optional**: a
-project without them still gets every page, the renderer warns which extension to
-enable, and the build check accepts the directive without drawing it. Report that
-warning; do not treat it as a failed step.
+`doc.json` contains no markup. **Do not write RST, MyST or Sphinx directives yourself** —
+the renderer owns headings, tables, references, escaping and the toctree.
+
+**`--check` answers with one of six outcomes, and `unwired` and `skipped` are not passes.**
+Neither fails the run; reporting either as a pass is the failure that distinction exists to
+prevent. The outcomes, the two formats, `--wire-toctree`, `--assume-parser`, and why
+`sphinxcontrib-plantuml` is optional where a parser is not, are in
+[`references/rendering.md`](references/rendering.md) — read it before rendering into a
+project that already has documentation in it.
 
 Presets are described in [`references/presets.md`](references/presets.md). `onboarding` is the default;
-`architecture` is denser and assumes the reader already knows the domain.
-
-**`handbook` is for a repository that already has a documentation tree** in the usual
-`getting_started/ architecture/ usage/ development/ appendix/` shape. It fills the four pages a dependency
-graph can answer for and writes none of the others: an installation guide or a changelog is not derivable from
-code, and a generated stub would replace what someone wrote. The renderer lists each page it did not generate,
-and keeps an existing `index.rst`.
-
-For those authored pages the work is an **update, not a generation**: read what is there, check it against
-`claims.verified.jsonl`, and change only what the evidence contradicts or completes — same citations, same
-status boundary. Anything you cannot check against the graph, leave as the author wrote it, and say in step 9
-which pages you touched and which you did not.
-
-`doc.json` contains no markup. **Do not write RST, MyST or Sphinx directives yourself** — the renderer owns
-headings, tables, references, escaping and the toctree, and hand-written directives are how a build starts
-failing on markup nobody remembers adding.
-
-`--format` chooses the markup: `rst` (the default) or `myst`. The same `doc.json` renders to both, page for
-page and reference for reference; only the emitter differs. **MyST needs the target project to enable
-`myst_parser`** — Markdown pages in a project that has not are files Sphinx will not read, and the build fails
-for a reason that is nothing to do with the pages.
-
-`--check` runs `sphinx-build -W` when Sphinx is installed, falls back to docutils, and reports `skipped` when
-neither is present. It answers with one of six outcomes, and they are not interchangeable:
-
-| Outcome | Means | Next |
-| --- | --- | --- |
-| `passed` | builds, every reference resolves | nothing |
-| `unwired` | builds; some pages are in no toctree yet | wire them in, or say the document is not yet part of the project's index |
-| `invalid_markup` | a page does not parse | a defect — report the output |
-| `broken_reference` | parses, but points at something absent | fix the target or the reference |
-| `runner_failure` | the builder could not run | the check learned nothing about the markup |
-| `skipped` | no builder installed | **not a pass** — say so |
-
-`unwired` and `skipped` do not fail the run. Neither is a pass either, and reporting them as one is the
-failure this table exists to prevent.
-
-**Writing into a project someone else owns.** The renderer never creates or edits a `conf.py`. Two flags
-cover the rest, and both are off by default because both touch what the author wrote:
-
-- `--wire-toctree` adds the generated pages to an index that already exists. It is idempotent, keeps every
-  entry and every line of prose that was there, and **refuses** an index with no toctree, with more than one,
-  or that it cannot parse — leaving the file untouched and naming the pages to add by hand. Without the flag
-  the pages are written and the run prints what is missing; the build check then reports `unwired`, and
-  wiring is what turns that into `passed`.
-- `--assume-parser` writes MyST into a project whose `conf.py` does not visibly enable `myst_parser`.
-  Without it that is refused before anything is written, because Markdown in such a project is a file Sphinx
-  will not read: the pages land, the toctree names them, and the build fails over documents that are not at
-  fault. `conf.py` is read as text, never imported — running a stranger's configuration to find out what it
-  configures is not a check, it is execution.
+`architecture` is denser and assumes the reader already knows the domain; `handbook` fits an existing
+documentation tree and **updates** its authored pages rather than generating over them.
 
 ### 9. Report
 
@@ -459,7 +379,9 @@ whether the build check passed or was skipped, and that `.docs-build/` can be de
 | `scripts/scan_repo.py` | Step 1, always. Run it; you do not need to read it |
 | `scripts/validate_index.py` | Step 1, always. Run it; you do not need to read it |
 | `scripts/annotate_import_usage.py` | Step 2, when import usage is wanted |
+| `scripts/derive_claims.py` | Step 4, once — the structural claims you must not hand-write |
 | `scripts/query_graph.py` | Step 4, once per scope |
+| `scripts/validate_analysis.py` | Step 4, after the last statement |
 | `scripts/assemble.py` | Step 5, always — before verifying |
 | `scripts/verify_doc.py` | Step 6, always — before writing anything |
 | `scripts/build_class_graph.py` | Step 7, when diagrams are wanted |
@@ -468,10 +390,13 @@ whether the build check passed or was skipped, and that `.docs-build/` can be de
 | `scripts/build_document_model.py` | Step 8 |
 | `scripts/render_docs.py` | Step 8 |
 | `scripts/sphinx_support.py` | Never directly — `render_docs.py --check` uses it |
+| `scripts/wire_toctree.py` | Never directly — `render_docs.py --wire-toctree` uses it |
+| `scripts/quality_docs.py` | Step 9, always — it is the only stage that measures the run |
 | `references/schemas.md` | Step 4, before emitting the first claim |
 | `references/presets.md` | Step 8, to choose a preset |
 | `references/diagram-policy.md` | Step 7, before drawing or reviewing a diagram |
-| `references/context-policy.md` | When a packet is oversized or a retry needs scoping |
+| `references/context-policy.md` | Step 4, for packets, partitions and the append discipline |
+| `references/rendering.md` | Step 8, before rendering into a project that already has documentation |
 
 ## Side effects
 
