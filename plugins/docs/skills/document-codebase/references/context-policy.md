@@ -61,3 +61,45 @@ Model calls scale with the number of scopes dispatched, not with repository size
 modules by fan-in plus every entry point; everything else gets one line in a grouped list. Raising that is a
 deliberate choice with a cost, and the cutoff used belongs in the document so a reader knows what was and was
 not examined closely.
+
+## Reading a packet
+
+The packet carries the file's source, its symbols and classes, every edge in and out with
+the line that proves it, its neighbours' public interfaces, and a **manifest naming what was
+left out**. Read the manifest — a scope described from a packet whose omissions you ignored
+is a scope described from half the evidence.
+
+When `partitioned` is `true` the file was too big to send whole. Fetch each part by id with
+`--part '<id>'` and analyse them separately. Nothing is ever silently truncated, so a missing
+part is always visible in the manifest.
+
+Other query modes, for when a finding asks for something specific:
+
+```bash
+python3 scripts/query_graph.py --index .docs-build/structure.json --inheritance src/models.py
+python3 scripts/query_graph.py --index .docs-build/structure.json --cross-dir-edges
+python3 scripts/query_graph.py --index .docs-build/structure.json --clusters
+python3 scripts/query_graph.py --index .docs-build/structure.json --call-candidates src/api.py --to src/db.py
+```
+
+Call candidates always come back `verified: false`. They tell you where to look; only reading
+the line promotes them.
+
+## Writing the rows
+
+**Every row carries `index_hash`**, the value the scanner printed, copied verbatim. It says
+which scan the row was written against. `.docs-build/` survives between runs, and a fragment
+left there by an earlier one parses, names a real file, and may even verify against today's
+index; nothing else tells it apart from one written a minute ago. `verify_doc.py` rejects a
+row whose hash does not match, and one that carries no hash at all.
+
+**Create the files empty before the first scope, then append** — one scope, one append, so a
+crash midway leaves the scopes already done intact and `assemble.py` names exactly the ones
+missing.
+
+If the analysis is fanned out to parallel tasks, each task returns its lines **to you** and
+you do the appending. Two writers on one JSONL file interleave into corrupt lines, and the
+failure surfaces much later as a parse error in `verify_doc.py`.
+
+Cite only lines the packet gave you, or lines you read in the packet's source. Never invent a
+location.
