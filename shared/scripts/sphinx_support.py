@@ -237,6 +237,74 @@ def _stage(out_dir, work, extensions):
     return source, stubbed
 
 
+CONF_TEMPLATE = '''\
+# Sphinx configuration.
+#
+# Generated once, because the pages beside it had nowhere to be built from. Nothing
+# regenerates or edits this file: it is yours now, and a later documentation run will
+# leave it exactly as you leave it.
+
+project = %(project)r
+author = %(author)r
+
+extensions = %(extensions)r
+
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+html_theme = "alabaster"
+%(notes)s'''
+
+PLANTUML_NOTE = '''
+# `sphinxcontrib.plantuml` renders the .puml sources under _diagrams/ as pictures. It is
+# optional: without it every page still builds and the diagrams are simply not drawn. To
+# turn them on, `pip install sphinxcontrib-plantuml`, make sure a `plantuml` command is
+# on PATH, and point this at it if it is not found automatically:
+#
+#     plantuml = "plantuml"
+'''
+
+MYST_NOTE = '''
+# The pages are MyST Markdown, so `myst_parser` is required, not optional: without it
+# Sphinx does not read .md files at all and the build fails for a reason that has nothing
+# to do with what the pages say. `pip install myst-parser`.
+'''
+
+
+def write_conf(out_dir, extensions=(), project="Documentation", author=""):
+    """Create a `conf.py` beside the rendered pages, when there is none.
+
+    Generated pages are not a document until something can build them, and a project
+    that has never used Sphinx has no `conf.py` to build them with. So this writes one --
+    once, only when asked, and only when the directory has none.
+
+    It **never** overwrites or edits an existing file. The reason is the same one that
+    makes `parser_enabled` read a `conf.py` as text rather than importing it: a
+    configuration is somebody's, it can contain anything, and a generator that rewrites
+    it destroys work no rerun can restore. Returns (outcome, detail) where outcome is
+    `written`, `exists` or `failed`.
+    """
+    path = os.path.join(out_dir, "conf.py")
+    if os.path.isfile(path):
+        return "exists", path
+    notes = ""
+    if "sphinxcontrib.plantuml" in extensions:
+        notes += PLANTUML_NOTE
+    if "myst_parser" in extensions:
+        notes += MYST_NOTE
+    body = CONF_TEMPLATE % {"project": project, "author": author,
+                            # Every extension the pages need, including the ones not
+                            # installed here: this file is for the reader's machine, not
+                            # for the one that happened to generate it.
+                            "extensions": sorted(set(extensions)), "notes": notes}
+    try:
+        if not os.path.isdir(out_dir):
+            os.makedirs(out_dir)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(body)
+    except OSError as exc:
+        return "failed", "cannot write %s: %s" % (path, exc)
+    return "written", path
+
+
 def _note(detail, stubbed):
     if not stubbed:
         return detail

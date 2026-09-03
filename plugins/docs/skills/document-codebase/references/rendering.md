@@ -51,7 +51,26 @@ Both are off by default, for that reason.
   `myst_parser`. `conf.py` is read as text, never imported — running a stranger's
   configuration to find out what it configures is not a check, it is execution.
 
-The renderer never creates or edits a `conf.py`.
+## `--write-conf`, and what it does not do
+
+Generated pages are not a document until something can build them, and a project that has
+never used Sphinx has no `conf.py` to build them with. Without one, `sphinx-build docs/` on
+a freshly rendered tree fails on configuration, not on anything the pages say.
+
+`--write-conf` writes one — **once, only when asked, and only when the directory has none.**
+It never overwrites and never edits. That is the same rule as reading a `conf.py` as text
+rather than importing it, for the same reason: a configuration is somebody's, it can contain
+anything, and a generator that rewrites it destroys work no rerun can restore. A second run
+against a directory that has one prints `kept the existing conf.py` and moves on.
+
+`--project` and `--author` fill in the two fields nothing can derive. The extension list is
+whatever the *pages* need — `myst_parser` for MyST, `sphinxcontrib.plantuml` where there are
+diagrams — and not what happens to be installed on the machine that generated it, so the
+file is correct on the reader's machine too. Each extension it names comes with a comment
+saying whether it is required or optional and how to install it.
+
+Without the flag nothing is written, and a run into a directory with no `conf.py` says so:
+the pages are on disk and cannot yet be built, which is not visible from the files alone.
 
 ## The `handbook` preset
 

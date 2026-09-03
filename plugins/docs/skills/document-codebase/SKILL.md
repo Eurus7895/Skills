@@ -354,6 +354,11 @@ that omits it prints why its pages are thin.
 `doc.json` contains no markup. **Do not write RST, MyST or Sphinx directives yourself** —
 the renderer owns headings, tables, references, escaping and the toctree.
 
+**A project with no `conf.py` cannot build what you just wrote.** The run says so when that
+is the case. Add `--write-conf --project "<name>"` to generate one; it is written only when
+the directory has none, and an existing one is never touched. Do not hand-write a `conf.py`
+either — say the flag exists and let the user choose.
+
 **`--check` answers with one of six outcomes, and `unwired` and `skipped` are not passes.**
 Neither fails the run; reporting either as a pass is the failure that distinction exists to
 prevent. The outcomes, the two formats, `--wire-toctree`, `--assume-parser`, and why
