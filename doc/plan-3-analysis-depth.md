@@ -1,0 +1,263 @@
+# Plan 3 — the analysis half
+
+Nine commits. This is `documentation-analysis-implementation-plan.md` reconciled with what
+the repository actually contains, and it replaces **A8** in `doc/plan-2-layout-and-release.md`.
+`A8b` (run it on a real repository) and `A9` (the release) survive and move to the end.
+
+## Why the source plan needed reconciling
+
+Its diagnosis is right, and one sentence carries it: **`structure.json` is evidence input,
+not analysis, and must not independently satisfy semantic coverage.** Everything worth
+keeping follows from that — `analysis_mode`, forbidding `passed` on `derived_only`, the
+four-way rationale status, and the eight negative tests, which are the best part of the
+document.
+
+What it needed was a look at the repository. Comparing it against `be4a420` gives one
+result that changes the shape of the work:
+
+> Everything already built is the delivery half. Everything missing is the analysis half.
+
+Scanning, indexing, context packets, verification, the document model, RST, MyST, Sphinx,
+PlantUML, toctree wiring — done. That is a complete distribution system for a kind of
+content the pipeline cannot yet produce. It is also exactly why a run can end in
+`derived_only` with every check green: the pipe is clear, and the only thing flowing
+through it is `structure.json` in prose.
+
+Of the source plan's eleven phases, three are done, four are half done, four are absent —
+and the four absent ones are the ones with no mechanical right answer to compare against.
+
+## Corrections applied
+
+| Source plan | This plan | Why |
+| --- | --- | --- |
+| Phase 1: remove Graphviz and draw.io | Dropped | Done in PR #23 |
+| Phase 2: compute source hashes | Dropped | `structure.json` v2 already carries per-file `source_hash`, the run carries `index_hash`, and stale evidence already lands on `V005` / `needs_context`. The Freshness row of its own quality table is finished |
+| Replace claims with analysis statements | **Layer, don't replace** | A claim can be *contradicted* by the source; a statement can only be checked for evidence validity. Keeping claims as the falsifiable floor and adding statements as the ceiling is strictly stronger than either alone |
+| One analysis record per in-scope module | Per module **in the fan-in budget** | `SKILL.md` step 3 caps dispatch at the top 25 by fan-in plus entry points, deliberately. Analysing every module removes the cost ceiling. Modules outside the budget are `derived_only` **by design**, counted separately, and never drag the mode down |
+| `partial` when *some* module is derived-only, or *some* rationale is inferred | Thresholds, not existence tests | Both conditions are true of every real repository, so the status would never change and would say nothing |
+| `confidence: high` on every statement | Dropped | Nothing can contradict a model's self-assessment. `status` is the part that carries information |
+| Phase 5 must produce an end-to-end flow whenever an entry point exists | Flows are **best-effort** | Tracing ordered interactions with evidence per step, through dynamic dispatch, is a different order of difficulty from module responsibility. A hard requirement here forces fabrication — the one thing the plan exists to prevent |
+| `documentation-model.json` | `doc.json` format_version 2 | A new file discards presets, which already encode which pages must exist |
+| Quality gates at Phase 9, last | **First** | The gate is the only instrument that can tell whether the expansion after it improved anything |
+| "Detect generic statements" / "detect architecture that mirrors directories" | Given a method | These two are the only checks that actually close the failure mode. Named without a method, they ship as stubs |
+
+## The inversion
+
+Build the instrument, then build what it measures. Commits **C1–C4** close the failure
+mode and change no documentation content at all; a run that was `derived_only` yesterday
+still is, and now says so. **C5–C8** are the expansion, and each one can be judged by
+whether the numbers from C3 move.
+
+## Artifact map
+
+| Source plan | Here |
+| --- | --- |
+| `repository-inventory.json` | `structure.json` grows an `assets` section (C5). `scan_repo.py` already walks the tree and already *excludes* non-source files; a second walker would disagree with the first |
+| `structure.json` | Unchanged in role |
+| `module-analysis.jsonl` | New, beside `fragments.jsonl` and `claims.jsonl` (C2) |
+| `architecture-analysis.json` | New (C6) |
+| `flow-analysis.json`, `operations-analysis.json` | New, best-effort (C7) |
+| `documentation-model.json` | `doc.json` v2 (C8) |
+| `generation-report.json` | New (C3) |
+
+## `module-analysis.jsonl` — analysis_version 1
+
+One row per module in `units.txt`. Flat, one object per line, like every other `.jsonl`
+here.
+
+```json
+{"path": "src/api.py", "source_hash": "sha256:…", "index_hash": "sha256:…",
+ "role": "Exposes the HTTP boundary and delegates to application services.",
+ "statements": [
+   {"id": "api-s1", "kind": "responsibility", "status": "observed",
+    "text": "Validates the request body before any service call, so a malformed payload never reaches the store.",
+    "evidence": [{"path": "src/api.py", "line_start": 34, "line_end": 51, "symbol": "create_order"}]}]}
+```
+
+`kind` is `responsibility`, `state`, `interface`, `interaction`, `failure`, or `rationale`.
+`status` is `declared`, `observed`, `inferred`, or `unknown`.
+
+**Two vocabularies, on purpose.** A claim keeps its six statuses because a claim is about
+structure and the source can prove it wrong. A statement is about meaning; nothing can
+prove it wrong, so its statuses record *where the reading came from* instead. Collapsing
+them would put an interpretation and a verified fact in the same column.
+
+`role` stays what it is today: a navigation label, not the analysis.
+
+## Thresholds
+
+A module counts as **analysed** when it has at least one statement that
+
+- carries at least one evidence record whose file exists, whose hash matches, whose line
+  range is inside the file, and whose `symbol` (if given) is in that file's symbol table;
+- survives detector A below.
+
+Let `coverage = analysed / |units.txt|`.
+
+```text
+analysis_mode = per_module    coverage >= 0.90
+                partial       0.50 <= coverage < 0.90
+                derived_only  coverage < 0.50, or no statement of any kind exists
+```
+
+Modules outside `units.txt` are reported as `out_of_budget` with their own count. They are
+not failures; the budget is the product decision that makes a run finite.
+
+```text
+status = failed   a required artifact is missing or invalid; evidence is stale;
+                  a required diagram is absent; the Sphinx build fails
+         partial  analysis_mode is partial; or detector B reports agreement in
+                  [0.85, 0.95); or a mandatory page has no covering statement
+         passed   analysis_mode is per_module, evidence validity is 1.0, both
+                  detectors pass, every mandatory page is covered, Sphinx did not fail
+```
+
+`passed` is forbidden when `analysis_mode` is `derived_only`, whatever else holds.
+
+## Detector A — a statement that describes nothing
+
+Three rules, ascending in value, all standard library.
+
+1. **Exact repetition.** Normalise (lowercase, strip punctuation, collapse whitespace). The
+   same text on two modules describes neither. Hard failure.
+2. **Near repetition.** Token Jaccard ≥ 0.8 between statements on different modules. Flag
+   each; if more than 20% of statements are flagged, the set is a template.
+3. **Anchoring.** A statement must name at least one identifier the module defines or
+   imports — taken from that file's `symbols` and its imports' `bindings`, both already in
+   `structure.json`. "This module provides functionality for the application" names
+   nothing in the file it claims to describe.
+
+Rule 3 does not error. A statement that fails it simply does not count towards `analysed`,
+so a run of anchorless prose degrades into `derived_only` rather than into an argument
+about whether one sentence was too abstract.
+
+## Detector B — architecture that is the directory tree with new labels
+
+Build two partitions of the same module set: `P_arch` from `architecture-analysis.json`
+(component → modules) and `P_dir` from the paths (parent directory → modules).
+
+- **Identical partition and each component's name normalising to its directory's name** →
+  hard failure. Nothing was merged, nothing was split, nothing was renamed: no synthesis
+  happened.
+- Otherwise compute pair agreement (the Rand index: the fraction of module pairs the two
+  partitions classify the same way). `>= 0.95` → failure. `[0.85, 0.95)` → `partial` with
+  the finding reported.
+
+A repository may genuinely be organised the way its architecture is, so the middle band is
+reported rather than fatal — but a synthesis that renamed nothing and moved nothing is not
+evidence of that, it is absence of work.
+
+## Commits
+
+### C1. Make the shortcut visible before fixing it
+
+`tests/contracts/` gains a fixture repository with layers, a CLI entry point, a CI
+workflow, and no stated rationale. A test takes the shortcut deliberately — claims derived
+from the index and nothing else — and asserts **that nothing notices**: identical prose on
+every module goes unchallenged, no artifact reports an analysis mode, and non-source
+evidence is not in the index at all. Staleness is exercised by editing a file in a copy of
+the fixture after the scan, so there is no second tree to keep in step with the first.
+
+It is written as a **passing** test, not a failing one. A suite that stays red until some
+later commit lands teaches everyone to stop reading it, and this repository keeps CI green.
+Each assertion that a later commit will invert carries a comment naming that commit, so the
+lines to change are found by reading rather than by watching what breaks.
+
+*Done when* the characterisation runs green, every inverting assertion is marked, and the
+fixture is held to its shape by `tools/test_contracts.py` like every other contract.
+
+### C2. `module-analysis.jsonl` and `validate_analysis.py`
+
+The schema above, and the script that holds rows to it: evidence validity, anchoring,
+duplicate detection, `index_hash` freshness. Claims and fragments are untouched.
+
+*Done when* a row with an invalid line range, a stale hash, a missing symbol, or text
+repeated across modules is refused with a distinct finding code for each, and a valid row
+passes.
+
+### C3. `quality_docs.py` and `generation-report.json`
+
+The report the source plan specifies at §6.8, with the thresholds and detector A above,
+`analysis_mode`, the `out_of_budget` bucket, and the statement mix by kind and status.
+Replaces A8 in plan 2.
+
+*Done when* a derived-only run reports `derived_only` and cannot return `passed`, and a run
+with real statements reports `per_module` — both proven on the C1 fixtures.
+
+### C4. Say it in the skill
+
+`SKILL.md` step 4 currently reads as though the model hand-writes structural claims, and
+shows an `imports` claim as its example. Rewrite: structural claims are derived by script,
+the model budget buys statements — responsibility, state, interaction, failure, rationale.
+Step 3 keeps the fan-in budget and states that everything outside it is `derived_only` by
+design and covered in one line each.
+
+*Done when* the documented workflow and `quality_docs.py` describe the same run, and the
+end-to-end fixture run reports a mode that matches what actually happened.
+
+**The failure mode is closed here.** Everything below is expansion, and each commit is
+judged by whether the C3 numbers move.
+
+### C5. Evidence that is not source code
+
+`scan_repo.py` records the files it currently skips — README, packaging manifests, CI
+workflows, contribution and release files, configuration and examples — with `kind`,
+`source_hash` and nothing else. No analysis, no parsing: availability only.
+
+*Done when* the index names them, hashes are deterministic, and `structure.json` v3 still
+loads everywhere v2 did.
+
+### C6. Architecture synthesis
+
+`architecture-analysis.json`: components, layers, boundaries, external systems, and
+rationale, every item carrying a status, evidence, and the module-analysis statement ids it
+was built from. Detector B lands in `quality_docs.py` with it.
+
+*Done when* every component links to contributing modules, every relationship to structural
+or behavioural evidence, every inferred rationale is labelled, and a synthesis that is the
+directory tree fails.
+
+### C7. Flows and operations, best-effort
+
+`flow-analysis.json` and `operations-analysis.json`, plus a PlantUML sequence diagram
+generated from the former. Both are optional outputs: a repository that yields no traceable
+flow gets that stated in the limitations, never a flow assembled from import edges. The
+existing rule holds — call chains are built from calls verified at their call site, and
+from nothing else.
+
+*Done when* a flow with a broken step is refused, an absent flow is reported as absent, and
+the sequence diagram is validated against the flow the way class diagrams are validated
+against the class graph.
+
+### C8. Outside-in documentation model
+
+`doc.json` v2 with `covers` and `analysis_ids` per page, checked in both directions: every
+mandatory topic has a page, and no page exists without something to say. A new preset lays
+out the outside-in hierarchy — product overview, getting started, conventions,
+architecture, rationale, components, flows, operations, reference — filled from C5–C7. RST
+and MyST rendering do not change.
+
+*Done when* a reference page cannot satisfy an architecture requirement, a page with no
+covering statement fails, and the existing presets still render.
+
+### C9. A8b, then A9
+
+Run the whole thing on a real repository (plan 2's A8b), read the output as a reader
+rather than as a checker, then the release. Unchanged from plan 2, and still not to be
+started without saying so first.
+
+## Out of scope, stated once
+
+- **Design intent that the repository does not record.** `unknown` is a supported answer and
+  the renderer must not promote it.
+- **Rationale from issue trackers.** The source plan lists "issue text included in the
+  repository" under `declared`; issues are not in the repository, so that branch would never
+  fire.
+- **Deployment behaviour** beyond what CI workflow files state.
+
+## Branch
+
+This document travels with the commits it plans rather than on a branch of its own: a plan
+merged ahead of the work describes a repository that does not exist yet, and one merged
+behind it is a record. `C1` and `C2` land beside it here; `C3` onward follow one commit at
+a time from `origin/dev`, per `AGENTS.md`.

@@ -65,11 +65,23 @@ def main():
             "doc-v1-dangling-ref.json", "unsupported-version.json",
             "class-graph-v1-minimal.json", "view-spec-v1-valid.json",
             "view-spec-v1-structural-mutation.json",
+            "module-analysis-v1-valid.jsonl", "module-analysis-v1-invalid.jsonl",
         ]
         missing = [n for n in expected if not os.path.isfile(fixture(n))]
         check("every named fixture is present", not missing, "missing %r" % missing)
         if missing:
             return 1
+
+        # The layered fixture is a contract too: `tools/test_analysis_depth.py` reads
+        # its shape, not just its existence. Three directories that are nearly the
+        # layering, one entry point, and evidence the scanner does not index yet --
+        # remove any of those and the test that uses it stops testing anything.
+        layered = fixture("layered-repo")
+        wanted = ["README.md", "pyproject.toml", ".github/workflows/ci.yml",
+                  "src/app/api/cli.py", "src/app/core/service.py",
+                  "src/app/infra/store.py"]
+        absent = [n for n in wanted if not os.path.isfile(os.path.join(layered, n))]
+        check("the layered fixture keeps its shape", not absent, "missing %r" % absent)
 
         # -- structure ---------------------------------------------------------
         index = load(fixture("structure-v2-minimal.json"))
@@ -183,6 +195,16 @@ def main():
                            fixture("view-spec-v1-structural-mutation.json"),
                            "--out", os.path.join(tmp, "mutated"))
         check("a view specification that changes the graph is refused", code == 1, output)
+
+        # -- module analysis ---------------------------------------------------
+        code, output = run("validate_analysis.py",
+                           fixture("module-analysis-v1-valid.jsonl"),
+                           "--index", fixture("structure-v2-minimal.json"))
+        check("analysis written against the index fixture is accepted", code == 0, output)
+        code, output = run("validate_analysis.py",
+                           fixture("module-analysis-v1-invalid.jsonl"),
+                           "--index", fixture("structure-v2-minimal.json"))
+        check("and the defective one is refused with findings", code == 1, output)
 
         # -- unsupported versions ----------------------------------------------
         for script, args in (

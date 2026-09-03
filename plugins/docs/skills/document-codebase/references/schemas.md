@@ -156,6 +156,85 @@ is false. Collapsing any pair of them either discards true claims or retries hop
 Only `rejected` and `needs_context` make `verify_doc.py` exit `1`. A run whose worst outcome is `unsupported`
 has finished: the claim is recorded, labelled, and reported in the limitations.
 
+## `module-analysis.jsonl` — analysis_version 1
+
+One row per module the run actually read. It sits **beside** `claims.jsonl`, not in place of it: a claim
+states a fact about structure that the source can contradict, a statement states what a module is for and
+nothing can. Keeping both means the run has a floor that can be proven wrong and a ceiling that carries
+meaning; collapsing them would put an interpretation in the same column as a verified fact.
+
+```json
+{"analysis_version": 1, "path": "src/api.py", "source_hash": "sha256:…", "index_hash": "sha256:…",
+ "role": "Exposes the HTTP boundary and delegates to application services.",
+ "statements": [{"id": "api-s1", "kind": "responsibility", "status": "observed",
+   "text": "Validates the request body before any service call, so a malformed payload never reaches the store.",
+   "evidence": [{"path": "src/api.py", "line_start": 34, "line_end": 51, "symbol": "create_order"}]}]}
+```
+
+`kind` is `responsibility`, `state`, `interface`, `interaction`, `failure` or `rationale`. `role` stays what
+it has always been — a navigation label, not the analysis.
+
+| `status` | Means |
+| --- | --- |
+| `declared` | the repository states it: an ADR, a design document, a docstring |
+| `observed` | visible in the code, with no reason given for it |
+| `inferred` | the model's reading, supported by more than one place |
+| `unknown` | the repository does not say, and the document must not pretend otherwise |
+
+There is no confidence field. Nothing can contradict a model's assessment of its own certainty, so it would
+be a number no check could ever disagree with.
+
+`validate_analysis.py` cannot ask whether a reading is right. It asks whether one happened:
+
+| Code | Meaning |
+| --- | --- |
+| `A002` | a row or statement is missing a required field |
+| `A003` | the module is not in the index |
+| `A004` | written against a different version of the file |
+| `A005` | carried over from a different scan |
+| `A006` / `A007` / `A008` | evidence names a file, a line range or a symbol that is not there |
+| `A009` / `A010` | unknown statement kind or status |
+| `A011` | a statement id used twice |
+| `A012` | the same statement made about two modules — it was about neither |
+| `A013` | two statements differing only in their nouns; past a fifth of the set, one template |
+| `A014` | the statement names nothing that is in the module it describes |
+
+`A013` between one pair and `A014` are **advisory**: they do not fail the run, they stop the statement
+counting as analysis. A document made of anchorless prose then falls to `derived_only` on its own, without
+an argument about whether one sentence was too abstract.
+
+## `generation-report.json` — schema_version 1
+
+Written by `quality_docs.py`. It is the only artefact that says **how much of the document was read and how
+much was copied**, and it exists because no other check can tell the difference: a claim derived from the index
+and checked against the index agrees with itself, so a document made entirely of them passes every other stage.
+
+```json
+{"schema_version": 1, "analysis_mode": "per_module", "status": "passed", "reasons": [],
+ "modules": {"budget_from": "units.txt", "in_budget": 25, "analysed": 24, "coverage": 0.96,
+             "out_of_budget": 310, "unanalysed": ["…"]},
+ "statements": {"total": 61, "valid": 58, "unanchored": 2, "near_duplicate": 1, "rejected": 0,
+                "with_valid_evidence": 61, "by_kind": {}, "by_status": {}}}
+```
+
+| `analysis_mode` | Coverage of the budget |
+| --- | --- |
+| `per_module` | 0.90 and above |
+| `partial` | 0.50 to 0.90 |
+| `derived_only` | below 0.50, or no statement was written at all |
+
+**`passed` is impossible under `derived_only`**, whatever else is green. Such a run is not broken — every
+sentence in it checks out — so it is reported as `partial` with the count that produced it, never as a failure
+of the tooling and never as a success.
+
+`status` is `failed` when a statement or a claim was rejected, a mandatory page is missing, or no diagram
+covers the repository; `partial` when the mode is `partial` or `derived_only`; `passed` otherwise. `--require`
+chooses which of those still exits `0`, defaulting to `partial`.
+
+**Coverage is measured against the budget, not the repository.** `units.txt` names the modules the run paid to
+read; everything else is covered in a line and counted in `out_of_budget`. A run that read everything it
+undertook to read is `per_module` on four files and on four thousand.
+
 ## `doc.json` — format_version 1
 
 Pages and blocks, with no markup in it. Block types are `prose`, `table`, `image`, `plantuml` and `ref`. Page ids, block
