@@ -38,7 +38,9 @@ import sys
 import sphinx_support
 import wire_toctree
 
-SUPPORTED_FORMAT = {1}
+# v2 adds `subheading` blocks, `covers`/`analysis_ids` per page and a `statements` list.
+# v1 documents render unchanged: nothing v1 carried was removed or given a new meaning.
+SUPPORTED_FORMAT = {1, 2}
 
 # `word_` is a reference in RST and `[1]_` a footnote, and an undefined one fails the
 # build. Mid-word underscores are not references, so `snake_case` -- which is most of
@@ -90,6 +92,10 @@ class Rst(object):
     def heading(self, text):
         line = self.escape(text)
         return "%s\n%s\n" % (line, "=" * max(len(line), 3))
+
+    def subheading(self, text):
+        line = self.escape(text)
+        return "%s\n%s\n" % (line, "-" * max(len(line), 3))
 
     def prose(self, text):
         return self.escape(text) + "\n"
@@ -150,6 +156,9 @@ class Myst(object):
     def heading(self, text):
         return "# %s\n" % self.escape(text)
 
+    def subheading(self, text):
+        return "## %s\n" % self.escape(text)
+
     def prose(self, text):
         return self.escape(text) + "\n"
 
@@ -191,6 +200,8 @@ def render_block(block, titles, emitter):
     kind = block["type"]
     if kind == "prose":
         return emitter.prose(block["text"])
+    if kind == "subheading":
+        return emitter.subheading(block["text"])
     if kind == "table":
         return emitter.table(block["columns"], block["rows"])
     if kind == "image":

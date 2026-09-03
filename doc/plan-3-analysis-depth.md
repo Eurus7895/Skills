@@ -213,6 +213,35 @@ end-to-end fixture run reports a mode that matches what actually happened.
 **The failure mode is closed here.** Everything below is expansion, and each commit is
 judged by whether the C3 numbers move.
 
+### C8a. The analysis reaches the page — taken before C5
+
+Done out of order, and the reason is worth recording. After C4 the pages were still
+generic, and reading the generated RST said why: `build_document_model.py` did not mention
+`module-analysis.jsonl` anywhere. Step 4 wrote the per-module reading, `quality_docs.py`
+counted it, and the document was then built from claims alone — so every page said
+structural things, and structural things read as generic however well they are phrased.
+The Flows page rendered its empty branch, because a flow needs a `calls` claim verified at
+its call site and nothing derives one.
+
+C5, C6 and C7 all add *more* material to the front of a pipeline that was dropping the
+material it already had. Wiring it up first makes each of them visible when it lands
+instead of accumulating at the input.
+
+So: `doc.json` v2 with `covers` and `analysis_ids` per page, statements rendered under
+their own section headings, the statement status boundary enforced the way the claim one
+already was — `declared` and `observed` stated, `inferred` hedged in the sentence,
+`unknown` listed in Limitations as a question — and `coverage_by_section` reporting a
+denominator per question. A statement kind no page covers fails the build, which is the
+original defect turned into a check.
+
+*Done when* a statement written in step 4 appears on a page, an `unknown` cannot reach
+prose, a kind covered by no page fails, a page whose blocks are all headings and links
+fails, v1 documents still render, and a run without `--analysis` builds the old document
+while saying why it is thin.
+
+What is left of C8 after this: the outside-in preset, which needs C5–C7's material before
+its pages have anything to hold.
+
 ### C5. Evidence that is not source code
 
 `scan_repo.py` records the files it currently skips — README, packaging manifests, CI

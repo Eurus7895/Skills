@@ -338,11 +338,18 @@ and ask first. `git status` afterwards is not a safety net — by then it has ha
 python3 scripts/build_document_model.py --index .docs-build/structure.json \
     --claims .docs-build/claims.verified.jsonl \
     --fragments .docs-build/fragments.verified.jsonl \
+    --analysis .docs-build/module-analysis.jsonl \
     --preset onboarding --diagrams docs/_diagrams --out .docs-build/doc.json
 
 python3 scripts/render_docs.py --doc .docs-build/doc.json --out docs \
     --diagrams docs/_diagrams --check
 ```
+
+**`--analysis` is what stops the document reading like an inventory.** A claim can only say
+that one file imports another, so pages built from claims alone say structural things, and
+structural things read as generic however well they are phrased. The statements from step 4
+are what carry purpose, ownership, failure and rationale onto the page. Pass the flag; a run
+that omits it prints why its pages are thin.
 
 `doc.json` contains no markup. **Do not write RST, MyST or Sphinx directives yourself** —
 the renderer owns headings, tables, references, escaping and the toctree.

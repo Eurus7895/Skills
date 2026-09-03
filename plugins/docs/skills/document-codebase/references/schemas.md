@@ -264,11 +264,31 @@ chooses which of those still exits `0`, defaulting to `partial`.
 read; everything else is covered in a line and counted in `out_of_budget`. A run that read everything it
 undertook to read is `per_module` on four files and on four thousand.
 
-## `doc.json` — format_version 1
+## `doc.json` — format_version 2
 
-Pages and blocks, with no markup in it. Block types are `prose`, `table`, `image`, `plantuml` and `ref`. Page ids, block
-ids, `ref` targets and `claim_refs` must all resolve before the model is written; a `claim_ref` to anything
-that is not `verified` or `supported_inference` is a build failure, not a warning.
+Pages and blocks, with no markup in it. Block types are `prose`, `subheading`, `table`, `image`, `plantuml`
+and `ref`. Page ids, block ids, `ref` targets, `claim_refs` and `analysis_refs` must all resolve before the
+model is written; a `claim_ref` to anything that is not `verified` or `supported_inference` is a build
+failure, not a warning, and so is an `analysis_ref` to a statement that is `unknown`.
+
+v2 adds the statements to the document. Each page carries `covers` — the statement kinds it is responsible
+for — and `analysis_ids`, the ones it actually used, and the model carries `statements` and
+`coverage_by_section`. Every kind has exactly one home:
+
+| Page | Covers |
+| --- | --- |
+| Module reference | `responsibility`, `state`, `interface`, `failure` |
+| Architecture | `interaction`, `rationale` |
+| Coverage and limitations | every kind, but only its `unknown` statements, as questions |
+
+The check runs both ways, and the second direction is the one that matters: **a statement kind no page
+covers fails the build**. Collecting a reading and then rendering a document without it is not a degraded
+document, it is a document that hides how much was known — which is the defect this version exists to
+close. `coverage_by_section` reports a denominator per question rather than one figure for the tree,
+because a document that knows what every module is for and nothing about how any of them fails is not
+90% of a document.
+
+v1 documents still render. Nothing v1 carried was removed or given a new meaning.
 
 ## PlantUML diagram artifacts — manifest_version 3
 
