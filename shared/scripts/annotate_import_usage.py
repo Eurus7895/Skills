@@ -49,7 +49,7 @@ import shutil
 import subprocess
 import sys
 
-SUPPORTED_SCHEMA = {2}
+SUPPORTED_SCHEMA = {2, 3}
 
 # Ruff names the *imported* symbol, which is not the bound name: `import sys as system`
 # is reported as "`sys` imported but unused". The leaf is the best cross-check available,

@@ -222,6 +222,21 @@ workflows, contribution and release files, configuration and examples — with `
 *Done when* the index names them, hashes are deterministic, and `structure.json` v3 still
 loads everywhere v2 did.
 
+**Done.** Two defects surfaced only by running it twice, neither visible by reading:
+
+- A scan indexed its own output. `.docs-build/structure.json` is a `.json` file inside the
+  repository, so the second scan hashed the first scan's artifacts and `index_hash` changed
+  on a tree that had not changed — quietly invalidating every fragment from the run before.
+  The directory holding `--out` is now excluded when it sits inside the repository, and
+  `.docs-build/` is skipped outright.
+- The fallback walker skipped every dot-directory, so `.github/workflows/` was invisible
+  whenever `git ls-files` could not answer. The same tree scanned differently depending on
+  whether it was a git checkout, and nothing downstream could see or explain the difference.
+
+Assets enter `index_hash`, so editing a README forces a rescan. That is the intended cost:
+a run cites an asset exactly where it could not derive the answer, so a stale asset citation
+is the one kind nothing downstream would catch.
+
 ### C6. Architecture synthesis
 
 `architecture-analysis.json`: components, layers, boundaries, external systems, and

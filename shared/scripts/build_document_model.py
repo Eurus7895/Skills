@@ -36,7 +36,7 @@ import sys
 
 FORMAT_VERSION = 1
 GENERATOR_VERSION = "0.2.0-dev"
-SUPPORTED_SCHEMA = {2}
+SUPPORTED_SCHEMA = {2, 3}
 SUPPORTED_MANIFEST_SCHEMA = {3}
 
 PROSE_STATUSES = ("verified", "supported_inference")

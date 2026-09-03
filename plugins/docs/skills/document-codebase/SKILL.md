@@ -102,6 +102,11 @@ do not load it into context.
 `--detail` is what fills in `classes`. Without it the records carry symbol names and nothing else, and any
 statement about a class hierarchy would be memory rather than data. It is Python-only by design.
 
+The digest also names the **assets** — README, packaging manifests, CI workflows, ADRs, configuration,
+examples — with a count per kind. These are listed, never parsed. They are what a page about installation or
+conventions may cite, and the absence of one is itself an answer: a repository with no ADR gets "no decision
+record exists", not a rationale you worked out.
+
 `validate_index.py` re-derives what can be re-derived: paths inside the repository, edge endpoints, line
 ranges, and whether each file still hashes to what was scanned. **A finding here is not something to work
 around.** `E007`/`E008` mean the tree changed under the scan — rerun the scanner. Its findings never enter a

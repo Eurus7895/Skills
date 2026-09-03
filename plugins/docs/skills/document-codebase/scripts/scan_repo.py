@@ -22,6 +22,13 @@ missing edge is recoverable; a confident wrong one is not.
 Files whose extension has no parser here are counted and reported as unscanned, so a
 caller cannot mistake "not looked at" for "nothing there".
 
+Files that are not code but that a document would want to quote — README, packaging
+manifests, CI workflows, contributing and release notes, configuration, examples,
+architecture decision records — are listed under `assets` with a path, a kind and a
+hash. **Availability only: nothing there is opened or parsed.** Knowing a README exists
+is what lets a run cite it instead of inventing an installation section; knowing it does
+not exist is what lets the run say so.
+
 `--detail` adds classes, methods, attributes and base classes, for Python only -- regex
 can find a class name but not its bases, and a half-filled record reads like a complete
 one. A base class links to the file defining it only when the import resolves *and* that
@@ -59,7 +66,7 @@ LANG_BY_EXT = {
     ".c": "c", ".h": "c", ".cc": "cpp", ".cpp": "cpp", ".hpp": "cpp",
 }
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # The compared value matters: `if __name__ == "pkg.optional":` is a real pattern and is
 # not a way into the program. Matching the whole comparison keeps it out.
@@ -85,7 +92,122 @@ NON_SOURCE_EXT = {
 SKIP_DIRS = {
     ".git", "node_modules", "vendor", "dist", "build", "target", "__pycache__",
     ".venv", "venv", ".tox", ".mypy_cache", ".pytest_cache", "site-packages",
+    # This pipeline's own working directory. Indexing it makes each scan depend on the
+    # previous one's output, so `index_hash` changes on a tree that did not.
+    ".docs-build",
 }
+
+# Dot-directories worth walking: how the project is built, tested and released lives in
+# them, and nowhere else. `git ls-files` already returns their contents, so without this
+# the fallback walker and the git path disagree about the same tree.
+EVIDENCE_DIRS = {".github", ".gitlab", ".circleci", ".buildkite", ".config"}
+
+
+def own_output(root_real, out_path):
+    """What this run is about to write, so the scan does not index itself.
+
+    Only assets are at risk -- no artifact here has a source extension -- but the
+    consequence is the whole freshness guarantee: a scan that indexes the previous
+    scan's output produces a different `index_hash` every time, and every fragment
+    written against the last one goes stale for no reason.
+
+    Returns a (directory, file) pair to exclude. The directory is only returned when it
+    sits strictly inside the repository, because `--out structure.json` at the root
+    would otherwise exclude the repository from itself.
+    """
+    if not out_path:
+        return None, None
+    full = os.path.realpath(out_path)
+    directory = os.path.dirname(full)
+    if directory != root_real and directory.startswith(root_real + os.sep):
+        return directory, full
+    return None, full
+
+
+# --- Assets -------------------------------------------------------------------------
+#
+# Files the parser has nothing to say about, which nonetheless hold the answers to the
+# questions a dependency graph cannot answer: how the project is installed, what it
+# calls itself, how it is built, why a decision was made. Recorded as availability only
+# -- a path, a kind, a hash, a size. Nothing here is parsed, and nothing here is read
+# into the index. A page that wants to say what a README claims still has to cite the
+# lines somebody read.
+#
+# Order matters: the first rule that matches wins, so `docs/adr/0001-x.md` is an `adr`
+# and not a `documentation` file, and `.github/workflows/ci.yml` is `ci` and not
+# `configuration`.
+ASSET_BASENAMES = (
+    ("readme", ("readme",)),
+    ("licence", ("license", "licence", "copying", "notice")),
+    ("changelog", ("changelog", "changes", "history", "news", "releases")),
+    ("contributing", ("contributing", "code_of_conduct", "code-of-conduct", "governance",
+                      "security", "support", "maintainers", "codeowners", "authors",
+                      "agents", "claude")),
+    ("packaging", ("pyproject", "setup", "requirements", "requirements-dev", "pipfile",
+                   "poetry", "package", "package-lock", "cargo", "go", "gemfile",
+                   "pom", "build", "makefile", "rakefile", "justfile", "manifest")),
+    ("container", ("dockerfile", "docker-compose", "compose", "containerfile")),
+    ("ci", ("jenkinsfile", "azure-pipelines", "appveyor", "cloudbuild", "buildkite")),
+)
+
+# Directory prefixes, consulted before the basename rules above for the kinds where the
+# location is the more reliable signal.
+ASSET_PREFIXES = (
+    ("adr", ("docs/adr/", "doc/adr/", "docs/decisions/", "doc/decisions/",
+             "architecture/decisions/", "adr/")),
+    ("ci", (".github/workflows/", ".github/actions/", ".circleci/", ".gitlab/",
+            ".buildkite/")),
+    ("example", ("examples/", "example/", "samples/", "sample/", "demo/", "demos/")),
+    ("documentation", ("docs/", "doc/", "documentation/")),
+)
+
+ASSET_EXTENSIONS = {
+    ".toml": "configuration", ".ini": "configuration", ".cfg": "configuration",
+    ".conf": "configuration", ".yaml": "configuration", ".yml": "configuration",
+    ".json": "configuration", ".env": "configuration", ".properties": "configuration",
+    ".md": "documentation", ".markdown": "documentation", ".rst": "documentation",
+    ".txt": "documentation", ".adoc": "documentation",
+    ".csv": "data", ".tsv": "data", ".sql": "data", ".xml": "data",
+    ".lock": "packaging",
+}
+
+ASSET_KINDS = ("readme", "licence", "changelog", "contributing", "packaging", "ci",
+               "container", "adr", "example", "documentation", "configuration", "data",
+               "other")
+
+# Nothing a person wrote, so nothing a document could cite. Excluded outright rather
+# than filed under `other`, or a repository with a hundred icons reports a hundred
+# assets and the useful dozen are lost among them.
+OPAQUE_EXT = {
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".pdf", ".zip", ".gz", ".tar",
+    ".woff", ".woff2", ".ttf", ".eot", ".otf", ".mp3", ".mp4", ".webm", ".mov", ".svg",
+    ".map", ".min", ".snap", ".log",
+}
+
+
+def asset_kind(path):
+    """Which question this file might answer. Convention only; nothing is opened.
+
+    Returns None for a file no documentation could quote -- a binary, a lockfile's
+    sibling image, an editor setting. Being wrong here costs a misfiled row in a list,
+    which is why it is allowed to be a table of names rather than a parser.
+    """
+    lowered = path.lower()
+    base = os.path.basename(lowered)
+    stem, ext = os.path.splitext(base)
+    if ext in OPAQUE_EXT:
+        return None
+    for kind, prefixes in ASSET_PREFIXES:
+        if any(lowered.startswith(prefix) for prefix in prefixes):
+            return kind
+    for kind, names in ASSET_BASENAMES:
+        if stem in names or base in names:
+            return kind
+    if base.startswith(".") and not ext:
+        # `.gitignore`, `.editorconfig`: settings for a tool, not a statement about the
+        # project. Recorded as configuration so the count is honest.
+        return "configuration"
+    return ASSET_EXTENSIONS.get(ext)
 
 # Approximate import extraction for non-Python languages.
 IMPORT_PATTERNS = [
@@ -138,7 +260,12 @@ def list_files(root):
 
     found = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+        # Dot-directories are tooling by default, but a few of them hold the only copy
+        # of how a project is built and released. Excluding those made the same tree
+        # scan differently depending on whether git could answer, which is a difference
+        # nothing downstream could see or explain.
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS
+                       and (not d.startswith(".") or d in EVIDENCE_DIRS)]
         for name in filenames:
             found.append(os.path.relpath(os.path.join(dirpath, name), root))
     return sorted(found)
@@ -793,9 +920,10 @@ def resolve_bases(records, aliases_by_path, by_module, by_suffix, by_stem, by_pa
                     base["resolved"], base["line"] = target, line
 
 
-def build(root, detail=False, detail_match=None):
+def build(root, detail=False, detail_match=None, out_path=None):
     root_real = os.path.realpath(root)
-    records, skipped_symlinks = [], []
+    skip_dir, skip_file = own_output(root_real, out_path)
+    records, skipped_symlinks, assets = [], [], []
     unscanned = Counter()
     aliases_by_path = {}
 
@@ -805,6 +933,22 @@ def build(root, detail=False, detail_match=None):
         if not lang:
             if ext and ext not in NON_SOURCE_EXT:
                 unscanned[ext] += 1
+            path = rel_path.replace(os.sep, "/")
+            kind = asset_kind(path)
+            full = os.path.join(root, rel_path)
+            real = os.path.realpath(full)
+            if real == skip_file or (skip_dir and real.startswith(skip_dir + os.sep)):
+                continue
+            if kind and within(root_real, full):
+                size = None
+                try:
+                    size = os.path.getsize(full)
+                except OSError:
+                    pass
+                digest = file_hash(full)
+                if digest is not None:
+                    assets.append({"path": path, "kind": kind,
+                                   "source_hash": digest, "bytes": size})
             continue
 
         full = os.path.join(root, rel_path)
@@ -904,12 +1048,19 @@ def build(root, detail=False, detail_match=None):
         "edges_are": "imports, not calls -- an edge does not prove an invocation",
         "detail_requested": detail,
         "files": records,
+        # Availability, not content. The graph cannot say how a project is installed,
+        # what it calls itself, or why a decision was taken; these are where a person
+        # would go looking, listed so a run can cite one rather than invent an answer.
+        "assets": sorted(assets, key=lambda a: a["path"]),
         "edges": edges,
         "fan_in": dict(fan_in),
         "fan_out": dict(fan_out),
         "entry_points": entry_points_of(records, fan_in),
         "diagnostics": diagnostics_of(records, unresolved_total, skipped_symlinks, unscanned),
-        "coverage": coverage_of(records, detail, unresolved_total, skipped_symlinks, unscanned),
+        "coverage": dict(
+            coverage_of(records, detail, unresolved_total, skipped_symlinks, unscanned),
+            assets={"count": len(assets),
+                    "by_kind": dict(Counter(a["kind"] for a in assets))}),
         "unresolved_imports": unresolved_total,
         "skipped_symlinks": skipped_symlinks,
         "unscanned_extensions": dict(unscanned),
@@ -950,6 +1101,14 @@ def digest(data, top):
         "%s=%d" % kv for kv in sorted(totals["languages"].items(), key=lambda kv: -kv[1])))
     lines.append("exact (ast-parsed): %d of %d files; unresolved imports: %d" % (
         totals["exact_files"], totals["files"], data["unresolved_imports"]))
+
+    # Named, not read. A run that says nothing about installation while the repository
+    # holds a README and a pyproject.toml did not fail to find them, it failed to look.
+    assets = data.get("coverage", {}).get("assets") or {}
+    if assets.get("count"):
+        by_kind = sorted(assets.get("by_kind", {}).items(), key=lambda kv: (-kv[1], kv[0]))
+        lines.append("assets (not parsed, available to cite): %d -- %s" % (
+            assets["count"], ", ".join("%s=%d" % kv for kv in by_kind)))
 
     # Reported whenever detail was asked for, including the zero case: a mistyped glob
     # otherwise produces a silent digest that looks like a repository with no classes.
@@ -1021,7 +1180,8 @@ def main():
         sys.stderr.write("FAIL  --root is not a directory: %s\n" % args.root)
         return 1
 
-    data = build(args.root, detail=args.detail, detail_match=args.detail_match)
+    data = build(args.root, detail=args.detail, detail_match=args.detail_match,
+                 out_path=args.out)
     if not data["files"]:
         sys.stderr.write("FAIL  no source files found under %s\n" % args.root)
         return 1
