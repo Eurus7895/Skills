@@ -104,15 +104,30 @@ Modules outside `units.txt` are reported as `out_of_budget` with their own count
 not failures; the budget is the product decision that makes a run finite.
 
 ```text
-status = failed   a required artifact is missing or invalid; evidence is stale;
-                  a required diagram is absent; the Sphinx build fails
-         partial  analysis_mode is partial; or detector B reports agreement in
-                  [0.85, 0.95); or a mandatory page has no covering statement
-         passed   analysis_mode is per_module, evidence validity is 1.0, both
-                  detectors pass, every mandatory page is covered, Sphinx did not fail
+status = failed           a required artifact is missing or invalid; evidence is
+                          stale; a required diagram is absent; the Sphinx build fails
+         review_required  a bounded model pass ran out of attempts, tokens or time
+                          before it could decide. Nothing was learned; a person has to
+                          look. Never reported as either of the two below
+         partial          analysis_mode is partial; or detector B reports agreement in
+                          [0.85, 0.95); or a mandatory page has no covering statement
+         passed           analysis_mode is per_module, evidence validity is 1.0, both
+                          detectors pass, every mandatory page is covered, Sphinx did
+                          not fail
 ```
 
 `passed` is forbidden when `analysis_mode` is `derived_only`, whatever else holds.
+
+`review_required` is the same distinction `sphinx_support.py` already draws between
+`skipped` and `runner_failure`: a check that could not run is not a check that passed, and
+it is not a defect in what it was pointed at either. Every commit below that spends a model
+on judgement — `C6`, `C7`, `C8b` — carries a **maximum number of attempts, a token ceiling
+and a timeout**, and exhausting any of them yields this status rather than a guess.
+
+**Adopting the gate is staged, not switched on.** `--require` already spells this: run at
+`--require failed` to observe the numbers without blocking anything, move to the default
+`partial` once a repository has a baseline, and only then to `passed`. A gate turned to its
+strictest setting on its first day fails honest documents and gets disabled.
 
 ## Detector A — a statement that describes nothing
 
@@ -217,6 +232,11 @@ was built from. Detector B lands in `quality_docs.py` with it.
 or behavioural evidence, every inferred rationale is labelled, and a synthesis that is the
 directory tree fails.
 
+Coverage grows a denominator per subject here, not one number for the run: components with
+contributing modules, relationships with evidence, entry points reached by a flow, boundaries
+with a rationale of any status. A single percentage hides which of them is empty, and empty
+is the interesting case.
+
 ### C7. Flows and operations, best-effort
 
 `flow-analysis.json` and `operations-analysis.json`, plus a PlantUML sequence diagram
@@ -238,13 +258,53 @@ architecture, rationale, components, flows, operations, reference — filled fro
 and MyST rendering do not change.
 
 *Done when* a reference page cannot satisfy an architecture requirement, a page with no
-covering statement fails, and the existing presets still render.
+covering statement fails, the existing presets still render, and coverage reports a
+denominator per required section rather than one figure for the tree.
+
+### C8b. The prose may not say more than the analysis
+
+Everything up to here checks that a statement had evidence. Nothing checks that the
+**sentence a reader actually sees** still says what the statement said. Between
+`module-analysis.jsonl` and a rendered page sits a rewrite, and a rewrite is where a
+relationship gets promoted: `calls` becomes *owns*, `imports` becomes *depends on*, an
+`inferred` rationale loses its hedge and becomes the reason the boundary exists.
+
+Deterministic first, and it goes a long way: a table of the words each relationship may be
+rendered with, and a rule that a page may not use a stronger one than the claim or statement
+behind it carries. A page citing an `inferred` or `unknown` statement may not assert. Only
+what survives those rules goes to a bounded model pass, under the budgets above.
+
+*Done when* a seeded contradiction fails — a page saying *owns* over a `calls` claim, a page
+asserting a rationale recorded as `unknown` — the honest fixture passes, and exhausting the
+budget returns `review_required` rather than a verdict.
 
 ### C9. A8b, then A9
 
 Run the whole thing on a real repository (plan 2's A8b), read the output as a reader
 rather than as a checker, then the release. Unchanged from plan 2, and still not to be
 started without saying so first.
+
+## The second source plan, and what came out of it
+
+`architecture-documentation-implementation-plan.md` proposed twelve work packages over the
+same pipeline. Six of them describe work already done — the baseline (`C1`), versioned
+schemas, analysis as an artifact (`C2`), the `.puml`-to-analysis link (PR #23), the manifest
+and the evidence checks (`C3`). Three do not apply, and the reason is the same for all
+three: **it was written for a system that runs, and this is a set of scripts an agent runs
+by hand.** There is no CI job that generates documentation for a repository, no publication
+step, and no pipeline service for two triggers to share. `.github/workflows/validate.yml`
+checks this marketplace, nothing else. A reviewer approval gate needs something to gate.
+
+`C8b` above is its one genuinely missing idea, and it is a good one.
+
+Refused, with the reason:
+
+| Proposal | Why not |
+| --- | --- |
+| Visual validation with a layout loop | Removed on purpose in PR #23. PlantUML owns layout, and the rasterizer it needs is not on most machines |
+| An `evidence.json` table with its own ids | Evidence already travels inside the claim or statement that rests on it. A second id space is a second thing to keep in step, bought for orphan detection |
+| A `documentation-output/` tree | `.docs-build/` for intermediates and `docs/` for pages is published in `SKILL.md`. Breaking that buys a different arrangement, not a better one |
+| A CI trigger and an approval gate | No substrate. When this should run inside another repository's CI, that is its own plan, and it starts from what runs it rather than from what it emits |
 
 ## Out of scope, stated once
 
@@ -259,5 +319,6 @@ started without saying so first.
 
 This document travels with the commits it plans rather than on a branch of its own: a plan
 merged ahead of the work describes a repository that does not exist yet, and one merged
-behind it is a record. `C1` and `C2` land beside it here; `C3` onward follow one commit at
-a time from `origin/dev`, per `AGENTS.md`.
+behind it is a record. `C1` through `C4` landed with it in PR #24, which is where the
+failure mode was closed. `C5` onward follow one commit at a time from `origin/dev`, per
+`AGENTS.md`, and each is judged by whether the numbers `C3` reports move.
