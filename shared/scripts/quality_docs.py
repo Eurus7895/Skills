@@ -262,19 +262,31 @@ def detector_b(architecture):
     return result
 
 
-def flow_report(flows):
+def flow_report(flows, validation=None):
     """What was traced, what was refused, and whether absence was stated.
 
     The denominator C6 left open. It is deliberately not a percentage: a repository with
     one traceable flow and one refused is not "50% documented", it is a document with a
     hole in a named place.
+
+    Counting every entry in the analysis overstated it. `validate_flows.py` refuses a
+    flow without removing it from the file -- that is the supported workflow, and the
+    diagram builder skips it -- so the raw list holds flows nothing vouches for. With the
+    validation report the counts are of accepted flows only, and `refused` is reported
+    beside them; without it nothing here has been checked and the caller is told so.
     """
     entries = [f for f in flows.get("flows", ()) or () if isinstance(f, dict)]
     absent = flows.get("absent")
+    accepted = None
+    if isinstance(validation, dict):
+        accepted = set(validation.get("accepted", ()))
+        entries = [f for f in entries if f.get("id") in accepted]
     return {
         "flows": len(entries),
         "steps": sum(len(f.get("steps") or ()) for f in entries),
         "unresolved": sum(len(f.get("unresolved") or ()) for f in entries),
+        "refused": len(validation.get("refused", ())) if accepted is not None else None,
+        "validated": accepted is not None,
         "absent_stated": bool(isinstance(absent, dict) and absent.get("reason")),
     }
 
@@ -325,6 +337,8 @@ def main():
     parser.add_argument("--architecture", help="architecture-analysis.json, so Detector B "
                                                "can ask whether it is a synthesis")
     parser.add_argument("--flows", help="flow-analysis.json, for the flow denominator")
+    parser.add_argument("--flow-report", help="the report from validate_flows.py, so "
+                                              "refused flows are not counted as traced")
     parser.add_argument("--operations", help="operations-analysis.json")
     parser.add_argument("--diagrams", help="directory holding diagram-manifest.json")
     parser.add_argument("--require", default=STATUS_PARTIAL,
@@ -469,7 +483,28 @@ def main():
         if stated != index.get("index_hash"):
             return fail("the %s was written against %s, the index is %s"
                         % (label, stated, index.get("index_hash")))
-        report[key] = builder(loaded)
+        if key == "flows":
+            validation = None
+            if args.flow_report:
+                validation, error = load_json(args.flow_report, "flow validation report")
+                if error:
+                    return fail(error)
+                if validation.get("index_hash") != stated:
+                    return fail("the flow report describes %s, the flow analysis is %s"
+                                % (validation.get("index_hash"), stated))
+            report[key] = builder(loaded, validation)
+            if not report[key]["validated"]:
+                # Unchecked counts are not coverage. Saying so beats a figure that reads
+                # like one and includes flows validate_flows.py would have refused.
+                status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
+                reasons.append("no flow report was supplied, so the flow counts include "
+                               "flows nothing has validated")
+            elif report[key]["refused"]:
+                status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
+                reasons.append("%d flow(s) were refused and are not documented"
+                               % report[key]["refused"])
+        else:
+            report[key] = builder(loaded)
         # Nothing traced and nothing said about why is the quiet failure this whole step
         # exists to stop. "Nothing here" is a result and passes; silence is not.
         if not report[key].get("absent_stated") and not (

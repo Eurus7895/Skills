@@ -34,7 +34,15 @@ import sys
 
 SUPPORTED_MANIFEST_SCHEMA = {1}
 
-DECLARATION = re.compile(r'^participant\s+"(?:[^"\\]|\\.)*"\s+as\s+(p_\w+)\s*$')
+DECLARATION = re.compile(r'^participant\s+"((?:[^"\\]|\\.)*)"\s+as\s+(p_\w+)\s*$')
+
+# The only non-metadata lines the generator emits that are not a participant, a message
+# or a note. Anything else in the file is a hand edit: `title Unverified claim` renders
+# into the picture and matches none of the shapes below, so without this list it would
+# pass every check while changing what a reader sees.
+PREAMBLE = ("@startuml", "@enduml", "autonumber",
+            "skinparam sequenceMessageAlign left",
+            "' Generated from flow-analysis.json; do not edit by hand.")
 PARTICIPANT_SHAPED = re.compile(r"^(?:participant|actor|boundary|control|entity|"
                                 r"collections|database|queue)\b")
 MESSAGE = re.compile(r"^(p_\w+)\s*(->|-->|->>|<-)\s*(p_\w+)\s*:\s*(.*)$")
@@ -107,7 +115,10 @@ def parse_source(path):
                 parsed["defects"].append(
                     "line %d declares a participant outside the generated form" % number)
             else:
-                parsed["declared"].append(match.group(1))
+                # The label as well as the alias: the label is what a reader uses to
+                # tell one lifeline from another, so a declaration retitled by hand while
+                # keeping its alias changes the diagram's meaning and nothing else.
+                parsed["declared"].append((match.group(2), match.group(1)))
         elif NOTE_SHAPED.match(stripped):
             match = NOTE.match(stripped)
             if match is None:
@@ -122,6 +133,9 @@ def parse_source(path):
                     "line %d draws a message outside the generated form" % number)
             else:
                 parsed["drawn"].append(match.groups())
+        elif stripped and stripped not in PREAMBLE:
+            parsed["defects"].append(
+                "line %d is not a line this generator writes: %r" % (number, stripped))
     if parsed["sequence"] is None:
         return None, "contains no sequence metadata"
     return parsed, None
@@ -129,6 +143,16 @@ def parse_source(path):
 
 def add(findings, code, message, view=None):
     findings.append({"code": code, "view": view, "message": message})
+
+
+def label_of(entity):
+    """The lifeline name the generator derives from an entity id. Kept in step with it."""
+    kind, _, rest = str(entity).partition(":")
+    if kind == "module":
+        return os.path.basename(rest) or rest
+    path, _, name = rest.rpartition(":")
+    stem = os.path.splitext(os.path.basename(path))[0]
+    return "%s.%s" % (stem, name) if stem else name
 
 
 def participants_of(flow):
@@ -140,19 +164,34 @@ def participants_of(flow):
     return order
 
 
-def note_texts(flow):
-    """Every text a generated note is allowed to carry, already collapsed to one line."""
-    allowed = set()
+def expected_notes(flow):
+    """The exact note sequence the generator owes this flow, in emission order.
+
+    A set of allowed texts was not enough. Deleting a note *and* its metadata together
+    left two empty lists agreeing with each other, so a diagram with the trigger removed
+    passed -- and a trigger is the one thing on the picture that says what starts it.
+    Kept in step with `build_flow_diagrams.render`.
+    """
+    order = participants_of(flow)
+    if not order:
+        return []
+    notes = []
     trigger = flow.get("trigger") or {}
     if isinstance(trigger, dict) and trigger.get("text"):
-        allowed.add(" ".join(str(trigger["text"]).split()))
+        notes.append({"kind": "trigger", "anchor": order[0],
+                      "text": " ".join(str(trigger["text"]).split()),
+                      "status": trigger.get("status")})
     outcome = flow.get("outcome") or {}
     if isinstance(outcome, dict) and outcome.get("text"):
-        allowed.add(" ".join(str(outcome["text"]).split()))
+        notes.append({"kind": "outcome", "anchor": order[-1],
+                      "text": " ".join(str(outcome["text"]).split()),
+                      "status": outcome.get("status")})
     for entry in flow.get("unresolved", ()) or ():
         if isinstance(entry, dict) and entry.get("reason"):
-            allowed.add(" ".join(str(entry["reason"]).split()))
-    return allowed
+            notes.append({"kind": "unresolved", "anchor": order[-1],
+                          "text": " ".join(str(entry["reason"]).split()),
+                          "status": "unknown"})
+    return notes
 
 
 def validate_view(entry, parsed, flow, index_hash, findings):
@@ -198,23 +237,26 @@ def validate_view(entry, parsed, flow, index_hash, findings):
     if sorted(drawn_ids) != sorted(entry.get("participants", ())):
         add(findings, "G005", "PlantUML participants do not match the manifest", view)
 
-    allowed = note_texts(flow)
-    for note in parsed["notes"]:
-        if note.get("text") not in allowed:
-            add(findings, "G001", "carries a note the flow does not say: %r"
-                % note.get("text"), view)
-        if note.get("anchor") not in expected:
-            add(findings, "G003", "anchors a note to something the flow does not touch",
-                view)
+    owed = expected_notes(flow)
+    if parsed["notes"] != owed:
+        add(findings, "G001", "the notes are not the ones the flow owes this diagram: "
+                              "expected %d, found %d"
+            % (len(owed), len(parsed["notes"])), view)
 
     # Everything above compares metadata to the flow. These compare what PlantUML will
     # actually draw to that same metadata: without them a lifeline or an arrow added by
     # hand renders in a document where every other check passed.
     for defect in parsed["defects"]:
         add(findings, "G006", defect, view)
-    if parsed["declared"] != [alias(identifier) for identifier in drawn_ids]:
+    labels_by_id = {p.get("id"): p.get("label") for p in parsed["participants"]}
+    if parsed["declared"] != [(alias(i), labels_by_id.get(i)) for i in drawn_ids]:
         add(findings, "G005", "the drawn participants are not the ones the metadata "
                               "declares", view)
+    for participant in parsed["participants"]:
+        if participant.get("label") != label_of(participant.get("id")):
+            add(findings, "G003", "participant %r is labelled %r, which is not the name "
+                "derived from the entity" % (participant.get("id"),
+                                             participant.get("label")), view)
     drawn = [(source, target) for source, arrow, target, _ in parsed["drawn"]]
     declared = [(alias(m.get("from")), alias(m.get("to"))) for m in parsed["messages"]]
     if drawn != declared:
@@ -271,6 +313,24 @@ def main():
         validate_view(entry, parsed, flow, index_hash, findings)
     if len(files) != len(set(files)):
         add(findings, "G007", "manifest maps multiple flows to the same file")
+
+    # Every flow is drawn or explicitly skipped. Iterating only the manifest's own
+    # entries meant deleting one -- or emptying `views` altogether -- left nothing to
+    # disagree with, and the run passed with `validated: true` and no picture.
+    drawn = {entry.get("flow") for entry in manifest.get("views", ())}
+    skipped = set(manifest.get("skipped", ()))
+    for flow_id in sorted(flows):
+        if flow_id not in drawn and flow_id not in skipped:
+            add(findings, "G007", "the manifest neither draws nor skips this flow",
+                flow_id)
+    for flow_id in sorted(drawn & skipped):
+        add(findings, "G007", "the manifest both draws and skips this flow", flow_id)
+
+    # A .puml nobody claims renders as readily as one the manifest owns.
+    for name in sorted(os.listdir(args.directory)):
+        if name.endswith(".puml") and name not in set(files):
+            add(findings, "G007", "%s is not named by the manifest" % name)
+
     if not manifest.get("validated"):
         # The diagrams may be perfectly faithful to a flow analysis nothing checked.
         add(findings, "G007", "the diagrams were generated without a flow report, so "

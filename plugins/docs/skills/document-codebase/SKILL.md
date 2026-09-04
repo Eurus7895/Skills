@@ -313,8 +313,7 @@ real answer** — most boundaries have no recorded reason, and saying so beats a
 - **Writes** `.docs-build/flow-analysis.json` and `.docs-build/operations-analysis.json` — **you** write them.
 - **Read** every `F0xx` and `O0xx` finding.
 - **Decide** whether there is a traceable flow at all. Often there is not, and saying so is the answer.
-
-Both files are best effort. Schemas and every code: [`references/schemas.md`](references/schemas.md).
+  Both files are best effort; schemas and codes: [`references/schemas.md`](references/schemas.md).
 
 ```bash
 python3 scripts/validate_flows.py .docs-build/flow-analysis.json \
@@ -326,11 +325,12 @@ python3 scripts/validate_operations.py .docs-build/operations-analysis.json \
 ```
 
 **A step is a call step 6 verified at its call site, and nothing else** — an import edge is the weaker claim
-that these files reference each other, not that the request passes through here. Steps must join up, because
-the order is the entire claim. **Expect `absent`**: a call through `self.service.record(...)` is not
-name-bound by an import, so it cannot be read at its call site. Write `absent` with a reason rather than
-something flow-shaped; an empty list saying nothing fails the gate. For operations, **quote commands from
-the file** — a `command` or requirement `value` must appear exactly in the lines it cites.
+that these files reference each other, not that the request passes through here. Steps must join up on the
+same *entity*, because the order is the entire claim. **Expect `absent`**: a call through
+`self.service.record(...)` is not name-bound by an import, so it cannot be read at its call site. Write
+`absent` with a reason rather than something flow-shaped; an empty list saying nothing fails the gate. For
+operations, **quote commands from the file** — a `command` or requirement `value` must appear exactly in the
+lines it cites.
 
 ### 7. Generate the PlantUML class diagram
 
@@ -401,13 +401,12 @@ python3 scripts/render_docs.py --doc .docs-build/doc.json --out docs \
     --diagrams docs/_diagrams --check
 ```
 
-**`--analysis` is what stops the document reading like an inventory.** A claim can only say
-that one file imports another, so pages built from claims alone say structural things, and
-structural things read as generic however well they are phrased. The statements from step 4
-are what carry purpose, ownership, failure and rationale onto the page. Pass the flag; a run
-that omits it prints why its pages are thin. **`--flows`** does the same for the flows page:
-without it that page is an unordered table of verified calls, which cannot say what leads to
-what. `doc.json` contains no markup — **do not write RST, MyST or Sphinx directives
+**`--analysis` is what stops the document reading like an inventory.** A claim can only say that one file
+imports another, so pages built from claims alone say structural things, and structural things read as
+generic however well they are phrased. The statements from step 4 carry purpose, ownership, failure and
+rationale onto the page. Pass the flag; a run that omits it prints why its pages are thin. **`--flows`** does
+the same for the flows page: without it that page is an unordered table of verified calls, which cannot say
+what leads to what. `doc.json` contains no markup — **do not write RST, MyST or Sphinx directives
 yourself**; the renderer owns headings, tables, references, escaping and the toctree.
 
 **A project with no `conf.py` cannot build what you just wrote**, and the run says so when
@@ -437,7 +436,7 @@ python3 scripts/quality_docs.py --index .docs-build/structure.json \
     --analysis .docs-build/module-analysis.jsonl --units .docs-build/units.txt \
     --claims .docs-build/claims.verified.jsonl --doc .docs-build/doc.json \
     --architecture .docs-build/architecture-analysis.json \
-    --flows .docs-build/flow-analysis.json \
+    --flows .docs-build/flow-analysis.json --flow-report .docs-build/flow-report.json \
     --operations .docs-build/operations-analysis.json \
     --diagrams docs/_diagrams --out .docs-build/generation-report.json
 ```
@@ -448,6 +447,8 @@ grouping is the tree; `not_applicable` means there was no partition to compare a
 
 **The flow and operations figures are counts, not percentages** — one flow traced and one refused is not
 "50% documented". Naming nothing and giving no reason holds the run back; `absent` with a reason does not.
+Pass `--flow-report` too: a refused flow stays in the analysis, so without it the counts include flows
+nothing validated, and the gate says so.
 
 **`analysis_mode` is the honest summary of the run**, and no other check can produce it: every other stage
 passes on a document derived entirely from `structure.json`, because a claim taken out of the index and

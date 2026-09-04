@@ -135,8 +135,11 @@ class Checker(object):
                 self.finding("O007", "evidence cites lines %r-%r of a %d-line file"
                              % (start, end, length), subject)
                 continue
-            resolved.append((item["path"], start, end,
-                             item.get("source_hash") or record.get("source_hash")))
+            # The index's hash, never the evidence record's. An analysis that supplies
+            # the *current* hash of a file that changed after the scan would otherwise
+            # authorise itself: a command added since would match its cited lines and
+            # pass, while the analysis is still bound to the old index.
+            resolved.append((item["path"], start, end, record.get("source_hash")))
         return resolved
 
     def check_quote(self, subject, text, resolved, label="command"):
@@ -153,8 +156,11 @@ class Checker(object):
         for path, start, end, recorded in resolved:
             current = file_hash(os.path.join(self.root, path))
             if current is None:
+                # Not advisory. A command nothing can be checked against is exactly the
+                # thing this validator exists to refuse; recording it as advice let the
+                # run exit 0 with the command unverified and commands_quoted at zero.
                 self.finding("O008", "%s cannot be read, so the %s cannot be checked"
-                             % (path, label), subject, severity="advisory")
+                             % (path, label), subject)
                 continue
             if recorded and recorded != current:
                 # Not wrong -- no longer checkable. Matching against today's text would

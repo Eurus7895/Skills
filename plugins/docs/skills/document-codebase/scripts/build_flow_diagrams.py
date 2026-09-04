@@ -189,7 +189,7 @@ def main():
     if not index_hash:
         return fail("the flow analysis carries no index_hash")
 
-    accepted = None
+    accepted, accepted_hashes = None, {}
     if args.report:
         report, error = load_json(args.report, "flow report")
         if error:
@@ -198,6 +198,13 @@ def main():
             return fail("the report describes %s, the flow analysis is %s"
                         % (report.get("index_hash"), index_hash))
         accepted = set(report.get("accepted", ()))
+        accepted_hashes = report.get("flow_hashes") or {}
+        if accepted and not accepted_hashes:
+            # An older report, from before the hashes existed. Its ids alone cannot say
+            # which version of a flow was accepted, and drawing on that basis is exactly
+            # what the hashes are for.
+            return fail("the report carries no flow_hashes, so it cannot say which "
+                        "version of each flow it accepted -- rerun validate_flows.py")
 
     os.makedirs(args.out, exist_ok=True)
     entries, skipped = [], []
@@ -207,6 +214,12 @@ def main():
         if accepted is not None and flow["id"] not in accepted:
             skipped.append(flow["id"])
             continue
+        if accepted is not None and accepted_hashes.get(flow["id"]) != digest(flow):
+            # Same id, same scan, different flow: the file was edited after it was
+            # validated. Refusing here is the only place that catches it -- the diagram
+            # validator compares the drawing against the edited flow and would agree.
+            return fail("%s was edited after the report was written; rerun "
+                        "validate_flows.py" % flow["id"])
         source, meta, order, notes = render(flow, index_hash)
         filename = "flow-%s.puml" % slug(flow["id"].split(":", 1)[-1])
         with open(os.path.join(args.out, filename), "w", encoding="utf-8") as fh:

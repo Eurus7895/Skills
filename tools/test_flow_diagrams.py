@@ -197,6 +197,51 @@ def main():
         check("a line outside the generated form is reported, not ignored",
               "G006" in codes(report), repr(codes(report)))
 
+        # A directive that is neither participant-, note- nor arrow-shaped used to be
+        # ignored outright, so anything a reader can see could be added by hand.
+        copy, path = clone("titled")
+        rewrite(path, "@enduml", "title Verified end to end\n@enduml")
+        code, report = validate(copy)
+        check("a title added by hand is caught", "G006" in codes(report),
+              repr(codes(report)))
+
+        # Deleting a note *and* its metadata left two empty lists agreeing, so the
+        # trigger -- the one thing saying what starts the flow -- could be removed.
+        copy, path = clone("noteless")
+        text = read(path)
+        keep = [ln for ln in text.splitlines()
+                if "The console script calls main." not in ln]
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(keep) + "\n")
+        code, report = validate(copy)
+        check("removing a note and its metadata together is still caught",
+              "G001" in codes(report), repr(codes(report)))
+
+        # The alias is what the checks matched on; the label is what a reader reads.
+        copy, path = clone("relabelled-participant")
+        rewrite(path, 'participant "entry.main"', 'participant "Trusted gateway"')
+        code, report = validate(copy)
+        check("a lifeline retitled by hand is caught",
+              "G003" in codes(report) or "G005" in codes(report), repr(codes(report)))
+
+        # --- The manifest has to account for every flow.
+        copy, _ = clone("dropped-view")
+        manifest_path = os.path.join(copy, "flow-diagram-manifest.json")
+        with open(manifest_path, encoding="utf-8") as fh:
+            manifest = json.load(fh)
+        manifest["views"] = []
+        write_json(manifest_path, manifest)
+        code, report = validate(copy)
+        check("a flow the manifest neither draws nor skips is caught",
+              "G007" in codes(report), repr(codes(report)))
+
+        copy, _ = clone("stray-puml")
+        shutil.copy(os.path.join(copy, "flow-normalise.puml"),
+                    os.path.join(copy, "flow-extra.puml"))
+        code, report = validate(copy)
+        check("a .puml the manifest does not name is caught",
+              "G007" in codes(report), repr(codes(report)))
+
         # --- Editing the flow after the diagram was drawn.
         moved = json.loads(json.dumps(flow_doc))
         moved["flows"][0]["steps"][0]["text"] = "Something else entirely."
@@ -230,6 +275,20 @@ def main():
                   encoding="utf-8") as fh:
             check("and the manifest records which flow was skipped",
                   json.load(fh)["skipped"] == ["flow:normalise"])
+
+        # The report used to carry only an index hash and the accepted ids, neither of
+        # which changes when a validated flow is edited in place. The builder drew the
+        # edited steps, marked the manifest `validated`, and the diagram validator agreed
+        # because it compared the drawing against the same edited flow.
+        edited = json.loads(json.dumps(flow_doc))
+        edited["flows"][0]["steps"][1]["text"] = "normalise writes to the audit log."
+        edited_path = write_json(os.path.join(tmp, "edited.json"), edited)
+        after = os.path.join(tmp, "after-edit")
+        code, out, err = run("build_flow_diagrams.py", "--flows", edited_path,
+                             "--report", report_path, "--out", after)
+        check("a flow edited after validation is not drawn under the old report",
+              code == 2 and "edited after the report" in err,
+              "%d %r" % (code, err[:200]))
 
         # --- Drawn with nothing vouching for it.
         unchecked = os.path.join(tmp, "unchecked")

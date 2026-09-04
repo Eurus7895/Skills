@@ -162,6 +162,22 @@ def main():
               "Nothing inside the repository calls main." in traced_rst,
               traced_rst[:1500])
 
+        # A trigger the analysis only inferred must not read like one it observed. The
+        # validator allows `inferred` and `unknown` without observed evidence, so the
+        # page is the last place the distinction can survive.
+        hedge = json.loads(json.dumps(flow_doc))
+        hedge["flows"][0]["trigger"]["status"] = "inferred"
+        hedge["flows"][0]["outcome"]["status"] = "unknown"
+        hedge_path = write_json(os.path.join(tmp, "hedged.json"), hedge)
+        code, hedge_doc, err = build("hedged", "--flows", hedge_path)
+        code, hedge_rst = render(hedge_doc, "hedged-rst")
+        check("an inferred trigger is rendered with its hedge, not as a fact",
+              "Inferred, not observed:" in hedge_rst, hedge_rst[:800])
+        check("and an outcome the repository never states says so",
+              "Not recorded in the repository:" in hedge_rst, hedge_rst[:1200])
+        check("while the observed version of the same flow carries no hedge",
+              "Inferred, not observed:" not in traced_rst, traced_rst[:800])
+
         absent = write_json(os.path.join(tmp, "absent.json"),
                             {"flow_version": 1, "index_hash": digest, "flows": [],
                              "absent": {"reason": "No call was verified at its call "
@@ -196,20 +212,52 @@ def main():
             except ValueError:
                 return code, {"_output": out + err}
 
-        code, report = gate("--flows", flows_path, "--operations", operations)
-        check("the gate reports a flow denominator",
-              report["flows"] == {"flows": 1, "steps": 2, "unresolved": 1,
-                                  "absent_stated": False},
-              repr(report.get("flows")))
-        check("and it is counts, not a percentage",
-              all(not isinstance(v, float) for v in report["flows"].values()),
-              repr(report.get("flows")))
-        check("the gate reports what operations were found",
-              report["operations"]["procedures"] == 1
-              and report["operations"]["commands"] == 1
-              and report["operations"]["kinds"] == ["test"],
-              repr(report.get("operations")))
+        flow_report = os.path.join(tmp, "flow-report.json")
+        run("validate_flows.py", flows_path, "--index", index_path,
+            "--claims", claims_path, "--out", flow_report)
 
+        code, first = gate("--flows", flows_path, "--flow-report", flow_report,
+                           "--operations", operations)
+        check("the gate reports a flow denominator",
+              first["flows"] == {"flows": 1, "steps": 2, "unresolved": 1,
+                                 "refused": 0, "validated": True,
+                                 "absent_stated": False},
+              repr(first.get("flows")))
+        check("and it is counts, not a percentage",
+              all(not isinstance(v, float) for v in first["flows"].values()
+                  if v is not None),
+              repr(first.get("flows")))
+        check("the gate reports what operations were found",
+              first["operations"]["procedures"] == 1
+              and first["operations"]["commands"] == 1
+              and first["operations"]["kinds"] == ["test"],
+              repr(first.get("operations")))
+
+        # Counting the raw analysis let a refused flow read as a traced one: the
+        # supported workflow leaves it in the file and the diagram builder skips it.
+        mixed = json.loads(json.dumps(flow_doc))
+        broken = json.loads(json.dumps(flow_doc["flows"][0]))
+        broken["id"] = "flow:broken"
+        broken["steps"][1]["claim_ids"] = ["claim:a"]         # a real call, wrong hop
+        mixed["flows"].append(broken)
+        mixed_path = write_json(os.path.join(tmp, "mixed.json"), mixed)
+        mixed_report = os.path.join(tmp, "mixed-report.json")
+        run("validate_flows.py", mixed_path, "--index", index_path,
+            "--claims", claims_path, "--out", mixed_report)
+        code, report = gate("--flows", mixed_path, "--flow-report", mixed_report)
+        check("a refused flow is not counted as traced",
+              report["flows"]["flows"] == 1 and report["flows"]["refused"] == 1,
+              repr(report.get("flows")))
+        check("and the run is held back for it",
+              report["status"] != "passed"
+              and any("refused" in r for r in report["reasons"]),
+              repr(report.get("reasons")))
+
+        code, report = gate("--flows", mixed_path)
+        check("without a flow report the counts are marked unvalidated",
+              report["flows"]["validated"] is False
+              and any("nothing has validated" in r for r in report["reasons"]),
+              repr(report.get("flows")))
         empty_flows = write_json(os.path.join(tmp, "empty-flows.json"),
                                  {"flow_version": 1, "index_hash": digest, "flows": []})
         code, report = gate("--flows", empty_flows)

@@ -39,6 +39,7 @@ Exit codes: 0 ok, 1 findings, 2 input or schema error, 3 internal error.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -74,6 +75,18 @@ def load_json(path, label):
         return None, "cannot read %s: %s" % (path, exc)
 
 
+def digest(value):
+    """The identity of one flow. Kept in step with build_flow_diagrams.py.
+
+    An `index_hash` says which scan the analysis describes and a flow id says which flow;
+    neither says which *version* of it was accepted. Editing a validated flow in place
+    keeps both, so the report has to carry a hash of the flow itself or it vouches for
+    something it never saw.
+    """
+    raw = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def parse_entity(entity):
     """'method:src/a.py:Repo.get' -> ('method', 'src/a.py', 'Repo.get'), else None."""
     if not isinstance(entity, str) or ":" not in entity:
@@ -89,17 +102,23 @@ def parse_entity(entity):
     return None
 
 
-def load_claims(path):
+def load_claims(path, index_hash):
     """Verified `calls` claims by id, or `(None, None)` when none were supplied.
 
     A mistyped `--claims` must not read as "there is nothing to check against": that
     would turn the one check this file exists for into advice and exit 0.
+
+    A claim written against another scan is dropped rather than kept. `.docs-build/`
+    survives between runs, so a `claims.verified.jsonl` left by an earlier one parses,
+    names entities that still exist, and would go on authorising a hop after the source
+    it was read from had changed. Dropping it means the step that cites it fails F006 --
+    the same answer as a claim that was never verified, which is what it now is.
     """
     if not path:
         return None, None
     if not os.path.isfile(path):
         return None, "no such claims file: %s" % path
-    claims = {}
+    claims, stale = {}, 0
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
@@ -109,8 +128,15 @@ def load_claims(path):
                 row = json.loads(line)
             except ValueError:
                 continue
-            if isinstance(row, dict) and row.get("id"):
-                claims[row["id"]] = row
+            if not isinstance(row, dict) or not row.get("id"):
+                continue
+            if row.get("index_hash") != index_hash:
+                stale += 1
+                continue
+            claims[row["id"]] = row
+    if stale and not claims:
+        return None, ("every claim in %s was written against another scan; rerun "
+                      "verify_doc.py against this index" % path)
     return claims, None
 
 
@@ -216,10 +242,14 @@ class Checker(object):
         if missing:
             self.finding("F002", "missing %s" % ", ".join(missing), subject)
             return False
-        if flow["id"] in ids:
-            self.finding("F005", "id used more than once", subject)
-        ids.add(flow["id"])
         intact = True
+        if flow["id"] in ids:
+            # A duplicate id makes every later reference to it ambiguous -- which flow a
+            # report accepted, which one a diagram was drawn for. Recording the finding
+            # without refusing the flow let the diagram builder draw it as validated.
+            self.finding("F005", "id used more than once", subject)
+            intact = False
+        ids.add(flow["id"])
         if flow["status"] not in STATUSES:
             self.finding("F012", "status %r is not one this schema defines"
                          % flow["status"], subject)
@@ -271,6 +301,7 @@ class Checker(object):
             step_subject = "%s / %s" % (subject, step["id"])
             if step["id"] in ids:
                 self.finding("F005", "id used more than once", step_subject)
+                intact = False
             ids.add(step["id"])
             if step["status"] not in STATUSES:
                 self.finding("F012", "status %r is not one this schema defines"
@@ -279,17 +310,22 @@ class Checker(object):
             source = self.check_entity(step_subject, "from", step.get("from"))
             target = self.check_entity(step_subject, "to", step.get("to"))
             intact &= source is not None and target is not None
-            if step.get("evidence") is not None:
-                intact &= self.check_evidence(step_subject, step.get("evidence"))
+            # A step is a call site, so it always has a line to cite. Making evidence
+            # conditional let a step through with none, and the diagram then labelled its
+            # arrow with the step id where the citation was promised.
+            intact &= self.check_evidence(step_subject, step.get("evidence"))
             intact &= self.check_step_claims(step_subject, step)
-            # What step n reached is where step n+1 starts. Without this a flow is a set
-            # of calls with an order imposed on it, and the order is the whole claim.
-            if previous is not None and source is not None and previous != source:
-                self.finding("F004", "starts in %s, but the step before it reached %s"
-                             % (source, previous), step_subject)
+            # What step n reached is where step n+1 starts -- the same *entity*, not
+            # merely the same file. Comparing paths let `a.py:f -> service.py:handle`
+            # join to `service.py:cleanup -> store.py:save`, which is two real calls and
+            # a chain that does not exist. The order is the whole claim a flow makes.
+            here = step.get("from") if source is not None else None
+            if previous is not None and here is not None and previous != here:
+                self.finding("F004", "starts at %s, but the step before it reached %s"
+                             % (here, previous), step_subject)
                 intact = False
             if target is not None:
-                previous = target
+                previous = step.get("to")
 
         outcome = flow.get("outcome")
         if isinstance(outcome, dict):
@@ -350,6 +386,12 @@ def report_of(doc, checker, accepted, refused):
         # a count keeps the page builder from rendering the half that happened to hold.
         "accepted": [f for f in accepted if f is not None],
         "refused": [f for f in refused if f is not None],
+        # Which *version* of each accepted flow was accepted. Without this a flow edited
+        # after validation keeps its id and its index_hash, and the diagram builder draws
+        # the edited steps under a report that never saw them.
+        "flow_hashes": {f["id"]: digest(f) for f in
+                        (x for x in doc.get("flows", ()) or () if isinstance(x, dict))
+                        if f.get("id") in set(accepted)},
         "absent": bool(isinstance(doc.get("absent"), dict)
                        and doc["absent"].get("reason")),
         "coverage": {
@@ -398,7 +440,7 @@ def main():
         return fail("the analysis was written against %s, the index is %s -- rerun the "
                     "analysis or rescan" % (stated, index.get("index_hash")))
 
-    claims, error = load_claims(args.claims)
+    claims, error = load_claims(args.claims, stated)
     if error:
         return fail(error)
 

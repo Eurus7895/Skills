@@ -519,6 +519,22 @@ def entity_label(entity):
     return "%s.%s" % (stem, name) if stem else name
 
 
+# How a flow's prose is introduced, by the status behind it. Same rule as BASIS above:
+# an `inferred` reading gets its hedge in the sentence, not in a parenthesis a reader
+# skims past. Without this the page said "Starts when: X" whatever the analysis recorded,
+# and an uncertain trigger read exactly like an observed one.
+FLOW_HEDGE = {
+    "declared": "%s",
+    "observed": "%s",
+    "inferred": "Inferred, not observed: %s",
+    "unknown": "Not recorded in the repository: %s",
+}
+
+
+def hedged(text, status):
+    return FLOW_HEDGE.get(status, FLOW_HEDGE["unknown"]) % str(text).strip()
+
+
 def traced_flows_page(flows):
     """The flows a flow analysis traced, one section each.
 
@@ -543,7 +559,7 @@ def traced_flows_page(flows):
                      if isinstance(e, dict) and e.get("path") and e.get("line_start")]
             blocks.append(prose(
                 "block:flow-%s-trigger" % stem,
-                "Starts when: %s%s" % (str(trigger["text"]).strip(),
+                "Starts when: %s%s" % (hedged(trigger["text"], trigger.get("status")),
                                        " (%s)" % ", ".join(where) if where else "")))
         rows = []
         for step in flow.get("steps", ()) or ():
@@ -554,14 +570,15 @@ def traced_flows_page(flows):
                           if isinstance(e, dict) and e.get("path")
                           and e.get("line_start")), "-")
             rows.append((entity_label(step.get("from")), entity_label(step.get("to")),
-                         str(step.get("text", "")).strip(), where))
+                         hedged(step.get("text", ""), step.get("status")), where))
         if rows:
             blocks.append(table("block:flow-%s-steps" % stem,
                                 ("From", "Calls", "What happens", "Read at"), rows))
         outcome = flow.get("outcome") or {}
         if isinstance(outcome, dict) and outcome.get("text"):
             blocks.append(prose("block:flow-%s-outcome" % stem,
-                                "Ends with: %s" % str(outcome["text"]).strip()))
+                                "Ends with: %s"
+                                % hedged(outcome["text"], outcome.get("status"))))
         unresolved = [str(u["reason"]).strip() for u in flow.get("unresolved", ()) or ()
                       if isinstance(u, dict) and u.get("reason")]
         if unresolved:
