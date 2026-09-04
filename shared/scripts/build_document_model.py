@@ -85,6 +85,22 @@ COVERS = {
     "architecture": ("interaction", "rationale"),
 }
 
+# A preset without a module reference still has to put the module-level statements
+# somewhere. `architecture` drops the inventory on purpose -- its reader knows the
+# domain -- but dropping the *reading* with it would fail the coverage check and make
+# the preset unusable with any real analysis, which is not what "no inventory" meant.
+PRESET_COVERS = {
+    "architecture": {
+        "architecture": ("interaction", "rationale", "responsibility", "state",
+                         "interface", "failure"),
+    },
+}
+
+
+def covers_of(preset, builder):
+    return PRESET_COVERS.get(preset, {}).get(builder, COVERS.get(builder, ()))
+
+
 KIND_TITLES = {
     "responsibility": "What it is responsible for",
     "state": "What it owns",
@@ -231,9 +247,18 @@ def sentence(statement):
     skims the front of the sentence has not read anything.
     """
     text = str(statement.get("text", "")).strip()
-    evidence = (statement.get("evidence") or [{}])[0]
-    path, start = evidence.get("path"), evidence.get("line_start")
-    where = cite(path, start) if path and isinstance(start, int) else statement.get("path", "")
+    # Every citation, not the first. An `inferred` statement is by definition supported
+    # by more than one place, and a reader of the rendered page cannot open `doc.json`
+    # to find the rest -- so showing one location makes the inference look like it rests
+    # on that one location, which is the opposite of what the extra evidence says.
+    places = []
+    for item in statement.get("evidence") or ():
+        path, start = item.get("path"), item.get("line_start")
+        if path and isinstance(start, int):
+            places.append(cite(path, start))
+        elif path:
+            places.append(str(path))
+    where = ", ".join(places) or statement.get("path", "")
     basis = BASIS.get(statement.get("status"), "From")
     if statement.get("status") == "inferred":
         return "Inferred: %s (%s %s)" % (text, basis.lower(), where)
@@ -258,8 +283,12 @@ def statement_blocks(page_id, analysis, kinds):
             by_module.setdefault(statement.get("path", ""), []).append(statement)
         for path in sorted(by_module):
             group = by_module[path]
+            # The path verbatim. Flattening "/" to "-" collided: `a-b/c.py` and
+            # `a/b-c.py` are different modules that produced the same block id, and the
+            # validator then rejected a document that was correct. A block id is never a
+            # filename -- only page ids are -- so it has no reason to be flattened.
             blocks.append(prose(
-                "block:%s-%s-%s" % (page_id, kind, path.replace("/", "-")),
+                "block:%s-%s-%s" % (page_id, kind, path),
                 "%s -- %s" % (path, " ".join(sentence(s) for s in group)),
                 analysis_refs=[s.get("id") for s in group]))
     return blocks
@@ -393,7 +422,7 @@ def entry_points_page(index):
     ]
 
 
-def architecture_page(index, claims_by_id, analysis):
+def architecture_page(index, claims_by_id, analysis, kinds):
     edges = [e for e in index.get("edges", ())
              if os.path.dirname(e["from"]) != os.path.dirname(e["to"])]
     verified_imports = {
@@ -422,7 +451,7 @@ def architecture_page(index, claims_by_id, analysis):
     # The table above says which modules reach into which. What that reaching is for,
     # and why the boundary sits where it does, is not in the graph and has to come from
     # somebody who read the code.
-    blocks.extend(statement_blocks("architecture", analysis, COVERS["architecture"]))
+    blocks.extend(statement_blocks("architecture", analysis, kinds))
     return blocks
 
 
@@ -440,7 +469,7 @@ def dependencies_page(index):
     ]
 
 
-def modules_page(index, fragments, claims_by_id, analysis):
+def modules_page(index, fragments, claims_by_id, analysis, kinds):
     fan_in = index.get("fan_in", {})
     rows, refs = [], set()
     for fragment in sorted(fragments, key=lambda f: f.get("source", "")):
@@ -454,21 +483,25 @@ def modules_page(index, fragments, claims_by_id, analysis):
                      fragment.get("role", "")))
         refs.update(c for c in fragment.get("claim_ids", ())
                     if claims_by_id.get(c, {}).get("status") in PROSE_STATUSES)
-    if not rows:
-        return [prose("block:modules-none",
-                      "No module description survived verification. Nothing is stated "
-                      "here rather than stating something unchecked.")]
-    blocks = [
-        prose("block:modules-intro",
-              "One row per module whose description survived verification. `verified` "
-              "means every claim behind the role was checked against the graph or the "
-              "source; `inferred` means the role rests on a reading of the code that no "
-              "pass could confirm."),
-        table("block:modules", ("Path", "Imported by", "Basis", "Role"), rows, refs),
-    ]
-    # The table is the index. The sections below are the part of this document a reader
-    # could not have worked out from the file tree.
-    blocks.extend(statement_blocks("modules", analysis, COVERS["modules"]))
+    if rows:
+        blocks = [
+            prose("block:modules-intro",
+                  "One row per module whose description survived verification. "
+                  "`verified` means every claim behind the role was checked against the "
+                  "graph or the source; `inferred` means the role rests on a reading of "
+                  "the code that no pass could confirm."),
+            table("block:modules", ("Path", "Imported by", "Basis", "Role"), rows, refs),
+        ]
+    else:
+        blocks = [prose("block:modules-none",
+                        "No module description survived verification, so there is no "
+                        "index of modules here. Any reading that did survive is below.")]
+    # Always, and not only when the table has rows. The fragment table and the analysis
+    # fail independently -- a fragment dies when a *claim* behind it is rejected, which
+    # says nothing about whether the module was read. Returning early on an empty table
+    # threw away every statement, and the coverage check did not catch it because it
+    # only asked whether the page declared the kinds, not whether it used them.
+    blocks.extend(statement_blocks("modules", analysis, kinds))
     return blocks
 
 
@@ -643,18 +676,18 @@ def limitations_page(index, fragments, claims, analysis):
 
 
 BUILDERS = {
-    "overview": lambda index, frags, claims, by_id, an: overview_page(index, frags, by_id),
-    "entry-points": lambda index, frags, claims, by_id, an: entry_points_page(index),
-    "architecture": lambda index, frags, claims, by_id, an: architecture_page(
-        index, by_id, an),
-    "dependencies": lambda index, frags, claims, by_id, an: dependencies_page(index),
-    "modules": lambda index, frags, claims, by_id, an: modules_page(
-        index, frags, by_id, an),
-    "flows": lambda index, frags, claims, by_id, an: flows_page(index, by_id),
-    "navigation": lambda index, frags, claims, by_id, an: navigation_page(index),
-    "class-views": lambda index, frags, claims, by_id, an: class_views_page(index),
-    "limitations": lambda index, frags, claims, by_id, an: limitations_page(
-        index, frags, claims, an),
+    "overview": lambda ix, frags, claims, by_id, an, kinds: overview_page(ix, frags, by_id),
+    "entry-points": lambda ix, frags, claims, by_id, an, kinds: entry_points_page(ix),
+    "architecture": lambda ix, frags, claims, by_id, an, kinds: architecture_page(
+        ix, by_id, an, kinds),
+    "dependencies": lambda ix, frags, claims, by_id, an, kinds: dependencies_page(ix),
+    "modules": lambda ix, frags, claims, by_id, an, kinds: modules_page(
+        ix, frags, by_id, an, kinds),
+    "flows": lambda ix, frags, claims, by_id, an, kinds: flows_page(ix, by_id),
+    "navigation": lambda ix, frags, claims, by_id, an, kinds: navigation_page(ix),
+    "class-views": lambda ix, frags, claims, by_id, an, kinds: class_views_page(ix),
+    "limitations": lambda ix, frags, claims, by_id, an, kinds: limitations_page(
+        ix, frags, claims, an),
 }
 
 
@@ -668,7 +701,7 @@ def section_coverage(preset, analysis, fragments):
     scope = sorted({f.get("source", "") for f in fragments} | analysis.modules())
     out = {}
     for page_id, _, _, builder in PRESETS[preset]:
-        kinds = COVERS.get(builder or "", ())
+        kinds = covers_of(preset, builder or "")
         if not kinds:
             continue
         out[page_id] = {
@@ -696,13 +729,14 @@ def build(index, fragments, claims, preset, diagrams=None, analysis=None):
             authored.append({"id": page_id, "title": title, "order": order,
                              "mandatory": mandatory})
             continue
-        blocks = BUILDERS[builder](index, fragments, claims, by_id, analysis)
+        blocks = BUILDERS[builder](index, fragments, claims, by_id, analysis,
+                                   covers_of(preset, builder))
         blocks.extend(diagram_blocks(diagrams, page_id))
         pages.append({"id": page_id, "title": title, "order": order,
                       "mandatory": mandatory, "blocks": blocks,
                       # What this page undertook to say, and which statements it used
                       # saying it. The pair is what makes the check below two-way.
-                      "covers": list(COVERS.get(builder, ())),
+                      "covers": list(covers_of(preset, builder)),
                       "analysis_ids": sorted({ref for block in blocks
                                               for ref in block.get("analysis_refs", ())})})
 
@@ -792,6 +826,20 @@ def validate(doc):
     for kind in sorted(dropped):
         problems.append("no page in preset %r covers statement kind %r; %d statement(s) "
                         "would be dropped" % (doc["preset"], kind, dropped[kind]))
+
+    # Declaring a kind is not rendering it. A page can name every kind in `covers` and
+    # still emit none of them -- an early return above the statement blocks did exactly
+    # that -- and the check above would pass, because it only reads `covers`. So compare
+    # what the analysis holds against the ids the pages actually cite.
+    used = {ref for page in doc["pages"] for ref in page.get("analysis_ids", ())}
+    for statement in doc.get("statements", ()):
+        kind, sid = statement.get("kind"), statement.get("id")
+        if statement.get("status") not in STATEMENT_PROSE_STATUSES or sid in used:
+            continue
+        home = [page["id"] for page in doc["pages"] if kind in page.get("covers", ())]
+        if home:
+            problems.append("statement %r (%s) is covered by page %r but appears on no "
+                            "page" % (sid, kind, home[0]))
 
     authored_ids = {p["id"] for p in doc.get("authored_pages", ())}
     for page_id, _, mandatory, builder in PRESETS[doc["preset"]]:

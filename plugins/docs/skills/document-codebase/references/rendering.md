@@ -63,11 +63,17 @@ rather than importing it, for the same reason: a configuration is somebody's, it
 anything, and a generator that rewrites it destroys work no rerun can restore. A second run
 against a directory that has one prints `kept the existing conf.py` and moves on.
 
-`--project` and `--author` fill in the two fields nothing can derive. The extension list is
-whatever the *pages* need — `myst_parser` for MyST, `sphinxcontrib.plantuml` where there are
-diagrams — and not what happens to be installed on the machine that generated it, so the
-file is correct on the reader's machine too. Each extension it names comes with a comment
-saying whether it is required or optional and how to install it.
+`--project` and `--author` fill in the two fields nothing can derive.
+
+**A required extension and an optional one are written differently, and the difference is not
+cosmetic.** `myst_parser` goes straight into `extensions`, because MyST pages are unreadable
+without it. `sphinxcontrib.plantuml` must not: naming an extension there that is not installed
+makes Sphinx raise `ExtensionError` while importing it and produce *no page at all*, which is
+the opposite of optional. So the generated file imports it inside a `try`, appends it when it
+is there, and otherwise registers `uml` as a directive that draws nothing — because leaving it
+unregistered turns every `.. uml::` into an unknown directive and `-W` fails the build for the
+other reason. Either way every page builds and the only difference is whether the picture
+appears.
 
 Without the flag nothing is written, and a run into a directory with no `conf.py` says so:
 the pages are on disk and cannot yet be built, which is not visible from the files alone.

@@ -132,24 +132,80 @@ def main():
         check("and says the parser is required, not optional",
               "required, not optional" in read(path), read(path))
 
+        # --- An optional extension named in `extensions` is not optional.
+        #
+        # Sphinx raises ExtensionError while importing it and builds no page at all, so
+        # writing it into the list flatly contradicts both the comment above it and the
+        # message saying the pages will now build. It is imported conditionally instead,
+        # with the directive stubbed when it is absent -- otherwise every `.. uml::`
+        # becomes an unknown directive and `-W` fails the build for the other reason.
+        uml_dir = os.path.join(tmp, "uml")
         outcome, path = sphinx_support.write_conf(
-            os.path.join(tmp, "uml"), ("sphinxcontrib.plantuml",), "P")
-        check("a document with diagrams declares the diagram extension",
-              "'sphinxcontrib.plantuml'" in read(path))
+            uml_dir, ("sphinxcontrib.plantuml",), "P")
+        body = read(path)
+        check("the diagram extension is not in the mandatory list",
+              "extensions = []" in body, body)
+        check("it is imported conditionally instead",
+              "import sphinxcontrib.plantuml" in body and "except ImportError" in body,
+              body)
         check("and says that one is optional",
-              "every page still builds" in read(path), read(path))
+              "every page still builds" in body, body)
 
-        # The extension list is for the reader's machine. `_resolve` is what the build
-        # check uses to decide what this machine can load; a conf.py filtered through it
-        # would silently drop a directive that works everywhere else.
-        usable, stubbed = sphinx_support._resolve(("sphinxcontrib.plantuml",))
-        check("an extension this machine cannot load is still declared",
-              "'sphinxcontrib.plantuml'" in read(path),
-              "usable=%r stubbed=%r" % (usable, stubbed))
+        # Both sides, because only one of them is the machine this happens to be.
+        with open(os.path.join(uml_dir, "index.rst"), "w", encoding="utf-8") as fh:
+            fh.write("Title\n=====\n\n.. uml:: a.puml\n   :caption: c\n")
+        with open(os.path.join(uml_dir, "a.puml"), "w", encoding="utf-8") as fh:
+            fh.write("@startuml\nclass A\n@enduml\n")
 
-        outcome, detail = sphinx_support.write_conf(os.path.join(tmp, "uml"), (), "P")
+        blocker = os.path.join(tmp, "blocker")
+        os.makedirs(blocker)
+        with open(os.path.join(blocker, "sitecustomize.py"), "w", encoding="utf-8") as fh:
+            fh.write("import sys\n"
+                     "class _Block(object):\n"
+                     "    def find_module(self, name, path=None):\n"
+                     "        if name.startswith('sphinxcontrib.plantuml'): return self\n"
+                     "    def load_module(self, name):\n"
+                     "        raise ImportError(name)\n"
+                     "sys.meta_path.insert(0, _Block())\n")
+
+        if shutil.which("sphinx-build"):
+            for label, env in (("installed", None), ("absent", blocker)):
+                environ = dict(os.environ)
+                if env:
+                    environ["PYTHONPATH"] = env
+                built = subprocess.run(
+                    ["sphinx-build", "-W", uml_dir, os.path.join(uml_dir, "_b_" + label)],
+                    capture_output=True, text=True, env=environ)
+                check("a page with a diagram builds when the renderer is %s" % label,
+                      built.returncode == 0,
+                      (built.stdout + built.stderr)[-400:])
+                check("and produces HTML either way (%s)" % label,
+                      os.path.isfile(os.path.join(uml_dir, "_b_" + label, "index.html")))
+        else:
+            print("ok   (sphinx-build absent: the two-sided build is not exercised here)")
+
+        outcome, detail = sphinx_support.write_conf(uml_dir, (), "P")
         check("write_conf reports `exists` rather than overwriting", outcome == "exists",
               "%s %s" % (outcome, detail))
+
+        # --- A dangling conf.py symlink is a file that `isfile` says is not there.
+        #
+        # Writing through it created the target -- outside the output directory, past
+        # the promise never to touch an existing configuration and past the script's own
+        # "writes only --out". `lexists` sees the link; O_EXCL|O_NOFOLLOW refuses it.
+        danger = os.path.join(tmp, "danger")
+        os.makedirs(danger)
+        victim = os.path.join(tmp, "victim.py")
+        os.symlink(victim, os.path.join(danger, "conf.py"))
+        outcome, _ = sphinx_support.write_conf(danger, (), "P")
+        check("a dangling conf.py symlink is refused", outcome == "exists", outcome)
+        check("and nothing is created through it", not os.path.exists(victim))
+
+        with open(victim, "w", encoding="utf-8") as fh:
+            fh.write("important = 1\n")
+        outcome, _ = sphinx_support.write_conf(danger, (), "P")
+        check("a live conf.py symlink is refused too", outcome == "exists", outcome)
+        check("and its target is untouched", read(victim) == "important = 1\n")
 
         # --- The same tree, rendered twice, is the same conf.py.
         first = read(path)

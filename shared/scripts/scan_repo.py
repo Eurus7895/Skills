@@ -280,6 +280,30 @@ def file_hash(full):
     return "sha256:" + digest_.hexdigest()
 
 
+def measure(full):
+    """(hash, bytes, lines) for an asset, in one pass over the file.
+
+    Counting newlines is not parsing: the bytes are already being read to hash them,
+    and a line count is what lets a `declared` statement cite `README.md:12` and have
+    that citation range-checked like any other. Without it the whole inventory is
+    unciteable, which would defeat the point of collecting it.
+    """
+    digest_ = hashlib.sha256()
+    size, newlines = 0, 0
+    try:
+        with open(full, "rb") as fh:
+            for chunk in iter(lambda: fh.read(65536), b""):
+                digest_.update(chunk)
+                size += len(chunk)
+                newlines += chunk.count(b"\n")
+    except OSError:
+        return None, None, None
+    # `newlines + 1`, the same count `loc` uses for source files. Matching it matters
+    # more than being pedantic about a trailing newline: a citation to the last line of
+    # a file must not pass for a module and fail for a README.
+    return "sha256:" + digest_.hexdigest(), size, newlines + 1
+
+
 def git_snapshot(root):
     """Which revision this scan describes, and whether the tree was clean.
 
@@ -925,32 +949,38 @@ def build(root, detail=False, detail_match=None, out_path=None):
     aliases_by_path = {}
 
     for rel_path in list_files(root):
+        path = rel_path.replace(os.sep, "/")
+        full = os.path.join(root, rel_path)
+
+        # This run's own artifacts, dropped before anything else is decided about the
+        # file. It has to be first: counting an extension as unscanned and parsing a
+        # leftover `.py` as source both feed `index_hash`, so an exclusion applied any
+        # later still lets the second scan of an unchanged tree disagree with the first.
+        real = os.path.realpath(full)
+        if real == skip_file or (skip_dir and real.startswith(skip_dir + os.sep)):
+            continue
+
         ext = os.path.splitext(rel_path)[1].lower()
         lang = LANG_BY_EXT.get(ext)
         if not lang:
+            kind = asset_kind(path)
+            if kind and not within(root_real, full):
+                # Recorded, not silently dropped. An omitted README is indistinguishable
+                # from an absent one, and the run is entitled to say "no README exists"
+                # only when it looked and there was none.
+                skipped_symlinks.append(path)
+                continue
             if ext and ext not in NON_SOURCE_EXT:
                 unscanned[ext] += 1
-            path = rel_path.replace(os.sep, "/")
-            kind = asset_kind(path)
-            full = os.path.join(root, rel_path)
-            real = os.path.realpath(full)
-            if real == skip_file or (skip_dir and real.startswith(skip_dir + os.sep)):
-                continue
-            if kind and within(root_real, full):
-                size = None
-                try:
-                    size = os.path.getsize(full)
-                except OSError:
-                    pass
-                digest = file_hash(full)
+            if kind:
+                digest, size, lines = measure(full)
                 if digest is not None:
-                    assets.append({"path": path, "kind": kind,
-                                   "source_hash": digest, "bytes": size})
+                    assets.append({"path": path, "kind": kind, "source_hash": digest,
+                                   "bytes": size, "lines": lines})
             continue
 
-        full = os.path.join(root, rel_path)
         if not within(root_real, full):
-            skipped_symlinks.append(rel_path.replace(os.sep, "/"))
+            skipped_symlinks.append(path)
             continue
         try:
             with open(full, encoding="utf-8", errors="replace") as fh:

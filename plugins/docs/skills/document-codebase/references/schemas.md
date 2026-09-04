@@ -43,7 +43,10 @@ reads a v3 one.
 
 The files a parser has nothing to say about, which nonetheless hold the answers a dependency graph cannot
 give: how the project is installed, what it calls itself, how it is built, why a decision was taken. Each row
-is `{path, kind, source_hash, bytes}` and **nothing is opened or parsed** — this is availability, not content.
+is `{path, kind, source_hash, bytes, lines}` and **nothing is parsed** — this is availability, not content.
+`lines` is counted while the bytes are being hashed, which is not parsing and is what makes an asset citeable:
+without it `README.md:12` could not be range-checked the way `src/api.py:12` is, and the inventory would be
+useless as evidence for the `declared` statements it exists to support.
 Knowing a README exists is what lets a run cite it instead of inventing an installation section; knowing one
 does not is what lets the run say so.
 
@@ -60,9 +63,16 @@ A path is never in both `files` and `assets`; `E011` says so if it is. Assets ar
 That is the intended cost: a run cites an asset precisely where it could not derive the answer, so nothing
 downstream would catch the citation being wrong.
 
+An asset-like path that is a symlink out of the repository is **not** silently dropped — it goes into
+`skipped_symlinks` with a `D003` diagnostic. An omitted README is otherwise indistinguishable from an absent
+one, and the run may only say "no README exists" when it looked and there was none.
+
 **A scan never indexes its own output.** The directory holding `--out` is excluded when it sits inside the
-repository, and `.docs-build/` is skipped outright. Without that, each scan hashes the previous scan's
-artifacts and `index_hash` changes on a tree that did not, invalidating every fragment for no reason.
+repository, and `.docs-build/` is skipped outright — and that exclusion is applied *before* the file's
+language or extension is classified. Applied any later it leaks through two other doors: a leftover
+`.jsonl` still counts toward `unscanned`, and a leftover `.py` is still parsed as source. Both feed
+`index_hash`, so either one makes a second scan of an unchanged tree disagree with the first and invalidates
+every fragment from the run before.
 
 `source.dirty` is true when the tree had uncommitted changes **and** when git could not answer. A revision
 that might not describe the files is worth no more than no revision.

@@ -228,6 +228,68 @@ def main():
               any("may not appear in prose" in p and "s4" in p for p in problems),
               repr(problems))
 
+        # --- A preset with no module reference still has to keep the reading.
+        #
+        # `architecture` drops the inventory deliberately, for a reader who knows the
+        # domain. Dropping the per-module *reading* with it made the preset refuse to
+        # build against any real analysis, which is not what "no inventory" meant.
+        code, output, arch, _ = build_doc(tmp, ctx, good, "arch.json",
+                                          preset="architecture")
+        check("the architecture preset builds with a module-level analysis",
+              code == 0, output)
+        check("and the reading lands on its architecture page",
+              "Turns a request body into an Order" in texts(page(arch, "architecture")),
+              texts(page(arch, "architecture"))[:200])
+
+        # --- The fragment table and the analysis fail independently.
+        #
+        # A fragment dies when a claim behind it is rejected; that says nothing about
+        # whether anyone read the module. Returning early on an empty table threw every
+        # statement away, and the coverage check passed because it only asked whether
+        # the page *declared* the kinds.
+        empty = os.path.join(tmp, "empty-fragments.jsonl")
+        write_jsonl(empty, [])
+        bare_ctx = dict(ctx, fragments=empty)
+        code, output, thin, _ = build_doc(tmp, bare_ctx, good, "thin.json")
+        check("statements survive an empty fragment table", code == 0, output)
+        check("and are still rendered on the modules page",
+              page(thin, "modules")["analysis_ids"] == ["s1", "s3"],
+              repr(page(thin, "modules")["analysis_ids"]))
+
+        # The check that would have caught it: declaring a kind is not rendering it.
+        starved = json.loads(json.dumps(doc))
+        for entry in starved["pages"]:
+            entry["analysis_ids"] = []
+            entry["blocks"] = [b for b in entry["blocks"] if not b.get("analysis_refs")]
+        problems = model.validate(starved)
+        check("a page that covers a kind but renders none of it fails",
+              any("appears on no page" in p for p in problems), repr(problems))
+
+        # --- Every citation, not the first.
+        #
+        # An inferred statement is supported by more than one place by definition, and a
+        # reader of the rendered page cannot open doc.json to find the rest.
+        rendered = model.sentence({
+            "status": "inferred", "text": "Two places support this.", "path": http,
+            "evidence": [{"path": http, "line_start": 3},
+                         {"path": http, "line_start": 9}]})
+        check("all evidence is cited, not just the first",
+              "http.py:3" in rendered and "http.py:9" in rendered, rendered)
+
+        # --- Block ids must survive paths that differ only in separator placement.
+        collide = model.Analysis([
+            analysis_row("a-b/c.py", "h", "i",
+                         [statement("c1", "responsibility", "observed", "One.",
+                                    "a-b/c.py", 1)]),
+            analysis_row("a/b-c.py", "h", "i",
+                         [statement("c2", "responsibility", "observed", "Two.",
+                                    "a/b-c.py", 1)]),
+        ])
+        ids = [b["id"] for b in model.statement_blocks("modules", collide,
+                                                       ("responsibility",))]
+        check("two paths differing only by separator get distinct block ids",
+              len(ids) == len(set(ids)), repr(ids))
+
         # --- Input errors are input errors, not silent omissions.
         future = os.path.join(tmp, "future.jsonl")
         write_jsonl(future, [dict(analysis_row(http, ctx["hashes"][http],

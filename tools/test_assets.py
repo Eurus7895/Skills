@@ -120,10 +120,26 @@ def main():
 
         # --- Availability only. Nothing is parsed, nothing is read into the index.
         row = [a for a in index["assets"] if a["path"] == "README.md"][0]
-        check("an asset row carries a path, a kind, a hash and a size, and nothing else",
-              set(row) == {"path", "kind", "source_hash", "bytes"}, repr(sorted(row)))
+        check("an asset row carries only what can be known without opening it",
+              set(row) == {"path", "kind", "source_hash", "bytes", "lines"},
+              repr(sorted(row)))
         check("the hash is of the bytes on disk",
               row["source_hash"] == scan_repo.file_hash(os.path.join(root, "README.md")))
+
+        # The line count is what makes an asset citeable. Counting newlines while
+        # hashing is not parsing, and without it `README.md:12` cannot be range-checked
+        # the way `src/api.py:12` is -- which would leave the inventory unusable as
+        # evidence for the `declared` statements it exists to support.
+        write(root, "counted.md", "one\ntwo\nthree\n")
+        _, counted, _ = scan(root, os.path.join(tmp, "counted.json"))
+        lines = {a["path"]: a["lines"] for a in counted["assets"]}
+        source_loc = {r["path"]: r["loc"] for r in counted["files"]}
+        check("assets carry a line count", lines.get("counted.md") == 4,
+              repr(lines.get("counted.md")))
+        check("counted the same way source files are",
+              lines["counted.md"] == open(os.path.join(root, "counted.md"),
+                                          encoding="utf-8").read().count("\n") + 1
+              and all(v >= 1 for v in source_loc.values()))
 
         # --- One file, one home.
         paths = {r["path"] for r in index["files"]}
@@ -131,8 +147,16 @@ def main():
               not (paths & set(found)), repr(paths & set(found)))
 
         # --- The defect that only shows up on the second run.
+        #
+        # The artifacts matter as much as the index itself, and they are not all the
+        # same shape: `.jsonl` has no parser, so it lands in `unscanned`, and a stale
+        # `.py` left behind gets read as source. Both feed `index_hash`, so excluding
+        # the output only in the asset branch left the scan depending on its own
+        # previous run through two other doors.
         inside = os.path.join(root, ".docs-build", "structure.json")
         os.makedirs(os.path.dirname(inside), exist_ok=True)
+        write(root, ".docs-build/claims.jsonl", '{"id": "claim:x"}\n')
+        write(root, ".docs-build/leftover.py", "generated = True\n")
         _, first, _ = scan(root, inside)
         _, second, _ = scan(root, inside)
         _, third, _ = scan(root, inside)
@@ -140,6 +164,12 @@ def main():
               first["index_hash"] == second["index_hash"] == third["index_hash"],
               "%s / %s / %s" % (first["index_hash"][:20], second["index_hash"][:20],
                                 third["index_hash"][:20]))
+        check("a leftover source file in the output directory is not scanned",
+              not any(r["path"].startswith(".docs-build/") for r in second["files"]),
+              repr([r["path"] for r in second["files"]]))
+        check("and a leftover artifact is not counted as an unscanned extension",
+              ".jsonl" not in second["unscanned_extensions"],
+              repr(second["unscanned_extensions"]))
         check("and its working directory is nowhere in the assets",
               not any(a["path"].startswith(".docs-build/") for a in second["assets"]),
               repr([a["path"] for a in second["assets"]
@@ -163,6 +193,28 @@ def main():
               index["coverage"]["assets"]["count"] == len(index["assets"])
               and index["coverage"]["assets"]["by_kind"]["readme"] == 1,
               repr(index["coverage"].get("assets")))
+
+        # --- An asset that leaves the repository is reported, not dropped.
+        #
+        # Silently omitting it lets the run read "no README exists" off an empty list,
+        # when what happened is that it found one and refused to follow it.
+        escaped = os.path.join(tmp, "escaped")
+        os.makedirs(os.path.join(escaped, "repo"))
+        write(escaped, "outside.md", "# elsewhere\n")
+        os.symlink(os.path.join(escaped, "outside.md"),
+                   os.path.join(escaped, "repo", "README.md"))
+        write(os.path.join(escaped, "repo"), "app.py", "x = 1\n")
+        _, out_index, _ = scan(os.path.join(escaped, "repo"),
+                               os.path.join(tmp, "escaped.json"))
+        check("an asset symlinked outside the root is not listed as an asset",
+              "README.md" not in kinds_of(out_index))
+        check("but it is recorded as a skipped symlink",
+              "README.md" in out_index.get("skipped_symlinks", ()),
+              repr(out_index.get("skipped_symlinks")))
+        check("with a diagnostic naming it",
+              any(d.get("code") == "D003" and d.get("path") == "README.md"
+                  for d in out_index.get("diagnostics", ())),
+              repr(out_index.get("diagnostics")))
 
         # --- Absence is an answer too.
         bare = os.path.join(tmp, "bare")

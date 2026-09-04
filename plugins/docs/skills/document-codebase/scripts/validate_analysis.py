@@ -5,7 +5,7 @@
 """Hold `module-analysis.jsonl` to its schema, its evidence, and to saying something.
 
     python3 scripts/validate_analysis.py .docs-build/module-analysis.jsonl \\
-        --index .docs-build/structure.json --root .
+        --index .docs-build/structure.json
 
 A claim says the code is shaped a certain way, and the source can prove it wrong. A
 statement says what a module is *for*, and nothing can prove it wrong -- so the checks
@@ -144,6 +144,11 @@ class Checker(object):
     def __init__(self, index):
         self.index = index
         self.by_path = {record["path"]: record for record in index.get("files", ())}
+        # A `declared` statement is one the repository states -- in an ADR, a design
+        # note, a README. Those are assets, not source files, so resolving evidence
+        # against `files` alone rejected exactly the citations the inventory was added
+        # to make possible.
+        self.assets = {record["path"]: record for record in index.get("assets", ())}
         self.findings = []
 
     def finding(self, code, message, path=None, statement=None, severity="error"):
@@ -162,26 +167,36 @@ class Checker(object):
                 ok = False
                 continue
             record = self.by_path.get(item["path"])
-            if record is None:
+            asset = None if record is not None else self.assets.get(item["path"])
+            if record is None and asset is None:
                 self.finding("A006", "evidence names %r, which the index does not hold"
                              % item["path"], path, statement_id)
                 ok = False
                 continue
+            length = record.get("loc", 0) if record is not None else asset.get("lines", 0)
             start, end = item.get("line_start"), item.get("line_end", item.get(
                 "line_start"))
             if not isinstance(start, int) or not isinstance(end, int) \
-                    or start < 1 or end < start or end > record.get("loc", 0):
+                    or start < 1 or end < start or end > length:
                 self.finding("A007", "evidence cites lines %r-%r of a %d-line file"
-                             % (start, end, record.get("loc", 0)), path, statement_id)
+                             % (start, end, length), path, statement_id)
                 ok = False
                 continue
             symbol = item.get("symbol")
-            if symbol and symbol.split(".")[-1] not in identifiers_of(record):
+            if symbol and asset is not None:
+                # An asset is never parsed, so there is no symbol table to check against
+                # and "not found" would mean "not looked for". Cite the lines instead.
+                self.finding("A008", "evidence names symbol %r in %s, which is an asset "
+                             "and has no symbol table; cite its lines instead"
+                             % (symbol, item["path"]), path, statement_id)
+                ok = False
+            elif symbol and symbol.split(".")[-1] not in identifiers_of(record):
                 self.finding("A008", "evidence names symbol %r, which is not in %s"
                              % (symbol, item["path"]), path, statement_id)
                 ok = False
             stated = item.get("source_hash")
-            if stated and stated != record.get("source_hash"):
+            if stated and stated != (record if record is not None
+                                     else asset).get("source_hash"):
                 self.finding("A004", "evidence in %s was written against a different "
                              "version of it" % item["path"], path, statement_id)
                 ok = False
