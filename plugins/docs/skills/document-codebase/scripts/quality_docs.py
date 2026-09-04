@@ -61,6 +61,12 @@ PARTIAL_COVERAGE = 0.50
 # being malformed. Reported apart because they call for a different fix.
 EVIDENCE_CODES = ("A004", "A006", "A007", "A008", "A015")
 
+# Detector B. Above the first, the components are the directories; between the two, they
+# may be -- a repository is allowed to be organised the way its architecture is, so that
+# band is reported rather than fatal.
+DETECTOR_B_FAIL = 0.95
+DETECTOR_B_PARTIAL = 0.85
+
 RANK = {FAILED: 0, STATUS_PARTIAL: 1, PASSED: 2}
 MODE_RANK = {DERIVED_ONLY: 0, PARTIAL: 1, PER_MODULE: 2}
 
@@ -154,6 +160,111 @@ def mode_of(coverage, statements):
     return DERIVED_ONLY
 
 
+def rand_index(left, right, keys):
+    """The fraction of pairs the two partitions classify the same way.
+
+    Pair counting rather than label matching, because the labels are the thing under
+    suspicion: a synthesis that renamed every directory and moved nothing is exactly what
+    this has to catch, and comparing names would call that a difference.
+    """
+    keys = sorted(keys)
+    if len(keys) < 2:
+        return 1.0
+    same = total = 0
+    for i, a in enumerate(keys):
+        for b in keys[i + 1:]:
+            total += 1
+            if (left.get(a) == left.get(b)) == (right.get(a) == right.get(b)):
+                same += 1
+    return same / float(total) if total else 1.0
+
+
+def normalise_name(text):
+    return "".join(ch for ch in str(text).lower() if ch.isalnum())
+
+
+def detector_b(architecture):
+    """Is this a synthesis, or the directory tree with better nouns?
+
+    Returns a dict; the verdict is in `outcome`. `not_applicable` is a real answer and
+    not a pass: below two directories or two components there is no partition to compare,
+    and the index would read 1.0 for every small repository purely for being small.
+    """
+    components = [c for c in architecture.get("components", ()) if isinstance(c, dict)]
+    by_component, placed = {}, []
+    for component in components:
+        for path in component.get("modules", ()) or ():
+            by_component[path] = component.get("id")
+            placed.append(path)
+    by_directory = {path: os.path.dirname(path) or "." for path in by_component}
+
+    directories = set(by_directory.values())
+    result = {"components": len(components), "directories": len(directories),
+              "modules_placed": len(by_component)}
+    if len(components) < 2 or len(directories) < 2:
+        result.update(outcome="not_applicable", agreement=None,
+                      detail="%d component(s) over %d director(y/ies): there is no "
+                             "partition to compare" % (len(components), len(directories)))
+        return result
+
+    agreement = rand_index(by_component, by_directory, by_component)
+    result["agreement"] = round(agreement, 4)
+
+    # The pure rename: same grouping, and every component named after the directory it
+    # contains. Nothing merged, nothing split, nothing named for what it does.
+    renamed = False
+    if agreement >= 1.0:
+        renamed = True
+        for component in components:
+            members = component.get("modules", ()) or ()
+            folders = {os.path.dirname(p) or "." for p in members}
+            leaf = normalise_name(os.path.basename(sorted(folders)[0])) if folders else ""
+            if normalise_name(component.get("name", "")) != leaf:
+                renamed = False
+                break
+    result["is_directory_rename"] = renamed
+
+    # What the synthesis holds that a path cannot give. This does not change the verdict
+    # -- softening the threshold would hand back the escape hatch the detector closes --
+    # but a maintainer reading `agreement 0.97, independent content 0.9` can see the
+    # difference the index cannot, and decide whether the threshold is what to revisit.
+    external = {e.get("id") for e in architecture.get("external_systems", ()) or ()
+                if isinstance(e, dict)}
+    linked = set()
+    for relationship in architecture.get("relationships", ()) or ():
+        if isinstance(relationship, dict):
+            if relationship.get("to") in external:
+                linked.add(relationship.get("from"))
+            if relationship.get("from") in external:
+                linked.add(relationship.get("to"))
+    earned = 0
+    for component in components:
+        folders = {os.path.dirname(p) or "." for p in component.get("modules", ()) or ()}
+        if ((component.get("rationale") or {}).get("status") not in (None, "unknown")
+                or component.get("id") in linked or len(folders) > 1):
+            earned += 1
+    result["independent_content"] = round(earned / float(len(components)), 4)
+
+    if renamed:
+        result.update(outcome="failed",
+                      detail="the components are the directories, renamed to match: "
+                             "nothing was merged, split, or named for what it does")
+    elif agreement >= DETECTOR_B_FAIL:
+        result.update(outcome="failed",
+                      detail="components and directories agree on %.0f%% of module "
+                             "pairs; %.0f%% of components carry something a path cannot "
+                             "give" % (agreement * 100,
+                                       result["independent_content"] * 100))
+    elif agreement >= DETECTOR_B_PARTIAL:
+        result.update(outcome="partial",
+                      detail="components and directories agree on %.0f%% of module pairs"
+                             % (agreement * 100))
+    else:
+        result.update(outcome="passed",
+                      detail="the grouping is not the directory tree")
+    return result
+
+
 def page_report(doc):
     preset = doc.get("preset")
     pages = {page["id"] for page in doc.get("pages", ())}
@@ -181,6 +292,8 @@ def main():
     parser.add_argument("--units", help="units.txt: the modules this run paid to read")
     parser.add_argument("--claims", help="claims.verified.jsonl")
     parser.add_argument("--doc", help="doc.json")
+    parser.add_argument("--architecture", help="architecture-analysis.json, so Detector B "
+                                               "can ask whether it is a synthesis")
     parser.add_argument("--diagrams", help="directory holding diagram-manifest.json")
     parser.add_argument("--require", default=STATUS_PARTIAL,
                         choices=(PASSED, STATUS_PARTIAL, FAILED),
@@ -281,6 +394,28 @@ def main():
             reasons.append("the %s preset requires pages that were not generated: %s"
                            % (report["pages"]["preset"],
                               ", ".join(report["pages"]["missing"])))
+
+    if args.architecture:
+        architecture, error = load_json(args.architecture, "architecture analysis")
+        if error:
+            return fail(error)
+        stated = architecture.get("index_hash")
+        if stated and stated != index.get("index_hash"):
+            return fail("the architecture analysis was written against %s, the index is "
+                        "%s" % (stated, index.get("index_hash")))
+        detector = detector_b(architecture)
+        report["architecture"] = detector
+        if detector["outcome"] == "failed":
+            status = FAILED
+            reasons.append("detector B: %s" % detector["detail"])
+        elif detector["outcome"] == "partial":
+            status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
+            reasons.append("detector B: %s" % detector["detail"])
+        elif detector["outcome"] == "not_applicable":
+            # Not a pass. Saying so keeps a small repository from reading as though the
+            # detector had looked and approved.
+            status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
+            reasons.append("detector B did not run: %s" % detector["detail"])
 
     if args.diagrams:
         report["diagrams"] = diagram_report(args.diagrams)

@@ -242,6 +242,68 @@ be a number no check could ever disagree with.
 counting as analysis. A document made of anchorless prose then falls to `derived_only` on its own, without
 an argument about whether one sentence was too abstract.
 
+## `architecture-analysis.json` — architecture_version 1
+
+What the modules add up to. A module analysis says what one file is for; this says what the files
+*together* are, which is one level further from anything a parser can confirm.
+
+```json
+{
+  "architecture_version": 1,
+  "index_hash": "sha256:…",
+  "components": [
+    {"id": "component:edge", "name": "Request handling", "status": "observed",
+     "modules": ["src/api/http.py", "src/api/cli.py"],
+     "statement_ids": ["api-s1"],
+     "rationale": {"status": "declared", "text": "…", "evidence": [{"path": "docs/adr/0001.md", "line_start": 12}]}}
+  ],
+  "layers": [{"id": "layer:domain", "name": "Domain", "components": ["component:edge"]}],
+  "relationships": [
+    {"from": "component:edge", "to": "component:storage", "kind": "depends_on",
+     "status": "observed", "evidence": [{"path": "src/service.py", "line_start": 4}]}
+  ],
+  "external_systems": [{"id": "external:postgres", "name": "PostgreSQL", "status": "declared"}]
+}
+```
+
+`status` is the statement vocabulary unchanged. `kind` on a relationship is `depends_on`, `calls`,
+`publishes_to`, `reads_from` or `extends`.
+
+**A component's modules are disjoint.** Overlap makes every later count ambiguous — coverage, the partition
+Detector B compares, and what a page says a module belongs to. **A relationship must cite a line whatever its
+status**: it is the part a reader acts on, because it says what breaks what. A `rationale` of `unknown` needs
+no evidence and is the honest answer for a boundary nobody recorded a reason for, which is most of them.
+
+`validate_architecture.py` checks the shape and the evidence; it never asks whether the grouping is a good
+one. Findings are `B002` missing field, `B003` module not in the index, `B004` module in two components,
+`B005` duplicate id, `B006` relationship endpoint that does not exist, `B007` evidence that does not resolve,
+`B008` a statement id the module analysis does not contain, `B010` a component holding nothing, `B011` a
+relationship with no evidence, `B012` an unknown status or kind. Coverage is reported per subject —
+components, components with modules, components with a rationale, rationales recorded as unknown,
+relationships, relationships with evidence, external systems, modules placed — because one blended figure
+hides which of them is the empty one, and empty is the interesting case.
+
+### Detector B
+
+Whether the synthesis is a synthesis lives in `quality_docs.py`, not here: a file can be perfectly valid
+above and still be `ls` with better nouns. Two partitions of the same modules are compared — component →
+modules against directory → modules — by **pair counting**, not by label, because a run that renamed every
+directory and moved nothing is exactly what this has to catch.
+
+| Outcome | When |
+| --- | --- |
+| `failed` | the components are the directories *and* each is named after its directory — nothing merged, split or renamed |
+| `failed` | pair agreement `>= 0.95` |
+| `partial` | agreement in `[0.85, 0.95)` — a repository is allowed to be organised the way its architecture is |
+| `passed` | below that |
+| `not_applicable` | fewer than two components or two directories: there is no partition to compare |
+
+`not_applicable` is **not a pass** and never reports as one — the index reads 1.0 on a single group, so a
+small repository would otherwise fail for being small. Beside the agreement the report carries
+`independent_content`: the fraction of components holding something a path cannot give — a rationale of any
+status, a named external system, or membership spanning more than one directory. It does not change the
+verdict; it is what a maintainer needs to tell "lazy" from "correct, because the layout already matches".
+
 ## `generation-report.json` — schema_version 1
 
 Written by `quality_docs.py`. It is the only artefact that says **how much of the document was read and how

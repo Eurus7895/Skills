@@ -162,6 +162,22 @@ A repository may genuinely be organised the way its architecture is, so the midd
 reported rather than fatal — but a synthesis that renamed nothing and moved nothing is not
 evidence of that, it is absence of work.
 
+Two things the rules above do not settle, decided here rather than in the code:
+
+**A tidy repository still fails at `>= 0.95`.** Pair agreement cannot tell "lazy" from
+"correct, because the layout already matches". Rather than soften the threshold — which
+would hand back the escape hatch the detector exists to close — the report carries a second
+number beside it: the fraction of components that hold something a path cannot give, being
+a rationale of any status, a named external system, or membership spanning more than one
+directory. A maintainer reading *agreement 0.97, independent content 0.9* can see the
+difference the index cannot. If real repositories trip this, the threshold is what to
+revisit, and the number to revisit it with is already there.
+
+**Below two directories or two components there is no partition to compare.** The Rand
+index is 1.0 by construction on a single group, which would fail every small repository for
+being small. That case reports `not_applicable` with the count that made it so — not a pass,
+and not a failure either.
+
 ## Commits
 
 ### C1. Make the shortcut visible before fixing it
@@ -280,6 +296,18 @@ Coverage grows a denominator per subject here, not one number for the run: compo
 contributing modules, relationships with evidence, entry points reached by a flow, boundaries
 with a rationale of any status. A single percentage hides which of them is empty, and empty
 is the interesting case.
+
+**Done**, less the flow denominator, which has nothing to count until C7 exists. Two notes
+for whoever reads this next:
+
+- `detector_b` takes only the architecture. It was written taking the index as well and
+  never read it — the question "is this the directory tree" is answerable from the
+  component-to-modules map alone, and the parameter was doing nothing but implying
+  otherwise.
+- The band is coarser than it looks on a small repository. Moving one module out of its
+  directory's component scores 0.8 on a seven-module fixture and 0.9 on a twenty-module
+  one, so a test that means to exercise `[0.85, 0.95)` has to be built to size rather than
+  taken from whatever fixture is to hand.
 
 ### C7. Flows and operations, best-effort
 
