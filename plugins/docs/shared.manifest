@@ -12,6 +12,7 @@ scripts/derive_claims.py         -> skills/document-codebase/scripts/derive_clai
 scripts/validate_analysis.py     -> skills/document-codebase/scripts/validate_analysis.py
 scripts/validate_architecture.py -> skills/document-codebase/scripts/validate_architecture.py
 scripts/validate_flows.py        -> skills/document-codebase/scripts/validate_flows.py
+scripts/validate_operations.py   -> skills/document-codebase/scripts/validate_operations.py
 scripts/annotate_import_usage.py -> skills/document-codebase/scripts/annotate_import_usage.py
 scripts/query_graph.py           -> skills/document-codebase/scripts/query_graph.py
 scripts/verify_doc.py            -> skills/document-codebase/scripts/verify_doc.py
