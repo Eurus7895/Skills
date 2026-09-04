@@ -265,6 +265,39 @@ def detector_b(architecture):
     return result
 
 
+def flow_report(flows):
+    """What was traced, what was refused, and whether absence was stated.
+
+    The denominator C6 left open. It is deliberately not a percentage: a repository with
+    one traceable flow and one refused is not "50% documented", it is a document with a
+    hole in a named place.
+    """
+    entries = [f for f in flows.get("flows", ()) or () if isinstance(f, dict)]
+    absent = flows.get("absent")
+    return {
+        "flows": len(entries),
+        "steps": sum(len(f.get("steps") or ()) for f in entries),
+        "unresolved": sum(len(f.get("unresolved") or ()) for f in entries),
+        "absent_stated": bool(isinstance(absent, dict) and absent.get("reason")),
+    }
+
+
+def operations_report(operations):
+    procedures = [p for p in operations.get("procedures", ()) or ()
+                  if isinstance(p, dict)]
+    steps = [s for p in procedures for s in (p.get("steps") or ())
+             if isinstance(s, dict)]
+    absent = operations.get("absent")
+    return {
+        "procedures": len(procedures),
+        "kinds": sorted({p.get("kind") for p in procedures if p.get("kind")}),
+        "commands": sum(1 for s in steps if s.get("command")),
+        "requirements": len([r for r in operations.get("requirements", ()) or ()
+                             if isinstance(r, dict)]),
+        "absent_stated": bool(isinstance(absent, dict) and absent.get("reason")),
+    }
+
+
 def page_report(doc):
     preset = doc.get("preset")
     pages = {page["id"] for page in doc.get("pages", ())}
@@ -294,6 +327,8 @@ def main():
     parser.add_argument("--doc", help="doc.json")
     parser.add_argument("--architecture", help="architecture-analysis.json, so Detector B "
                                                "can ask whether it is a synthesis")
+    parser.add_argument("--flows", help="flow-analysis.json, for the flow denominator")
+    parser.add_argument("--operations", help="operations-analysis.json")
     parser.add_argument("--diagrams", help="directory holding diagram-manifest.json")
     parser.add_argument("--require", default=STATUS_PARTIAL,
                         choices=(PASSED, STATUS_PARTIAL, FAILED),
@@ -421,6 +456,29 @@ def main():
             # detector had looked and approved.
             status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
             reasons.append("detector B did not run: %s" % detector["detail"])
+
+    for option, label, builder, key in (
+            (args.flows, "flow analysis", flow_report, "flows"),
+            (args.operations, "operations analysis", operations_report, "operations")):
+        if not option:
+            continue
+        loaded, error = load_json(option, label)
+        if error:
+            return fail(error)
+        stated = loaded.get("index_hash")
+        if not stated:
+            return fail("the %s carries no index_hash, so which scan it describes is "
+                        "unknown" % label)
+        if stated != index.get("index_hash"):
+            return fail("the %s was written against %s, the index is %s"
+                        % (label, stated, index.get("index_hash")))
+        report[key] = builder(loaded)
+        # Nothing traced and nothing said about why is the quiet failure this whole step
+        # exists to stop. "Nothing here" is a result and passes; silence is not.
+        if not report[key].get("absent_stated") and not (
+                report[key].get("flows") or report[key].get("procedures")):
+            status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
+            reasons.append("the %s names nothing and does not say why" % label)
 
     if args.diagrams:
         report["diagrams"] = diagram_report(args.diagrams)
