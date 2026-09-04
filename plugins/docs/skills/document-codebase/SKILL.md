@@ -285,6 +285,32 @@ finding explaining anything that is not the first two.
 Revise the affected fragment only. Re-analysing the whole repository because one claim failed wastes the
 budget from step 3 and usually reintroduces claims that already passed.
 
+### 6b. Say what the modules add up to
+
+- **Run** the validator once you have written the file; the file itself is yours to write.
+- **Writes** `.docs-build/architecture-analysis.json` — **you** write it, from the statements of step 4.
+- **Read** its findings, and the Detector B verdict that step 9 prints.
+- **Decide** whether the grouping is a reading or a relabelling. That is the whole question here.
+
+Components, the layers they sit in, what crosses between them, and which outside systems the repository
+talks to. The schema and every `B0xx` code are in [`references/schemas.md`](references/schemas.md).
+
+```bash
+python3 scripts/validate_architecture.py .docs-build/architecture-analysis.json \
+    --index .docs-build/structure.json --analysis .docs-build/module-analysis.jsonl
+```
+
+**The easy way to produce this file is to read the directory listing and rename it** — `src/api/` becomes
+"API layer", `src/core/` becomes "Core" — and the result has components, layers and a shape while telling a
+reader nothing `ls` would not. Step 9 measures exactly that and fails the run for it, so the work is to
+decide where the boundaries actually are: which modules serve one purpose whatever folder they sit in, which
+folder holds two unrelated things, and why each boundary is where it is.
+
+Three rules do most of the work. **A module belongs to one component**, or every later count is ambiguous.
+**A relationship cites a line**, whatever its status, because it is the part that says what breaks what. And
+**a rationale of `unknown` is a real answer** — most boundaries in most repositories have no recorded reason,
+and saying so is worth more than a plausible sentence.
+
 ### 7. Generate the PlantUML class diagram
 
 - **Run** the three commands below in order: build the graph, generate PlantUML, then validate it.
@@ -381,8 +407,13 @@ documentation tree and **updates** its authored pages rather than generating ove
 python3 scripts/quality_docs.py --index .docs-build/structure.json \
     --analysis .docs-build/module-analysis.jsonl --units .docs-build/units.txt \
     --claims .docs-build/claims.verified.jsonl --doc .docs-build/doc.json \
+    --architecture .docs-build/architecture-analysis.json \
     --diagrams docs/_diagrams --out .docs-build/generation-report.json
 ```
+
+**Detector B** reports under `architecture`. It compares your components against the directory tree by
+counting module pairs, not by comparing names, so renaming every folder does not fool it. `failed` means the
+grouping is the tree; `not_applicable` means there was no partition to compare and is **not** a pass.
 
 **`analysis_mode` is the honest summary of the run**, and it is the one thing no other
 check can produce. Every other stage passes on a document derived entirely from
@@ -408,6 +439,7 @@ whether the build check passed or was skipped, and that `.docs-build/` can be de
 | `scripts/derive_claims.py` | Step 4, once — the structural claims you must not hand-write |
 | `scripts/query_graph.py` | Step 4, once per scope |
 | `scripts/validate_analysis.py` | Step 4, after the last statement |
+| `scripts/validate_architecture.py` | Step 6b, after writing the synthesis |
 | `scripts/assemble.py` | Step 5, always — before verifying |
 | `scripts/verify_doc.py` | Step 6, always — before writing anything |
 | `scripts/build_class_graph.py` | Step 7, when diagrams are wanted |
