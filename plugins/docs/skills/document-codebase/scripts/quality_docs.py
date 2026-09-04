@@ -400,7 +400,12 @@ def main():
         if error:
             return fail(error)
         stated = architecture.get("index_hash")
-        if stated and stated != index.get("index_hash"):
+        if not stated:
+            # Without it the synthesis cannot be tied to the repository that was scanned,
+            # and detector B would hand back a verdict on modules from who knows where.
+            return fail("the architecture analysis carries no index_hash, so which scan "
+                        "it describes is unknown")
+        if stated != index.get("index_hash"):
             return fail("the architecture analysis was written against %s, the index is "
                         "%s" % (stated, index.get("index_hash")))
         detector = detector_b(architecture)

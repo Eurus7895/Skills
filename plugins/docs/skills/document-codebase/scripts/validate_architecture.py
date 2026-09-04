@@ -67,13 +67,19 @@ def load_json(path, label):
         return None, "cannot read %s: %s" % (path, exc)
 
 
-def statement_ids_of(path):
-    """Every statement id in a module-analysis file, or None when there is no file."""
+def statement_sources(path):
+    """Map every statement id to the module paths that produced it.
+
+    Returns `(None, None)` when no analysis was asked for, and `(None, error)` when one
+    was asked for and could not be read -- a mistyped `--analysis` must not read as
+    "there is nothing to check against", which would downgrade every id check to advice
+    and let the run exit 0.
+    """
     if not path:
-        return None
+        return None, None
     if not os.path.isfile(path):
-        return None
-    ids = set()
+        return None, "no such module analysis: %s" % path
+    sources = {}
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
@@ -83,21 +89,22 @@ def statement_ids_of(path):
                 row = json.loads(line)
             except ValueError:
                 continue
+            origin = row.get("path")
             for statement in row.get("statements", ()) or ():
                 if isinstance(statement, dict) and statement.get("id"):
-                    ids.add(statement["id"])
-    return ids
+                    sources.setdefault(statement["id"], set()).add(origin)
+    return sources, None
 
 
 class Checker(object):
-    def __init__(self, index, statement_ids=None):
+    def __init__(self, index, statement_sources=None):
         self.index = index
         self.modules = {record["path"] for record in index.get("files", ())}
         self.by_path = {record["path"]: record for record in index.get("files", ())}
         self.assets = {record["path"]: record for record in index.get("assets", ())}
         # None means "no module analysis was supplied", which is different from "it
         # contained no statements". The first cannot be checked; the second is a finding.
-        self.statement_ids = statement_ids
+        self.statement_sources = statement_sources
         self.findings = []
 
     def finding(self, code, message, subject=None, severity="error"):
@@ -132,17 +139,30 @@ class Checker(object):
                 ok = False
         return ok
 
-    def check_statement_ids(self, subject, ids):
+    def check_statement_ids(self, subject, ids, home=None):
+        """`home` is the set of modules this subject is built from, when it has one.
+
+        A citation is provenance only if it points back at the subject's own modules. A
+        component holding `b.py` that cites a statement written about `a.py` has borrowed
+        someone else's evidence, and the id existing somewhere in the analysis does not
+        make the component a synthesis of what it contains.
+        """
         if not ids:
             return
-        if self.statement_ids is None:
+        if self.statement_sources is None:
             self.finding("B008", "names statement ids, but no module analysis was given "
                                  "to check them against", subject, severity="advisory")
             return
         for statement_id in ids:
-            if statement_id not in self.statement_ids:
+            origins = self.statement_sources.get(statement_id)
+            if origins is None:
                 self.finding("B008", "names statement %r, which the module analysis does "
                              "not contain" % statement_id, subject)
+            elif home is not None and not (origins & home):
+                self.finding("B009", "names statement %r, which was written about %s -- "
+                             "not a module it holds"
+                             % (statement_id, ", ".join(sorted(str(o) for o in origins))),
+                             subject)
 
     def check(self, doc):
         ids, owner = set(), {}
@@ -196,7 +216,8 @@ class Checker(object):
                                  "defines" % rationale["status"], subject)
                 elif rationale["status"] != "unknown":
                     self.check_evidence(subject, rationale.get("evidence"))
-            self.check_statement_ids(subject, component.get("statement_ids", ()))
+            self.check_statement_ids(subject, component.get("statement_ids", ()),
+                                     home={p for p in members if isinstance(p, str)})
             if component.get("evidence") is not None:
                 self.check_evidence(subject, component.get("evidence"))
 
@@ -212,6 +233,10 @@ class Checker(object):
             if layer["id"] in ids:
                 self.finding("B005", "id used more than once", subject)
             ids.add(layer["id"])
+            if not isinstance(layer["components"], list) or not layer["components"]:
+                # Same rule as a component holding no module: a layer holding no
+                # component is a name, and names are what this plan exists to stop.
+                self.finding("B010", "holds no component", subject)
             for member in layer.get("components", ()):
                 if member not in {c.get("id") for c in components if isinstance(c, dict)}:
                     self.finding("B006", "names component %r, which does not exist"
@@ -242,7 +267,16 @@ class Checker(object):
             # A relationship is the part a reader acts on -- it says what breaks what --
             # so it is the part that must cite a line, whatever its status.
             self.check_evidence(subject, relationship.get("evidence"))
-            self.check_statement_ids(subject, relationship.get("statement_ids", ()))
+            # A relationship may cite either end: the evidence for "edge depends on
+            # storage" is as likely to sit in storage as in edge.
+            members = {c.get("id"): c for c in components if isinstance(c, dict)}
+            home = set()
+            for end in ("from", "to"):
+                held = members.get(relationship[end], {}).get("modules")
+                if isinstance(held, list):
+                    home |= {p for p in held if isinstance(p, str)}
+            self.check_statement_ids(subject, relationship.get("statement_ids", ()),
+                                     home=home or None)
 
         for external in doc.get("external_systems", ()) or ():
             subject = external.get("id") if isinstance(external, dict) else repr(external)
@@ -265,6 +299,20 @@ class Checker(object):
         return owner
 
 
+def rationale_status(component):
+    """The rationale's status, or None when there is not a well-formed one.
+
+    A model writing `"rationale": "because"` is a schema finding (B002), and the counters
+    below must still be able to run: exiting 3 on the malformed input throws away the
+    report that says what was wrong with it.
+    """
+    rationale = component.get("rationale")
+    if not isinstance(rationale, dict):
+        return None
+    status = rationale.get("status")
+    return status if status in STATUSES else None
+
+
 def report_of(doc, checker, owner):
     components = [c for c in doc.get("components", ()) if isinstance(c, dict)]
     relationships = [r for r in doc.get("relationships", ()) or ()
@@ -283,10 +331,9 @@ def report_of(doc, checker, owner):
             "components_with_modules": sum(1 for c in components if c.get("modules")),
             "components_with_rationale": sum(
                 1 for c in components
-                if (c.get("rationale") or {}).get("status") not in (None, "unknown")),
+                if rationale_status(c) not in (None, "unknown")),
             "rationale_unknown": sum(
-                1 for c in components
-                if (c.get("rationale") or {}).get("status") == "unknown"),
+                1 for c in components if rationale_status(c) == "unknown"),
             "relationships": len(relationships),
             "relationships_with_evidence": sum(
                 1 for r in relationships if r.get("evidence")),
@@ -331,7 +378,11 @@ def main():
         return fail("the analysis was written against %s, the index is %s -- rerun the "
                     "analysis or rescan" % (stated, index.get("index_hash")))
 
-    checker = Checker(index, statement_ids_of(args.analysis))
+    sources, error = statement_sources(args.analysis)
+    if error:
+        return fail(error)
+
+    checker = Checker(index, sources)
     owner = checker.check(doc)
     report = report_of(doc, checker, owner)
 

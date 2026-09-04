@@ -175,6 +175,51 @@ def main():
               and report["coverage"]["components_with_rationale"] == 0,
               repr(report["coverage"]))
 
+        # A statement id that exists is not provenance unless it was written about a
+        # module the component holds. Borrowed evidence is the easiest way to make a
+        # synthesis look sourced.
+        borrowed = json.loads(json.dumps(honest))
+        borrowed["components"][0]["statement_ids"] = []
+        borrowed["components"][1]["statement_ids"] = ["m1"]      # m1 is about api/http.py
+        code, report = validate(tmp, index_path, borrowed, analysis, "borrowed.json")
+        check("a statement written about a module the component does not hold is B009",
+              "B009" in codes(report), repr(codes(report)))
+        check("and the honest citation of its own module is not", "B009" not in codes(
+            validate(tmp, index_path, honest, analysis, "own.json")[1]))
+
+        # A relationship spans two components, so either end may hold the evidence.
+        both = json.loads(json.dumps(honest))
+        both["relationships"][0]["statement_ids"] = ["m1"]
+        code, report = validate(tmp, index_path, both, analysis, "both.json")
+        check("a relationship may cite a statement from either endpoint",
+              "B009" not in codes(report) and code == 0, repr(codes(report)))
+
+        # `--analysis` pointing nowhere used to read as "nothing to check against", which
+        # turned every id check into advice and still exited 0.
+        code, out, err = run("validate_architecture.py",
+                             write_json(os.path.join(tmp, "typo.json"), honest),
+                             "--index", index_path,
+                             "--analysis", os.path.join(tmp, "not-here.jsonl"))
+        check("a mistyped --analysis path is an input error, not silence",
+              code == 2 and "no such module analysis" in err, "%d %r" % (code, err[:200]))
+
+        # B002 says the rationale is malformed; the report has to survive to say so.
+        malformed = json.loads(json.dumps(honest))
+        malformed["components"][0]["rationale"] = "because"
+        code, report = validate(tmp, index_path, malformed, analysis, "malformed.json")
+        check("a rationale that is a string is B002, not an internal error",
+              code == 1 and "B002" in codes(report), "%d %s" % (code, repr(report)[:200]))
+        check("and the coverage counters still come back",
+              report["coverage"]["components_with_rationale"] == 0
+              and report["coverage"]["rationale_unknown"] == 0,
+              repr(report.get("coverage")))
+
+        layered = json.loads(json.dumps(honest))
+        layered["layers"] = [{"id": "layer:top", "name": "Top", "components": []}]
+        code, report = validate(tmp, index_path, layered, analysis, "layer.json")
+        check("a layer holding no component is B010", "B010" in codes(report),
+              repr(codes(report)))
+
         stale = json.loads(json.dumps(honest))
         stale["index_hash"] = "sha256:" + "0" * 64
         code, report = validate(tmp, index_path, stale, analysis, "stale.json")
@@ -279,6 +324,16 @@ def main():
             else:
                 check("the gate does not fail an honest synthesis",
                       gate["architecture"]["outcome"] == "passed", repr(gate["reasons"]))
+
+        # An architecture with no index_hash cannot be tied to the scan at all. The gate
+        # used to skip the freshness check for it and let detector B answer anyway.
+        floating = json.loads(json.dumps(honest))
+        del floating["index_hash"]
+        path = write_json(os.path.join(tmp, "floating.json"), floating)
+        code, out, err = run("quality_docs.py", "--index", index_path,
+                             "--analysis", analysis, "--architecture", path)
+        check("the gate rejects an architecture with no index_hash",
+              code == 2 and "no index_hash" in err, "%d %r" % (code, err[:200]))
 
         # --- Same input, same report.
         first = validate(tmp, index_path, honest, analysis, "again-a.json")

@@ -277,8 +277,12 @@ no evidence and is the honest answer for a boundary nobody recorded a reason for
 `validate_architecture.py` checks the shape and the evidence; it never asks whether the grouping is a good
 one. Findings are `B002` missing field, `B003` module not in the index, `B004` module in two components,
 `B005` duplicate id, `B006` relationship endpoint that does not exist, `B007` evidence that does not resolve,
-`B008` a statement id the module analysis does not contain, `B010` a component holding nothing, `B011` a
-relationship with no evidence, `B012` an unknown status or kind. Coverage is reported per subject —
+`B008` a statement id the module analysis does not contain, `B009` a statement id written about a module the
+citing component does not hold, `B010` a component holding nothing or a layer holding no component, `B011` a
+relationship with no evidence, `B012` an unknown status or kind. A citation is provenance only if it points
+back at the subject's own modules, so `B009` is what keeps a component from borrowing the evidence of a file
+it has nothing to do with; a relationship may cite either of its two endpoints. Passing `--analysis` with a
+path that cannot be read is an input error, not a silent downgrade to advice. Coverage is reported per subject —
 components, components with modules, components with a rationale, rationales recorded as unknown,
 relationships, relationships with evidence, external systems, modules placed — because one blended figure
 hides which of them is the empty one, and empty is the interesting case.
@@ -300,8 +304,11 @@ directory and moved nothing is exactly what this has to catch.
 
 `not_applicable` is **not a pass** and never reports as one — the index reads 1.0 on a single group, so a
 small repository would otherwise fail for being small. Beside the agreement the report carries
-`independent_content`: the fraction of components holding something a path cannot give — a rationale of any
-status, a named external system, or membership spanning more than one directory. It does not change the
+`independent_content`: the fraction of components holding something a path cannot give — a recorded
+rationale, a named external system, or membership spanning more than one directory. A rationale of status
+`unknown` does **not** count: it says no reason was found, which is honest and worth recording, but it is
+information the tree already gave. Counting it would let a rename inflate the figure to 1.0 by attaching an
+empty rationale to every component. It does not change the
 verdict; it is what a maintainer needs to tell "lazy" from "correct, because the layout already matches".
 
 ## `generation-report.json` — schema_version 1
