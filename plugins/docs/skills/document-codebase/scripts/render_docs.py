@@ -38,7 +38,9 @@ import sys
 import sphinx_support
 import wire_toctree
 
-SUPPORTED_FORMAT = {1}
+# v2 adds `subheading` blocks, `covers`/`analysis_ids` per page and a `statements` list.
+# v1 documents render unchanged: nothing v1 carried was removed or given a new meaning.
+SUPPORTED_FORMAT = {1, 2}
 
 # `word_` is a reference in RST and `[1]_` a footnote, and an undefined one fails the
 # build. Mid-word underscores are not references, so `snake_case` -- which is most of
@@ -90,6 +92,10 @@ class Rst(object):
     def heading(self, text):
         line = self.escape(text)
         return "%s\n%s\n" % (line, "=" * max(len(line), 3))
+
+    def subheading(self, text):
+        line = self.escape(text)
+        return "%s\n%s\n" % (line, "-" * max(len(line), 3))
 
     def prose(self, text):
         return self.escape(text) + "\n"
@@ -150,6 +156,9 @@ class Myst(object):
     def heading(self, text):
         return "# %s\n" % self.escape(text)
 
+    def subheading(self, text):
+        return "## %s\n" % self.escape(text)
+
     def prose(self, text):
         return self.escape(text) + "\n"
 
@@ -191,6 +200,8 @@ def render_block(block, titles, emitter):
     kind = block["type"]
     if kind == "prose":
         return emitter.prose(block["text"])
+    if kind == "subheading":
+        return emitter.subheading(block["text"])
     if kind == "table":
         return emitter.table(block["columns"], block["rows"])
     if kind == "image":
@@ -239,6 +250,14 @@ def main():
                              "myst_parser; see references/presets.md")
     parser.add_argument("--check", action="store_true",
                         help="validate the rendered markup after writing it")
+    parser.add_argument("--write-conf", action="store_true",
+                        help="write a conf.py beside the pages when the output directory "
+                             "has none, so the document can be built. Never overwrites "
+                             "or edits one that is already there")
+    parser.add_argument("--project", default="Documentation",
+                        help="project name for a conf.py written by --write-conf")
+    parser.add_argument("--author", default="",
+                        help="author line for a conf.py written by --write-conf")
     parser.add_argument("--replace-index", action="store_true",
                         help="overwrite an existing index page; without this an index "
                              "already in the output directory is left as the author "
@@ -393,6 +412,23 @@ def main():
     for page in doc.get("authored_pages", ()):
         print("not generated: %s%s (%s) -- no evidence in the graph for this page"
               % (page["id"], emitter.extension, page["title"]))
+
+    if args.write_conf:
+        outcome, detail = sphinx_support.write_conf(
+            args.out, required_extensions, args.project, args.author)
+        if outcome == "written":
+            print("wrote %s -- `sphinx-build %s %s/_build` will now build these pages"
+                  % (detail, args.out, args.out))
+        elif outcome == "exists":
+            print("kept the existing %s; it is the project's, and this never edits one"
+                  % detail)
+        else:
+            sys.stderr.write("WARN  %s\n" % detail)
+    elif not sphinx_support.project_at(args.out):
+        # Pages with nothing to build them are not yet a document, and the reader has no
+        # way to know that from the files alone.
+        print("no conf.py in %s: these pages cannot be built until the project has one. "
+              "Rerun with --write-conf to generate a starting point." % args.out)
 
     if not args.check:
         return 0

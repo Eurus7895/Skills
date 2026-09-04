@@ -38,7 +38,7 @@ import json
 import os
 import sys
 
-SUPPORTED_SCHEMA = {2}
+SUPPORTED_SCHEMA = {2, 3}
 PACKET_VERSION = 1
 
 # Assuming a 200k-token host window. Scope analysis gets a soft target and a hard

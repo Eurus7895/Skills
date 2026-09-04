@@ -240,6 +240,116 @@ def _stage(out_dir, work, extensions):
     return source, stubbed
 
 
+CONF_TEMPLATE = '''\
+# Sphinx configuration.
+#
+# Generated once, because the pages beside it had nowhere to be built from. Nothing
+# regenerates or edits this file: it is yours now, and a later documentation run will
+# leave it exactly as you leave it.
+
+project = %(project)r
+author = %(author)r
+
+extensions = %(extensions)r
+
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+html_theme = "alabaster"
+%(notes)s'''
+
+# Naming an optional extension in `extensions` is not optional at all: Sphinx raises
+# ExtensionError while importing it and the build produces no page. So it is imported
+# conditionally, and when it is absent the directive it would have provided is
+# registered as a no-op -- otherwise every `.. uml::` becomes an unknown directive,
+# which `-W` turns back into a failed build. Either way every page builds and the only
+# difference is whether the picture is drawn, which is what "optional" has to mean.
+PLANTUML_NOTE = '''
+# `sphinxcontrib.plantuml` draws the .puml sources under _diagrams/. It is optional:
+# without it every page still builds and the diagrams are left undrawn. To turn them on,
+# `pip install sphinxcontrib-plantuml` and make sure a `plantuml` command is on PATH:
+#
+#     plantuml = "plantuml"
+
+try:
+    import sphinxcontrib.plantuml  # noqa: F401
+
+    extensions.append("sphinxcontrib.plantuml")
+except ImportError:
+
+    def setup(app):
+        """Accept `uml` without drawing it, so a missing renderer costs one picture."""
+        from docutils.parsers.rst import Directive, directives
+
+        class _UndrawnDiagram(Directive):
+            has_content = True
+            optional_arguments = 9
+            final_argument_whitespace = True
+            option_spec = {name: directives.unchanged
+                           for name in ("caption", "alt", "align", "width", "height",
+                                        "scale")}
+
+            def run(self):
+                return []
+
+        app.add_directive("uml", _UndrawnDiagram)
+        return {"parallel_read_safe": True, "parallel_write_safe": True}
+'''
+
+MYST_NOTE = '''
+# The pages are MyST Markdown, so `myst_parser` is required, not optional: without it
+# Sphinx does not read .md files at all and the build fails for a reason that has nothing
+# to do with what the pages say. `pip install myst-parser`.
+'''
+
+
+def write_conf(out_dir, extensions=(), project="Documentation", author=""):
+    """Create a `conf.py` beside the rendered pages, when there is none.
+
+    Generated pages are not a document until something can build them, and a project
+    that has never used Sphinx has no `conf.py` to build them with. So this writes one --
+    once, only when asked, and only when the directory has none.
+
+    It **never** overwrites or edits an existing file. The reason is the same one that
+    makes `parser_enabled` read a `conf.py` as text rather than importing it: a
+    configuration is somebody's, it can contain anything, and a generator that rewrites
+    it destroys work no rerun can restore. Returns (outcome, detail) where outcome is
+    `written`, `exists` or `failed`.
+    """
+    path = os.path.join(out_dir, "conf.py")
+    # `lexists`, not `isfile`. A dangling symlink named conf.py is not a file, so
+    # `isfile` said the directory was empty and the write then followed the link and
+    # created its target -- overwriting a configuration this promises never to touch,
+    # outside the only directory this script says it writes to.
+    if os.path.lexists(path):
+        return "exists", path
+
+    # An optional extension named in `extensions` is not optional: Sphinx fails to
+    # import it and no page is built. Those are appended conditionally by the note below
+    # instead, so the list here is only what the pages genuinely require.
+    required = sorted({e for e in extensions if e not in OPTIONAL_DIRECTIVES})
+    notes = ""
+    if "sphinxcontrib.plantuml" in extensions:
+        notes += PLANTUML_NOTE
+    if "myst_parser" in extensions:
+        notes += MYST_NOTE
+    body = CONF_TEMPLATE % {"project": project, "author": author,
+                            # What the pages need, not what happens to be installed on
+                            # the machine that generated the file.
+                            "extensions": required, "notes": notes}
+    try:
+        if not os.path.isdir(out_dir):
+            os.makedirs(out_dir)
+        # O_EXCL closes the gap between the check above and the write, and O_NOFOLLOW
+        # refuses a symlink outright rather than writing through one.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        with os.fdopen(os.open(path, flags, 0o644), "w", encoding="utf-8") as fh:
+            fh.write(body)
+    except FileExistsError:
+        return "exists", path
+    except OSError as exc:
+        return "failed", "cannot write %s: %s" % (path, exc)
+    return "written", path
+
+
 def _note(detail, stubbed):
     if not stubbed:
         return detail

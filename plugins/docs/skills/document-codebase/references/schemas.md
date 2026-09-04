@@ -17,16 +17,17 @@ method:<path>:<Class>.<name>      a method on such a class
 Paths are repository-relative and forward-slashed, exactly as they appear in `structure.json`. An absolute
 path, a `../`, or a Windows separator is rejected.
 
-## `structure.json` — schema_version 2
+## `structure.json` — schema_version 3
 
 Written by `scan_repo.py`, checked by `validate_index.py`. The deterministic half of everything downstream.
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "index_hash": "sha256:…",
   "source": {"root": "/abs/path", "revision": "a1b2c3…", "dirty": false},
   "files": [],
+  "assets": [],
   "edges": [],
   "fan_in": {},
   "entry_points": [],
@@ -34,6 +35,44 @@ Written by `scan_repo.py`, checked by `validate_index.py`. The deterministic hal
   "coverage": {}
 }
 ```
+
+v3 adds `assets` and `coverage.assets`. Nothing v2 carried changed, and every script that read a v2 index
+reads a v3 one.
+
+### Assets
+
+The files a parser has nothing to say about, which nonetheless hold the answers a dependency graph cannot
+give: how the project is installed, what it calls itself, how it is built, why a decision was taken. Each row
+is `{path, kind, source_hash, bytes, lines}` and **nothing is parsed** — this is availability, not content.
+`lines` is counted while the bytes are being hashed, which is not parsing and is what makes an asset citeable:
+without it `README.md:12` could not be range-checked the way `src/api.py:12` is, and the inventory would be
+useless as evidence for the `declared` statements it exists to support.
+Knowing a README exists is what lets a run cite it instead of inventing an installation section; knowing one
+does not is what lets the run say so.
+
+`kind` is `readme`, `licence`, `changelog`, `contributing`, `packaging`, `ci`, `container`, `adr`, `example`,
+`documentation`, `configuration`, `data` or `other`. Classification is by convention — directory prefix first,
+then basename, then extension — so `docs/adr/0001-x.md` is an `adr` rather than `documentation`, and
+`.github/workflows/ci.yml` is `ci` rather than `configuration`. Being wrong here costs a misfiled row in a
+list, which is why it is a table of names and not a parser. Files nothing could quote — images, archives,
+fonts, source maps — are left out rather than filed under `other`, or a repository with a hundred icons
+reports a hundred assets and the useful dozen are lost among them.
+
+A path is never in both `files` and `assets`; `E011` says so if it is. Assets are hashed and enter
+`index_hash` like everything else, so **editing a README makes the index stale and the run must rescan**.
+That is the intended cost: a run cites an asset precisely where it could not derive the answer, so nothing
+downstream would catch the citation being wrong.
+
+An asset-like path that is a symlink out of the repository is **not** silently dropped — it goes into
+`skipped_symlinks` with a `D003` diagnostic. An omitted README is otherwise indistinguishable from an absent
+one, and the run may only say "no README exists" when it looked and there was none.
+
+**A scan never indexes its own output.** The directory holding `--out` is excluded when it sits inside the
+repository, and `.docs-build/` is skipped outright — and that exclusion is applied *before* the file's
+language or extension is classified. Applied any later it leaks through two other doors: a leftover
+`.jsonl` still counts toward `unscanned`, and a leftover `.py` is still parsed as source. Both feed
+`index_hash`, so either one makes a second scan of an unchanged tree disagree with the first and invalidates
+every fragment from the run before.
 
 `source.dirty` is true when the tree had uncommitted changes **and** when git could not answer. A revision
 that might not describe the files is worth no more than no revision.
@@ -235,11 +274,31 @@ chooses which of those still exits `0`, defaulting to `partial`.
 read; everything else is covered in a line and counted in `out_of_budget`. A run that read everything it
 undertook to read is `per_module` on four files and on four thousand.
 
-## `doc.json` — format_version 1
+## `doc.json` — format_version 2
 
-Pages and blocks, with no markup in it. Block types are `prose`, `table`, `image`, `plantuml` and `ref`. Page ids, block
-ids, `ref` targets and `claim_refs` must all resolve before the model is written; a `claim_ref` to anything
-that is not `verified` or `supported_inference` is a build failure, not a warning.
+Pages and blocks, with no markup in it. Block types are `prose`, `subheading`, `table`, `image`, `plantuml`
+and `ref`. Page ids, block ids, `ref` targets, `claim_refs` and `analysis_refs` must all resolve before the
+model is written; a `claim_ref` to anything that is not `verified` or `supported_inference` is a build
+failure, not a warning, and so is an `analysis_ref` to a statement that is `unknown`.
+
+v2 adds the statements to the document. Each page carries `covers` — the statement kinds it is responsible
+for — and `analysis_ids`, the ones it actually used, and the model carries `statements` and
+`coverage_by_section`. Every kind has exactly one home:
+
+| Page | Covers |
+| --- | --- |
+| Module reference | `responsibility`, `state`, `interface`, `failure` |
+| Architecture | `interaction`, `rationale` |
+| Coverage and limitations | every kind, but only its `unknown` statements, as questions |
+
+The check runs both ways, and the second direction is the one that matters: **a statement kind no page
+covers fails the build**. Collecting a reading and then rendering a document without it is not a degraded
+document, it is a document that hides how much was known — which is the defect this version exists to
+close. `coverage_by_section` reports a denominator per question rather than one figure for the tree,
+because a document that knows what every module is for and nothing about how any of them fails is not
+90% of a document.
+
+v1 documents still render. Nothing v1 carried was removed or given a new meaning.
 
 ## PlantUML diagram artifacts — manifest_version 3
 

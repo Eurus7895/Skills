@@ -91,7 +91,7 @@ def main():
         if code != 0:
             return 1
 
-        check("schema_version is 2", data.get("schema_version") == 2,
+        check("schema_version is 3", data.get("schema_version") == 3,
               "got %r" % data.get("schema_version"))
 
         source = data.get("source", {})

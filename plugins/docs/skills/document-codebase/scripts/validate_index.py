@@ -22,6 +22,7 @@ Findings carry stable codes so a report can group them:
     E003  edge endpoint not in files          E008  indexed file absent from disk
     E004  path escapes the repository         E009  fan-in disagrees with edges
     E005  cited line outside the file         E010  entry point not in files
+    E011  asset row is malformed, duplicated, of an unknown kind, or also a source file
 
 Exit codes:
 
@@ -39,7 +40,13 @@ import json
 import os
 import sys
 
-SUPPORTED_SCHEMA = {2}
+SUPPORTED_SCHEMA = {2, 3}
+
+# Kept in step with scan_repo.ASSET_KINDS by the test suite rather than by importing it:
+# this validator's whole job is to disagree with the scanner when the scanner is wrong.
+ASSET_KINDS = ("readme", "licence", "changelog", "contributing", "packaging", "ci",
+               "container", "adr", "example", "documentation", "configuration", "data",
+               "other")
 
 # Anything a claim can cite a line inside. Kept explicit rather than walking the record
 # blindly, so a new scanner field cannot silently start being range-checked.
@@ -124,6 +131,46 @@ def check_files(index, root, findings):
     return by_path
 
 
+def check_assets(index, root, by_path, findings):
+    """The same three questions asked of source files: is the path sane, is the file
+    there, does it still hash to what was scanned.
+
+    An asset is never parsed, so there is nothing else to check -- but a stale one is
+    worse than a stale source record, not better. A run cites an asset precisely when it
+    cannot derive the answer, so nothing downstream would catch the citation being wrong.
+    """
+    seen = set()
+    for asset in index.get("assets", ()):
+        path = asset.get("path")
+        if not normalized(path):
+            findings.add("E011", "asset path is not a normalized repository-relative path",
+                         path if isinstance(path, str) else repr(path))
+            continue
+        if path in seen:
+            findings.add("E011", "asset path appears more than once", path)
+            continue
+        seen.add(path)
+        if path in by_path:
+            # One file, one home. A path in both lists means a caller reading `files`
+            # and a caller reading `assets` are describing the same file differently.
+            findings.add("E011", "path is listed both as a source file and as an asset",
+                         path)
+        if asset.get("kind") not in ASSET_KINDS:
+            findings.add("E011", "asset kind %r is not one this schema defines"
+                         % asset.get("kind"), path)
+
+        full = os.path.join(root, path)
+        if not os.path.isfile(full):
+            findings.add("E008", "indexed asset is not on disk; the index is stale", path)
+            continue
+        recorded = asset.get("source_hash")
+        if not recorded:
+            findings.add("E006", "asset carries no source_hash, so freshness cannot be "
+                                 "checked", path)
+        elif recorded != file_hash(full):
+            findings.add("E007", "asset on disk differs from the scanned snapshot", path)
+
+
 def check_edges(index, by_path, findings):
     seen = set()
     for edge in index.get("edges", []):
@@ -173,6 +220,7 @@ def check_derived(index, by_path, findings):
 def validate(index, root):
     findings = Findings()
     by_path = check_files(index, root, findings)
+    check_assets(index, root, by_path, findings)
     check_edges(index, by_path, findings)
     check_derived(index, by_path, findings)
     return findings

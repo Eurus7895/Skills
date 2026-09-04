@@ -213,6 +213,35 @@ end-to-end fixture run reports a mode that matches what actually happened.
 **The failure mode is closed here.** Everything below is expansion, and each commit is
 judged by whether the C3 numbers move.
 
+### C8a. The analysis reaches the page — taken before C5
+
+Done out of order, and the reason is worth recording. After C4 the pages were still
+generic, and reading the generated RST said why: `build_document_model.py` did not mention
+`module-analysis.jsonl` anywhere. Step 4 wrote the per-module reading, `quality_docs.py`
+counted it, and the document was then built from claims alone — so every page said
+structural things, and structural things read as generic however well they are phrased.
+The Flows page rendered its empty branch, because a flow needs a `calls` claim verified at
+its call site and nothing derives one.
+
+C5, C6 and C7 all add *more* material to the front of a pipeline that was dropping the
+material it already had. Wiring it up first makes each of them visible when it lands
+instead of accumulating at the input.
+
+So: `doc.json` v2 with `covers` and `analysis_ids` per page, statements rendered under
+their own section headings, the statement status boundary enforced the way the claim one
+already was — `declared` and `observed` stated, `inferred` hedged in the sentence,
+`unknown` listed in Limitations as a question — and `coverage_by_section` reporting a
+denominator per question. A statement kind no page covers fails the build, which is the
+original defect turned into a check.
+
+*Done when* a statement written in step 4 appears on a page, an `unknown` cannot reach
+prose, a kind covered by no page fails, a page whose blocks are all headings and links
+fails, v1 documents still render, and a run without `--analysis` builds the old document
+while saying why it is thin.
+
+What is left of C8 after this: the outside-in preset, which needs C5–C7's material before
+its pages have anything to hold.
+
 ### C5. Evidence that is not source code
 
 `scan_repo.py` records the files it currently skips — README, packaging manifests, CI
@@ -221,6 +250,21 @@ workflows, contribution and release files, configuration and examples — with `
 
 *Done when* the index names them, hashes are deterministic, and `structure.json` v3 still
 loads everywhere v2 did.
+
+**Done.** Two defects surfaced only by running it twice, neither visible by reading:
+
+- A scan indexed its own output. `.docs-build/structure.json` is a `.json` file inside the
+  repository, so the second scan hashed the first scan's artifacts and `index_hash` changed
+  on a tree that had not changed — quietly invalidating every fragment from the run before.
+  The directory holding `--out` is now excluded when it sits inside the repository, and
+  `.docs-build/` is skipped outright.
+- The fallback walker skipped every dot-directory, so `.github/workflows/` was invisible
+  whenever `git ls-files` could not answer. The same tree scanned differently depending on
+  whether it was a git checkout, and nothing downstream could see or explain the difference.
+
+Assets enter `index_hash`, so editing a README forces a rescan. That is the intended cost:
+a run cites an asset exactly where it could not derive the answer, so a stale asset citation
+is the one kind nothing downstream would catch.
 
 ### C6. Architecture synthesis
 

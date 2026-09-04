@@ -188,7 +188,7 @@ def main():
     index, error = load_json(args.index, "index")
     if error:
         return fail(error)
-    if index.get("schema_version") != 2:
+    if index.get("schema_version") not in (2, 3):
         return fail("unsupported index schema_version %r" % index.get("schema_version"))
 
     try:

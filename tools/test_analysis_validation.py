@@ -190,6 +190,73 @@ def main():
         first = run(VALID)
         second = run(VALID)
         check("the same input gives the same report", first == second)
+
+        # --- A `declared` statement cites the place the repository declares it, and
+        # that place is an ADR or a README -- an asset, not a source file. Resolving
+        # evidence against `files` alone rejected every such citation with A006, which
+        # made the asset inventory unusable as evidence for the one statement status
+        # that needs it.
+        with open(INDEX, encoding="utf-8") as fh:
+            v3 = json.load(fh)
+        v3["schema_version"] = 3
+        v3["assets"] = [
+            {"path": "docs/adr/0001-layers.md", "kind": "adr",
+             "source_hash": "sha256:" + "a" * 64, "bytes": 120, "lines": 6},
+        ]
+        index_v3 = os.path.join(tmp, "structure-v3.json")
+        with open(index_v3, "w", encoding="utf-8") as fh:
+            json.dump(v3, fh)
+
+        def run_v3(path):
+            proc = subprocess.run(
+                [sys.executable, SCRIPT, path, "--index", index_v3],
+                capture_output=True, text=True)
+            try:
+                return proc.returncode, json.loads(proc.stdout)
+            except ValueError:
+                return proc.returncode, {"_output": proc.stdout + proc.stderr}
+
+        def declared(evidence, sid="adr-s1"):
+            return [{"analysis_version": 1, "path": "app.py",
+                     "source_hash": v3["files"][0]["source_hash"],
+                     "index_hash": v3["index_hash"], "role": "The entry point.",
+                     "statements": [{"id": sid, "kind": "rationale", "status": "declared",
+                                     "text": "The ADR records that app.py owns the "
+                                             "main guard and pkg/store.py owns saving.",
+                                     "evidence": evidence}]}]
+
+        cited = write(tmp, "adr-cited.jsonl", declared(
+            [{"path": "docs/adr/0001-layers.md", "line_start": 3, "line_end": 4}]))
+        code, report = run_v3(cited)
+        check("evidence naming an indexed asset resolves",
+              "A006" not in codes(report), repr(codes(report)))
+        check("and the statement counts as analysis",
+              verdict(report, "adr-s1") == "valid", repr(report.get("modules")))
+
+        past_end = write(tmp, "adr-past-end.jsonl", declared(
+            [{"path": "docs/adr/0001-layers.md", "line_start": 99, "line_end": 99}]))
+        code, report = run_v3(past_end)
+        check("an asset citation past the end of the file is A007",
+              "A007" in codes(report), repr(codes(report)))
+
+        stale = write(tmp, "adr-stale.jsonl", declared(
+            [{"path": "docs/adr/0001-layers.md", "line_start": 3,
+              "source_hash": "sha256:" + "b" * 64}]))
+        code, report = run_v3(stale)
+        check("an asset edited since the scan is A004", "A004" in codes(report),
+              repr(codes(report)))
+
+        symboled = write(tmp, "adr-symbol.jsonl", declared(
+            [{"path": "docs/adr/0001-layers.md", "line_start": 3, "symbol": "save"}]))
+        code, report = run_v3(symboled)
+        check("naming a symbol inside an asset is A008, not a silent pass",
+              "A008" in codes(report), repr(codes(report)))
+
+        missing = write(tmp, "adr-missing.jsonl", declared(
+            [{"path": "docs/adr/9999-nope.md", "line_start": 1}]))
+        code, report = run_v3(missing)
+        check("an asset the index does not hold is still A006",
+              "A006" in codes(report), repr(codes(report)))
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)

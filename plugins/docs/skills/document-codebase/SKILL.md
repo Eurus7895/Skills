@@ -102,6 +102,11 @@ do not load it into context.
 `--detail` is what fills in `classes`. Without it the records carry symbol names and nothing else, and any
 statement about a class hierarchy would be memory rather than data. It is Python-only by design.
 
+The digest also names the **assets** — README, packaging manifests, CI workflows, ADRs, configuration,
+examples — with a count per kind. These are listed, never parsed. They are what a page about installation or
+conventions may cite, and the absence of one is itself an answer: a repository with no ADR gets "no decision
+record exists", not a rationale you worked out.
+
 `validate_index.py` re-derives what can be re-derived: paths inside the repository, edge endpoints, line
 ranges, and whether each file still hashes to what was scanned. **A finding here is not something to work
 around.** `E007`/`E008` mean the tree changed under the scan — rerun the scanner. Its findings never enter a
@@ -333,14 +338,26 @@ and ask first. `git status` afterwards is not a safety net — by then it has ha
 python3 scripts/build_document_model.py --index .docs-build/structure.json \
     --claims .docs-build/claims.verified.jsonl \
     --fragments .docs-build/fragments.verified.jsonl \
+    --analysis .docs-build/module-analysis.jsonl \
     --preset onboarding --diagrams docs/_diagrams --out .docs-build/doc.json
 
 python3 scripts/render_docs.py --doc .docs-build/doc.json --out docs \
     --diagrams docs/_diagrams --check
 ```
 
+**`--analysis` is what stops the document reading like an inventory.** A claim can only say
+that one file imports another, so pages built from claims alone say structural things, and
+structural things read as generic however well they are phrased. The statements from step 4
+are what carry purpose, ownership, failure and rationale onto the page. Pass the flag; a run
+that omits it prints why its pages are thin.
+
 `doc.json` contains no markup. **Do not write RST, MyST or Sphinx directives yourself** —
 the renderer owns headings, tables, references, escaping and the toctree.
+
+**A project with no `conf.py` cannot build what you just wrote.** The run says so when that
+is the case. Add `--write-conf --project "<name>"` to generate one; it is written only when
+the directory has none, and an existing one is never touched. Do not hand-write a `conf.py`
+either — say the flag exists and let the user choose.
 
 **`--check` answers with one of six outcomes, and `unwired` and `skipped` are not passes.**
 Neither fails the run; reporting either as a pass is the failure that distinction exists to

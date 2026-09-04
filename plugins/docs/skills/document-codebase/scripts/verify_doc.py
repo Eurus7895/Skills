@@ -60,7 +60,7 @@ import json
 import os
 import sys
 
-SUPPORTED_SCHEMA = {2}
+SUPPORTED_SCHEMA = {2, 3}
 
 KINDS = ("defines", "contains", "imports", "inherits", "calls", "responsibility")
 

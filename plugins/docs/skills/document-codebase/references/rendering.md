@@ -51,7 +51,32 @@ Both are off by default, for that reason.
   `myst_parser`. `conf.py` is read as text, never imported — running a stranger's
   configuration to find out what it configures is not a check, it is execution.
 
-The renderer never creates or edits a `conf.py`.
+## `--write-conf`, and what it does not do
+
+Generated pages are not a document until something can build them, and a project that has
+never used Sphinx has no `conf.py` to build them with. Without one, `sphinx-build docs/` on
+a freshly rendered tree fails on configuration, not on anything the pages say.
+
+`--write-conf` writes one — **once, only when asked, and only when the directory has none.**
+It never overwrites and never edits. That is the same rule as reading a `conf.py` as text
+rather than importing it, for the same reason: a configuration is somebody's, it can contain
+anything, and a generator that rewrites it destroys work no rerun can restore. A second run
+against a directory that has one prints `kept the existing conf.py` and moves on.
+
+`--project` and `--author` fill in the two fields nothing can derive.
+
+**A required extension and an optional one are written differently, and the difference is not
+cosmetic.** `myst_parser` goes straight into `extensions`, because MyST pages are unreadable
+without it. `sphinxcontrib.plantuml` must not: naming an extension there that is not installed
+makes Sphinx raise `ExtensionError` while importing it and produce *no page at all*, which is
+the opposite of optional. So the generated file imports it inside a `try`, appends it when it
+is there, and otherwise registers `uml` as a directive that draws nothing — because leaving it
+unregistered turns every `.. uml::` into an unknown directive and `-W` fails the build for the
+other reason. Either way every page builds and the only difference is whether the picture
+appears.
+
+Without the flag nothing is written, and a run into a directory with no `conf.py` says so:
+the pages are on disk and cannot yet be built, which is not visible from the files alone.
 
 ## The `handbook` preset
 

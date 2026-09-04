@@ -98,7 +98,7 @@ def main():
             index = json.load(fh)
     except (OSError, ValueError) as exc:
         return fail("cannot read %s: %s" % (args.index, exc))
-    if index.get("schema_version") != 2:
+    if index.get("schema_version") not in (2, 3):
         return fail("unsupported index schema_version %r" % index.get("schema_version"))
     if not os.path.isfile(args.units):
         return fail("no such units file: %s" % args.units)

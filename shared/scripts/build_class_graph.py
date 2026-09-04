@@ -38,7 +38,7 @@ import os
 import sys
 
 SCHEMA_VERSION = 1
-SUPPORTED_INDEX_SCHEMA = {2}
+SUPPORTED_INDEX_SCHEMA = {2, 3}
 
 DETAIL_LEVELS = ("summary", "public", "full")
 
