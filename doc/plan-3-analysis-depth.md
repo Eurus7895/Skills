@@ -398,6 +398,32 @@ what survives those rules goes to a bounded model pass, under the budgets above.
 asserting a rationale recorded as `unknown` — the honest fixture passes, and exhausting the
 budget returns `review_required` rather than a verdict.
 
+**Done**, and the limits are worth stating plainly because the check is easy to overrate.
+
+- **The verb ladder only reaches blocks that carry a citation.** On the outside-in preset
+  that is 5 of 22 blocks: the components, rationale, flows and operations tables are
+  rendered mechanically from their analyses and record no `claim_refs` or `analysis_refs`.
+  That is defensible — a mechanical render is not a rewrite, and there is nothing to have
+  overstated — but it means rule 1 is a check on *statement-derived prose*, not on the
+  document. Uncited blocks are reported as `P005` advisory rather than quietly skipped.
+- **Rule 2 reaches those tables, and does it by substring.** The renderer prefixes a hedge
+  to the analysis's own sentence, so dropping the hedge leaves that sentence bare and the
+  match finds it. A *rewritten* sentence escapes. That is the model pass's job, and saying
+  so is better than implying the deterministic pass is tighter than it is.
+- **`block_text` has to include table column headers.** Leaving them out made the rationale
+  page's "The question nobody answered" table read as a set of assertions — a false
+  positive on the one page written to be honest about not knowing. A checker that fails the
+  honest fixture gets switched off, so this was the bug most worth catching.
+
+`review_required` is now a real status in `quality_docs.py`, ranked below `partial` and
+above `failed`: it can never be reported as a pass, and a real defect still outranks "could
+not tell". The model pass itself is not run by the script — the agent runs it and writes
+verdicts to a JSONL — which is the only shape that fits a pipeline whose model is the
+caller.
+
+SKILL.md is at its 500-line ceiling with nothing left to compress. The step 6 finding-to-
+action table moved to `references/schemas.md` to make room for step 8b. C9 has none.
+
 ### C9. A8b, then A9
 
 Run the whole thing on a real repository (plan 2's A8b), read the output as a reader

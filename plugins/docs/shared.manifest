@@ -25,5 +25,6 @@ scripts/build_diagrams.py        -> skills/document-codebase/scripts/build_diagr
 scripts/validate_diagrams.py     -> skills/document-codebase/scripts/validate_diagrams.py
 scripts/build_flow_diagrams.py   -> skills/document-codebase/scripts/build_flow_diagrams.py
 scripts/validate_flow_diagrams.py -> skills/document-codebase/scripts/validate_flow_diagrams.py
+scripts/check_prose.py           -> skills/document-codebase/scripts/check_prose.py
 scripts/quality_docs.py          -> skills/document-codebase/scripts/quality_docs.py
 scripts/assemble.py              -> skills/document-codebase/scripts/assemble.py

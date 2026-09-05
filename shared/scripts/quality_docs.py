@@ -48,6 +48,13 @@ DERIVED_ONLY = "derived_only"
 
 PASSED, STATUS_PARTIAL, FAILED = "passed", "partial", "failed"
 
+# A bounded model pass ran out of attempts, tokens or time before it could decide.
+# Nothing was learned, so this is neither a defect in what was checked nor a pass -- the
+# same distinction sphinx_support.py draws between `skipped` and `runner_failure`. It
+# ranks below partial so it can never be reported as one, and above failed because a real
+# defect outranks "could not tell".
+REVIEW_REQUIRED = "review_required"
+
 # Where the two lines sit. Nine in ten leaves room for a module whose only honest
 # statement was unanchored; half is where a document stops being an account of the
 # repository and starts being an index with sentences around it.
@@ -64,7 +71,7 @@ EVIDENCE_CODES = ("A004", "A006", "A007", "A008", "A015")
 DETECTOR_B_FAIL = 0.95
 DETECTOR_B_PARTIAL = 0.85
 
-RANK = {FAILED: 0, STATUS_PARTIAL: 1, PASSED: 2}
+RANK = {FAILED: 0, REVIEW_REQUIRED: 1, STATUS_PARTIAL: 2, PASSED: 3}
 MODE_RANK = {DERIVED_ONLY: 0, PARTIAL: 1, PER_MODULE: 2}
 
 
@@ -341,8 +348,10 @@ def main():
                                               "refused flows are not counted as traced")
     parser.add_argument("--operations", help="operations-analysis.json")
     parser.add_argument("--diagrams", help="directory holding diagram-manifest.json")
+    parser.add_argument("--prose", help="the report from check_prose.py, so a document "
+                                        "whose sentences outrun their sources cannot pass")
     parser.add_argument("--require", default=STATUS_PARTIAL,
-                        choices=(PASSED, STATUS_PARTIAL, FAILED),
+                        choices=(PASSED, STATUS_PARTIAL, REVIEW_REQUIRED, FAILED),
                         help="lowest status that still exits 0 (default: partial)")
     parser.add_argument("--out", help="where to write the report; stdout either way")
     args = parser.parse_args()
@@ -511,6 +520,24 @@ def main():
                 report[key].get("flows") or report[key].get("procedures")):
             status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
             reasons.append("the %s names nothing and does not say why" % label)
+
+    if args.prose:
+        prose, error = load_json(args.prose, "prose report")
+        if error:
+            return fail(error)
+        report["prose"] = {"status": prose.get("status"),
+                           "findings": len([f for f in prose.get("findings", ())
+                                            if f.get("severity") != "advisory"]),
+                           "queued": (prose.get("coverage") or {}).get("queued"),
+                           "unreviewed": len(prose.get("unreviewed", ()))}
+        if prose.get("status") == FAILED:
+            status = FAILED
+            reasons.append("the prose says more than the analysis behind it: %d finding(s)"
+                           % report["prose"]["findings"])
+        elif prose.get("status") == REVIEW_REQUIRED:
+            status = min(status, REVIEW_REQUIRED, key=lambda s: RANK[s])
+            reasons.append("%d block(s) were queued for a model pass that did not "
+                           "decide them" % report["prose"]["unreviewed"])
 
     if args.diagrams:
         report["diagrams"] = diagram_report(args.diagrams)

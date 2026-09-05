@@ -311,6 +311,21 @@ information the tree already gave. Counting it would let a rename inflate the fi
 empty rationale to every component. It does not change the
 verdict; it is what a maintainer needs to tell "lazy" from "correct, because the layout already matches".
 
+## The verification loop
+
+What to do with each finding `verify_doc.py` returns. Group them by code first; acting on them one at a time
+is how a loop stops converging.
+
+| Finding | Do this |
+| --- | --- |
+| `needs_context` naming an entity | Fetch it with `query_graph.py --include`, revise **only that fragment**, verify again |
+| `rejected` — the graph has no such edge | Drop the claim. There is nothing to retry |
+| `rejected` — the cited line calls something else | Read the line again; either cite correctly or drop it |
+| `V014` `unsupported` — the call target is computed at run time | Nothing. Do not retry; it belongs in the limitations |
+| `V005` stale evidence | Rerun from step 1. The tree changed under you |
+| `V020` the same finding twice | Stop. Report it unresolved; the loop is not converging |
+| Anything unresolved after two attempts | Leave it `candidate` and let it appear in the limitations |
+
 ## `flow-analysis.json` — flow_version 1
 
 The traced paths through the repository. Both this file and the operations one below are **best effort**: a

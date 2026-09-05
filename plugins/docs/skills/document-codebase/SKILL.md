@@ -94,10 +94,8 @@ python3 scripts/validate_index.py .docs-build/structure.json --root .
 ```
 
 The digest printed by the scanner is what you read. The JSON stays on disk — query it with the scripts below,
-do not load it into context.
-
-`--detail` is what fills in `classes`. Without it the records carry symbol names and nothing else, and any
-statement about a class hierarchy would be memory rather than data. It is Python-only by design.
+do not load it into context. `--detail` is what fills in `classes`; without it the records carry symbol names
+and nothing else, and any statement about a class hierarchy would be memory rather than data.
 
 The digest also names the **assets** — README, packaging manifests, CI workflows, ADRs, configuration,
 examples — with a count per kind. These are listed, never parsed. They are what a page about installation or
@@ -116,9 +114,9 @@ cover them; do not fall back to reading files and writing an unverifiable docume
 ### 2. Optionally annotate import usage
 
 - **Run** the command below.
-- **Writes** back into `.docs-build/structure.json` **in place** — `usage` on each import record and a
-  `coverage.import_usage` block. No edge, fan-in or symbol changes. Pass `--out` to write elsewhere instead,
-  and `--report` for the diagnostics that did not match anything.
+- **Writes** back into `.docs-build/structure.json` **in place** — `usage` per import record and a
+  `coverage.import_usage` block; no edge, fan-in or symbol changes. `--out` writes elsewhere, `--report`
+  gives the diagnostics that matched nothing.
 - **Read** the summary line: how many bindings came back used, unused, suppressed, unknown.
 - **Decide** nothing about the code. This annotation is reported in step 9 and never acted on.
 
@@ -126,24 +124,22 @@ cover them; do not fall back to reading files and writing an unverifiable docume
 python3 scripts/annotate_import_usage.py .docs-build/structure.json --root . --policy optional
 ```
 
-Ruff answers a question the graph cannot: whether an imported name is ever read. It is advisory and additive —
-no edge changes. **An unused import is not evidence that a dependency is unnecessary**; re-export, side
-effects, registration and dynamic discovery all look identical from here. Report the count in the limitations
-section with that caveat attached, and never propose removing an import as part of documenting.
-
-Missing Ruff under `optional` warns and continues. Use `--policy disabled` if the user does not want an
-external tool invoked.
+Ruff answers a question the graph cannot: whether an imported name is ever read. It is advisory and additive.
+**An unused import is not evidence that a dependency is unnecessary** — re-export, side effects, registration
+and dynamic discovery all look identical from here. Report the count in the limitations section with that
+caveat, and never propose removing an import as part of documenting. Missing Ruff under `optional` warns and
+continues; `--policy disabled` if the user does not want an external tool invoked.
 
 ### 3. Pick the scope from fan-in, not from filenames
 
-Not every file earns a paragraph, and every file that does costs a model call. Rank by how many modules depend
-on it:
+Not every file earns a paragraph, and every file that does costs a model call. Rank by how many modules
+depend on it:
 
 - **Run** the selection below.
-- **Writes** `.docs-build/units.txt` — one path per line, the modules that will be described in detail.
+- **Writes** `.docs-build/units.txt` — one path per line, the modules described in detail.
 - **Read** the printed list with its fan-in counts.
-- **Decide** the cutoff. The default is the top 25 by fan-in plus every entry point; change the `25` if the
-  repository warrants it, and state in the document which cutoff you used.
+- **Decide** the cutoff: the top 25 by fan-in plus every entry point. Change the `25` if the repository
+  warrants it, and state in the document which cutoff you used.
 
 ```bash
 python3 -c "
@@ -156,9 +152,9 @@ print('\n'.join('%-4d %s' % (d['fan_in'].get(p, 0), p) for p in sel))
 "
 ```
 
-`units.txt` is the contract for step 5: it must name exactly the modules that get dispatched, so edit it here
-and not later. Cover everything outside it in one line each, grouped by directory. This budget is the
-difference between a documentation run and an unbounded one; raise it deliberately, not by forgetting it.
+`units.txt` is the contract for step 5: it must name exactly the modules dispatched, so edit it here and not
+later. Cover everything outside it in one line each, grouped by directory. This budget is the difference
+between a documentation run and an unbounded one; raise it deliberately, not by forgetting it.
 
 ### 4. Analyse one scope at a time, from a context packet
 
@@ -226,12 +222,10 @@ query modes are in [`references/context-policy.md`](references/context-policy.md
 
 ### 5. Gate the fragments before verifying
 
-- **Run** the assembler against `units.txt` from step 3. Run it; do not skim the rows yourself and decide they
-  look fine.
+- **Run** the assembler against `units.txt` from step 3 — do not skim the rows and decide they look fine.
 - **Writes** `.docs-build/fragments.csv`.
 - **Read** the exit status **and the warnings**, which do not affect it.
-- **Decide** which units to re-dispatch. A FAILURE means going back to step 4 for the named units, not
-  proceeding.
+- **Decide** which units to re-dispatch. A FAILURE means going back to step 4 for those units, not proceeding.
 
 ```bash
 python3 scripts/assemble.py \
@@ -245,9 +239,8 @@ This gate catches the two ways parallel fan-out fails behind a finished-looking 
 - **A dispatched task returned nothing.** The assembler fails on a unit with no row. Without it, three
   missing modules read as a complete document.
 - **The descriptions are near-identical.** The `constant` warning fires when a field's values barely vary,
-  which usually means the tasks answered the prompt instead of reading the source. **Read the warnings** —
-  they do not set the exit code, and a clean exit with a constant `role` field is a failed extraction wearing
-  a passing grade.
+  which usually means the tasks answered the prompt instead of reading the source. **Read the warnings**: a
+  clean exit with a constant `role` field is a failed extraction wearing a passing grade.
 
 ### 6. Verify every claim
 
@@ -266,20 +259,12 @@ python3 scripts/verify_doc.py --claims .docs-build/claims.jsonl \
 Each claim comes back `verified`, `supported_inference`, `candidate`, `needs_context` or `rejected`, with a
 finding explaining anything that is not the first two.
 
-**The loop, and where it stops.** Group the findings, then:
-
-| Finding | Do this |
-| --- | --- |
-| `needs_context` naming an entity | Fetch it with `query_graph.py --include`, revise **only that fragment**, verify again |
-| `rejected` — the graph has no such edge | Drop the claim. There is nothing to retry |
-| `rejected` — the cited line calls something else | Read the line again; either cite correctly or drop it |
-| `V014` `unsupported` — the call target is computed at run time | Nothing. Do not retry; it will appear in the limitations |
-| `V005` stale evidence | Rerun from step 1. The tree changed under you |
-| `V020` the same finding twice | Stop. Report it unresolved; the loop is not converging |
-| Anything unresolved after two attempts | Leave it `candidate` and let it appear in the limitations |
-
-Revise the affected fragment only. Re-analysing the whole repository because one claim failed wastes the
-budget from step 3 and usually reintroduces claims that already passed.
+**The loop, and where it stops.** Group the findings and act on each per the table in
+[`references/schemas.md`](references/schemas.md#the-verification-loop) — it says which findings are worth a
+retry, which are permanent, and where the loop is declared not to be converging. Two rules hold whatever the
+finding: **revise only the affected fragment** (re-analysing the repository because one claim failed wastes
+the budget from step 3 and reintroduces claims that already passed), and **stop after two attempts** on
+anything unresolved, leaving it `candidate` for the limitations page.
 
 ### 6b. Say what the modules add up to
 
@@ -334,9 +319,8 @@ lines it cites.
 ### 7. Generate the PlantUML class diagram
 
 - **Run** the three commands below in order: build the graph, generate PlantUML, then validate it.
-- **Writes** `.docs-build/class-graph.json`, and into `docs/_diagrams/`: one
-  `diagram-manifest.json` plus a `.puml` file for every view. The repository view is always
-  `full-repository.puml`.
+- **Writes** `.docs-build/class-graph.json`, and into `docs/_diagrams/`: a
+  `diagram-manifest.json` plus a `.puml` per view. The repository view is always `full-repository.puml`.
 - **Read** every `G0xx` finding from the validator.
 - **Decide** which relationship layers and detail level the view needs. PlantUML owns layout.
 
@@ -347,16 +331,13 @@ python3 scripts/build_class_graph.py --index .docs-build/structure.json \
 
 python3 scripts/build_diagrams.py --class-graph .docs-build/class-graph.json \
     --out docs/_diagrams
-```
 
-```bash
 python3 scripts/validate_diagrams.py docs/_diagrams \
     --class-graph .docs-build/class-graph.json
 ```
 
-`class-graph.json` is structural truth; `.puml` is the canonical Diagram as Code
-presentation. Generation uses only the standard library and always writes a diagram for a
-valid graph, including an explicit empty-state one when no class was found.
+`class-graph.json` is structural truth; `.puml` is the canonical Diagram as Code presentation. A valid graph
+always gets a diagram, including an explicit empty-state one when no class was found.
 
 **Past the density threshold you get more than one picture** — read the run's output for how many. A
 `view-spec.json` may choose detail, layers and emphasis; it may **not** add a class, drop one, change what
@@ -424,6 +405,26 @@ the only preset that puts the components, their rationale and the operations on 
 default and opens on structure; `architecture` is denser; `handbook` fits an existing tree and **updates**
 its authored pages rather than generating over them.
 
+### 8b. Check the sentences against the analysis behind them
+
+- **Run** the checker on the rendered model, then review what it queues.
+- **Writes** `.docs-build/prose-report.json`, and **you** write `prose-review.jsonl`.
+- **Read** every `P003` and `P004`; they are promotions, not style.
+- **Decide** the queued blocks. Leaving one undecided is `review_required`, which is honest.
+
+```bash
+python3 scripts/check_prose.py .docs-build/doc.json \
+    --architecture .docs-build/architecture-analysis.json \
+    --flows .docs-build/flow-analysis.json --require-review \
+    --operations .docs-build/operations-analysis.json --out .docs-build/prose-report.json
+```
+
+Every check before this asks whether a statement had evidence; none asks whether the sentence a reader sees
+still says what it said. **A block may not use a stronger relationship verb than its sources carry** — an
+import proves a reference, so it may not be rendered *depends on* — and **a reading must stay a reading**.
+Ranks, ceilings and the review format: [`references/prose-rules.md`](references/prose-rules.md). Pass
+`--review` with your verdicts; a queued block you did not decide is reported as undecided, never as passed.
+
 ### 9. Report
 
 - **Run** the gate, then read what it says about your own run.
@@ -437,7 +438,7 @@ python3 scripts/quality_docs.py --index .docs-build/structure.json \
     --claims .docs-build/claims.verified.jsonl --doc .docs-build/doc.json \
     --architecture .docs-build/architecture-analysis.json \
     --flows .docs-build/flow-analysis.json --flow-report .docs-build/flow-report.json \
-    --operations .docs-build/operations-analysis.json \
+    --operations .docs-build/operations-analysis.json --prose .docs-build/prose-report.json \
     --diagrams docs/_diagrams --out .docs-build/generation-report.json
 ```
 
@@ -475,26 +476,25 @@ calls them.
 | `references/diagram-policy.md` | Step 7, before drawing or reviewing a diagram |
 | `references/presets.md` | Step 8, to choose a preset |
 | `references/rendering.md` | Step 8, before rendering into a project that already has documentation |
+| `references/prose-rules.md` | Step 8b, for the verb ranks, the ceilings and the review format |
 
 ## Side effects
 
 Writes `.docs-build/` in the working directory, and the rendered document under `docs/` (or a path you name).
 Reads the working tree only. Uses `git ls-files` when the target is a git repository so ignored files are
-skipped, and `git rev-parse`/`git status` to record which revision was scanned.
-
-`annotate_import_usage.py` invokes `ruff` when enabled, read-only and with `--no-cache`, so nothing is written
-into the scanned repository. `render_docs.py --check` invokes `sphinx-build` or imports `docutils` when
-present. No network access, no package installation.
+skipped, and `git rev-parse`/`git status` to record which revision was scanned. `annotate_import_usage.py`
+invokes `ruff` when enabled, read-only and with `--no-cache`, so nothing is written into the scanned
+repository. `render_docs.py --check` invokes `sphinx-build` or imports `docutils` when present. No network
+access, no package installation.
 
 ## Conventions
 
 - Reference bundled files by paths relative to this skill folder.
-- Report what was done and what was skipped; never claim success for something that was not verified. A partial
-  result reported honestly is more useful than a complete result that is not true.
-- Report failures with the actual output, not a paraphrase.
-- Confirm before anything destructive or hard to reverse, and before anything outward-facing. Approval for one
-  action does not carry to the next.
-- Look at the target before overwriting or deleting it.
+- Report what was done and what was skipped; never claim success for something that was not verified. A
+  partial result reported honestly beats a complete one that is not true. Report failures with the actual
+  output, not a paraphrase.
+- Confirm before anything destructive, hard to reverse or outward-facing; approval for one action does not
+  carry to the next. Look at the target before overwriting or deleting it.
 - Assume no network access and no package installation.
-- Match the surrounding document's naming, structure, and idioms. Prefer editing what exists over generating a
+- Match the surrounding document's naming, structure and idioms; prefer editing what exists to generating a
   parallel new thing.
