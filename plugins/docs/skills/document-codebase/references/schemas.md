@@ -311,6 +311,119 @@ information the tree already gave. Counting it would let a rename inflate the fi
 empty rationale to every component. It does not change the
 verdict; it is what a maintainer needs to tell "lazy" from "correct, because the layout already matches".
 
+## `flow-analysis.json` — flow_version 1
+
+The traced paths through the repository. Both this file and the operations one below are **best effort**: a
+repository that yields no traceable flow says so and that is a complete answer.
+
+```json
+{
+  "flow_version": 1,
+  "index_hash": "sha256:…",
+  "flows": [
+    {"id": "flow:record-order", "name": "Recording an order", "status": "observed",
+     "trigger": {"kind": "http", "text": "…", "status": "declared",
+                 "evidence": [{"path": "src/api/http.py", "line_start": 10}]},
+     "steps": [
+       {"id": "step:1", "from": "symbol:src/api/http.py:post", "to": "symbol:src/core/service.py:record",
+        "text": "…", "status": "observed", "claim_ids": ["claim:post-calls-record"],
+        "evidence": [{"path": "src/api/http.py", "line_start": 13}]}
+     ],
+     "outcome": {"status": "observed", "text": "…", "evidence": [{"path": "src/core/service.py", "line_start": 14}]},
+     "unresolved": [{"after": "step:1", "reason": "The handler is looked up at run time."}]}
+  ],
+  "absent": {"reason": "No call was verified at its call site."}
+}
+```
+
+`trigger.kind` is one of `http`, `cli`, `schedule`, `event`, `message`, `call`, `unknown`. Statuses are the
+statement vocabulary. `flows` and `absent` are mutually exclusive: exactly one of them says what happened.
+
+**A step is a call `verify_doc.py` verified at its call site, or it is not a step.** Each step names the
+claim behind it, and `validate_flows.py` checks that the claim is a `calls` claim, `verified`, and between
+exactly the two entities the step names — without that last part a step can cite any verified call in the
+repository and inherit its standing. Findings: `F002` missing field, `F003` an entity the index does not
+know, `F004` steps that do not join up, `F005` duplicate id, `F006` a step whose claim is not a verified call
+between its own two ends, `F007` evidence that does not resolve, `F010` a flow with no step, `F011` missing
+evidence, `F012` an unknown status or kind, `F013` `flows` and `absent` disagreeing.
+
+Continuity compares **whole entity ids**, not the files behind them: `a.py:f → service.py:handle` followed by
+`service.py:cleanup → store.py:save` is two real calls passing through one file and a chain that does not
+exist. Every step needs evidence — it is a call site, so it always has a line to cite. Claim rows written
+against another scan are dropped before anything is checked, so a `claims.verified.jsonl` left in
+`.docs-build/` by an earlier run cannot go on authorising hops.
+
+The report records `flow_hashes`, a digest per accepted flow. An `index_hash` says which scan and an id says
+which flow; neither says which *version* was accepted, so editing a validated flow in place would otherwise
+carry it into the diagram under a report that never saw it.
+
+**A flow with a broken step is refused whole**, not trimmed to the part that held: half a traced request,
+rendered as a traced request, is worse than none. Note what this rule costs on ordinary object-oriented
+code — a call through `self.service.record(...)` is not name-bound by an import, so it cannot be read at its
+call site and never becomes a step. `absent` is the common answer, and an honest one.
+
+## `operations-analysis.json` — operations_version 1
+
+How the repository is installed, built, tested, configured, run, deployed, released and watched.
+
+```json
+{
+  "operations_version": 1,
+  "index_hash": "sha256:…",
+  "procedures": [
+    {"id": "op:test", "kind": "test", "name": "Running the tests", "status": "declared",
+     "steps": [{"text": "CI runs the suite on every push.", "status": "declared",
+                "command": "python3 -m pytest",
+                "evidence": [{"path": ".github/workflows/ci.yml", "line_start": 8}]}]}
+  ],
+  "requirements": [
+    {"id": "req:python", "name": "Python", "value": ">=3.9", "status": "declared",
+     "evidence": [{"path": "pyproject.toml", "line_start": 4}]}
+  ]
+}
+```
+
+`kind` is one of `install`, `build`, `test`, `run`, `configure`, `deploy`, `release`, `observe`. Evidence
+resolves against assets as well as source files, because workflows, manifests and configuration are where
+operational truth lives and none of them are modules.
+
+**A `command` must appear, character for character, in the lines it cites** — and so must a requirement
+`value`. This is the operations analogue of reading a call at its call site, and the only claim in the schema
+a parser can settle. A near miss is the case it is for: `pytest -q` where the workflow says `python3 -m
+pytest` runs, does the same job, and is not what this repository does. Findings: `O002` missing field, `O003`
+evidence the index does not hold, `O005` duplicate id, `O006` a quoted command or value that is not there,
+`O007` evidence that does not resolve, `O008` the evidence file changed since the scan so the quote cannot be
+checked, `O010` a procedure with no step, `O011` missing evidence, `O012` an unknown kind or status, `O013`
+`procedures` and `absent` disagreeing.
+
+`O008` is not `O006`. A file that moved on since the scan may now say anything, so matching against today's
+text would prove nothing about the run that wrote the claim. It is an **error**, not advice: a command
+nothing can be checked against is exactly what this validator refuses, and that covers an evidence file that
+has since been deleted. The hash compared is always the **index's** record, never one supplied in the
+evidence — otherwise an analysis quoting a command added after the scan vouches for itself. Prose steps need no command, and a step whose
+status is `unknown` needs nothing to cite: most of a deployment is prose.
+
+## Sequence diagrams — flow diagram manifest_version 1
+
+`build_flow_diagrams.py` writes one `.puml` per flow plus `flow-diagram-manifest.json`. Participants are the
+entities the steps touch, in the order the flow reaches them; every arrow is a step, labelled with the file
+and line the call was read at. The trigger is a note before the first arrow, the outcome and anything
+unresolved are notes after the last.
+
+`--report` takes `validate_flows.py`'s output and skips a flow it refused. Without one the manifest records
+`"validated": false` and `validate_flow_diagrams.py` reports that rather than passing quietly.
+
+`validate_flow_diagrams.py` re-reads the drawing, because a `.puml` is a text file in the repository and an
+arrow added by hand renders exactly like one that came from a verified call. It checks the metadata against
+the flow (every message a step, **in order**, between the entities that step names; the exact note sequence
+the flow owes, derived from the flow rather than merely allowed by it, so deleting a note *and* its metadata
+together is still caught; each lifeline's visible label, since that is what a reader identifies it by) and
+the drawn lines against that metadata. Any line that is not part of the small generated form is a finding —
+a hand-added `title` renders into the picture and matches none of the shapes. The manifest must account for
+every flow, as a drawn view or an explicitly skipped one, and no `.puml` may sit in the directory unnamed by
+it. `flow_hash` catches the other direction: a flow edited after the diagram was drawn, where every other
+check would pass against a flow the picture no longer describes. Findings use the diagram family, `G0xx`.
+
 ## `generation-report.json` — schema_version 1
 
 Written by `quality_docs.py`. It is the only artefact that says **how much of the document was read and how

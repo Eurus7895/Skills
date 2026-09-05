@@ -68,20 +68,18 @@ separately to prove it still is.
 ## Where the intermediate files go
 
 Everything except the finished document is written to **`.docs-build/`** in the working directory:
-`structure.json`, `fragments.jsonl`, `claims.jsonl`, their verified counterparts, `findings.jsonl`,
-`class-graph.json` and `doc.json`. Say so when you finish, and offer to delete it. Nothing in there is meant
-to be committed. The rendered diagrams are the exception: they belong beside the document, under
+`structure.json`, the claims, fragments and analyses with their verified counterparts, `findings.jsonl`,
+`class-graph.json` and `doc.json`. Say so when you finish, and offer to delete it; nothing in there is meant
+to be committed. The rendered diagrams are the exception — they belong beside the document, under
 `docs/_diagrams/`.
 
 ## Steps
 
 Each step below states four things: what to **run**, what it **writes**, what you **read** of that, and what
-you **decide** next. When a step says you do not need to read a script, that is load-bearing — its output is
-the interface, not its source.
-
-Exit codes are uniform across these scripts: `0` fine, `1` a policy the script enforces was not met, `2` bad
-input or a missing dependency, `3` an internal error. **`1` is a verdict and `2`/`3` are breakage** — the
-first tells you the repository or the claims need work, the second that the invocation does.
+you **decide** next. Where a step says you need not read a script, that is load-bearing: its output is the
+interface, not its source. Exit codes are uniform — `0` fine, `1` a policy the script enforces was not met,
+`2` bad input or a missing dependency, `3` an internal error. **`1` is a verdict and `2`/`3` are breakage**:
+the first says the repository or the claims need work, the second that the invocation does.
 
 ### 1. Scan, then validate the index
 
@@ -225,8 +223,7 @@ Three rules hold for every row you write, whatever else you skip:
   JSONL file interleave into corrupt lines, and it surfaces much later as a parse error.
 
 Why each of those matters, how to read a packet and its omission manifest, and the other
-query modes are in [`references/context-policy.md`](references/context-policy.md). Entity
-ids and claim kinds are in [`references/schemas.md`](references/schemas.md).
+query modes are in [`references/context-policy.md`](references/context-policy.md).
 
 ### 5. Gate the fragments before verifying
 
@@ -306,10 +303,34 @@ reader nothing `ls` would not. Step 9 measures exactly that and fails the run fo
 decide where the boundaries actually are: which modules serve one purpose whatever folder they sit in, which
 folder holds two unrelated things, and why each boundary is where it is.
 
-Three rules do most of the work. **A module belongs to one component**, or every later count is ambiguous.
-**A relationship cites a line**, whatever its status, because it is the part that says what breaks what. And
-**a rationale of `unknown` is a real answer** — most boundaries in most repositories have no recorded reason,
-and saying so is worth more than a plausible sentence.
+Three rules do most of the work: **a module belongs to one component**, **a relationship cites a line**
+whatever its status because it is the part that says what breaks what, and **a rationale of `unknown` is a
+real answer** — most boundaries have no recorded reason, and saying so beats a plausible sentence.
+
+### 6c. Trace the flows, and record how the thing is operated
+
+- **Run** both validators once you have written the files; the files themselves are yours to write.
+- **Writes** `.docs-build/flow-analysis.json` and `.docs-build/operations-analysis.json` — **you** write them.
+- **Read** every `F0xx` and `O0xx` finding.
+- **Decide** whether there is a traceable flow at all. Often there is not, and saying so is the answer.
+  Both files are best effort; schemas and codes: [`references/schemas.md`](references/schemas.md).
+
+```bash
+python3 scripts/validate_flows.py .docs-build/flow-analysis.json \
+    --index .docs-build/structure.json --claims .docs-build/claims.verified.jsonl \
+    --out .docs-build/flow-report.json
+
+python3 scripts/validate_operations.py .docs-build/operations-analysis.json \
+    --index .docs-build/structure.json --root .
+```
+
+**A step is a call step 6 verified at its call site, and nothing else** — an import edge is the weaker claim
+that these files reference each other, not that the request passes through here. Steps must join up on the
+same *entity*, because the order is the entire claim. **Expect `absent`**: a call through
+`self.service.record(...)` is not name-bound by an import, so it cannot be read at its call site. Write
+`absent` with a reason rather than something flow-shaped; an empty list saying nothing fails the gate. For
+operations, **quote commands from the file** — a `command` or requirement `value` must appear exactly in the
+lines it cites.
 
 ### 7. Generate the PlantUML class diagram
 
@@ -338,15 +359,24 @@ python3 scripts/validate_diagrams.py docs/_diagrams \
 presentation. Generation uses only the standard library and always writes a diagram for a
 valid graph, including an explicit empty-state one when no class was found.
 
-**Past the density threshold you get more than one picture** — the overview drops to class
-names and the run adds a view per package. Read the run's output for how many were
-produced; the checker holds the set together as well as each view.
-
-A `view-spec.json` may choose the detail level, the visible layers and what to emphasise.
-It may **not** add a class, drop one, change what connects to what, or set its own scope;
-`build_diagrams.py` refuses such a spec before writing anything. The layers, the threshold
-and what the checks guarantee are in
+**Past the density threshold you get more than one picture** — read the run's output for how many. A
+`view-spec.json` may choose detail, layers and emphasis; it may **not** add a class, drop one, change what
+connects to what, or set its own scope, and such a spec is refused before anything is written. The layers,
+the threshold and what the checks guarantee are in
 [`references/diagram-policy.md`](references/diagram-policy.md).
+
+**If step 6c traced a flow, draw it as a sequence too** — generate, then read the drawing back, because a
+`.puml` is a text file and a hand-added arrow renders like a verified one.
+
+```bash
+python3 scripts/build_flow_diagrams.py --flows .docs-build/flow-analysis.json \
+    --report .docs-build/flow-report.json --out docs/_diagrams
+
+python3 scripts/validate_flow_diagrams.py docs/_diagrams --flows .docs-build/flow-analysis.json
+```
+
+Pass `--report` or nothing vouches for the steps drawn, and the validator says so. With nothing traced this
+writes no diagram and exits 1 — the expected outcome, not a failure to work around.
 
 ### 8. Build the document model and render
 
@@ -355,40 +385,38 @@ and what the checks guarantee are in
 - **Read** the page count and the `--check` verdict.
 - **Decide** nothing about markup — the renderer owns it. Decide only whether `--check` genuinely passed.
 
-**Look at `docs/` before you render into it.** This is the step rule 8 is about: the renderer
-writes each page with `"w"` and will replace a hand-written `index.rst` or an existing page of
-the same name without saying so. If anything is already there, list what would be overwritten
-and ask first. `git status` afterwards is not a safety net — by then it has happened.
+**Look at `docs/` before you render into it.** This is the step rule 8 is about: the renderer writes each
+page with `"w"` and will replace a hand-written `index.rst` or a page of the same name without saying so. If
+anything is there, list what would be overwritten and ask first — `git status` afterwards is not a safety
+net, because by then it has happened.
 
 ```bash
 python3 scripts/build_document_model.py --index .docs-build/structure.json \
     --claims .docs-build/claims.verified.jsonl \
     --fragments .docs-build/fragments.verified.jsonl \
-    --analysis .docs-build/module-analysis.jsonl \
+    --analysis .docs-build/module-analysis.jsonl --flows .docs-build/flow-analysis.json \
     --preset onboarding --diagrams docs/_diagrams --out .docs-build/doc.json
 
 python3 scripts/render_docs.py --doc .docs-build/doc.json --out docs \
     --diagrams docs/_diagrams --check
 ```
 
-**`--analysis` is what stops the document reading like an inventory.** A claim can only say
-that one file imports another, so pages built from claims alone say structural things, and
-structural things read as generic however well they are phrased. The statements from step 4
-are what carry purpose, ownership, failure and rationale onto the page. Pass the flag; a run
-that omits it prints why its pages are thin.
+**`--analysis` is what stops the document reading like an inventory.** A claim can only say that one file
+imports another, so pages built from claims alone say structural things, and structural things read as
+generic however well they are phrased. The statements from step 4 carry purpose, ownership, failure and
+rationale onto the page. Pass the flag; a run that omits it prints why its pages are thin. **`--flows`** does
+the same for the flows page: without it that page is an unordered table of verified calls, which cannot say
+what leads to what. `doc.json` contains no markup — **do not write RST, MyST or Sphinx directives
+yourself**; the renderer owns headings, tables, references, escaping and the toctree.
 
-`doc.json` contains no markup. **Do not write RST, MyST or Sphinx directives yourself** —
-the renderer owns headings, tables, references, escaping and the toctree.
-
-**A project with no `conf.py` cannot build what you just wrote.** The run says so when that
-is the case. Add `--write-conf --project "<name>"` to generate one; it is written only when
-the directory has none, and an existing one is never touched. Do not hand-write a `conf.py`
+**A project with no `conf.py` cannot build what you just wrote**, and the run says so when
+that is the case. Add `--write-conf --project "<name>"` to generate one; it is written only
+when the directory has none, and an existing one is never touched. Do not hand-write one
 either — say the flag exists and let the user choose.
 
 **`--check` answers with one of six outcomes, and `unwired` and `skipped` are not passes.**
 Neither fails the run; reporting either as a pass is the failure that distinction exists to
-prevent. The outcomes, the two formats, `--wire-toctree`, `--assume-parser`, and why
-`sphinxcontrib-plantuml` is optional where a parser is not, are in
+prevent. The outcomes, the formats, `--wire-toctree` and `--assume-parser` are in
 [`references/rendering.md`](references/rendering.md) — read it before rendering into a
 project that already has documentation in it.
 
@@ -408,6 +436,8 @@ python3 scripts/quality_docs.py --index .docs-build/structure.json \
     --analysis .docs-build/module-analysis.jsonl --units .docs-build/units.txt \
     --claims .docs-build/claims.verified.jsonl --doc .docs-build/doc.json \
     --architecture .docs-build/architecture-analysis.json \
+    --flows .docs-build/flow-analysis.json --flow-report .docs-build/flow-report.json \
+    --operations .docs-build/operations-analysis.json \
     --diagrams docs/_diagrams --out .docs-build/generation-report.json
 ```
 
@@ -415,45 +445,35 @@ python3 scripts/quality_docs.py --index .docs-build/structure.json \
 counting module pairs, not by comparing names, so renaming every folder does not fool it. `failed` means the
 grouping is the tree; `not_applicable` means there was no partition to compare and is **not** a pass.
 
-**`analysis_mode` is the honest summary of the run**, and it is the one thing no other
-check can produce. Every other stage passes on a document derived entirely from
-`structure.json`, because a claim taken out of the index and checked against the index
-agrees with itself. `derived_only` means fewer than half the modules in the budget carry
-a statement that survived; such a run is never `passed`, however green everything else is.
+**The flow and operations figures are counts, not percentages** — one flow traced and one refused is not
+"50% documented". Naming nothing and giving no reason holds the run back; `absent` with a reason does not.
+Pass `--flow-report` too: a refused flow stays in the analysis, so without it the counts include flows
+nothing validated, and the gate says so.
 
-Modules outside `units.txt` are counted apart and never lower the coverage. Staying
-inside the budget is the plan, not a shortfall.
+**`analysis_mode` is the honest summary of the run**, and no other check can produce it: every other stage
+passes on a document derived entirely from `structure.json`, because a claim taken out of the index and
+checked against the index agrees with itself. `derived_only` means fewer than half the modules in the budget
+carry a statement that survived, and such a run is never `passed` however green everything else is. Modules
+outside `units.txt` are counted apart and never lower the coverage — staying inside the budget is the plan,
+not a shortfall.
 
-Then state, from the artefacts rather than from memory: files scanned and skipped, the
-fan-in cutoff used, `analysis_mode` and the module counts behind it, how many claims were
-verified, how many are candidates or unsupported and why, whether a diagram was generated,
-whether the build check passed or was skipped, and that `.docs-build/` can be deleted.
+Then state, from the artefacts rather than memory: files scanned and skipped, the fan-in cutoff,
+`analysis_mode` and the counts behind it, claims verified, what is candidate or unsupported and why, what was
+traced and what was not, whether a diagram was generated, whether the build check passed or was skipped, and
+that `.docs-build/` can be deleted.
 
 ## Bundled resources
 
-| Path | Load when |
+Every script under `scripts/` is named by the step that runs it, with its exact invocation; run them, you do
+not need to read them. `sphinx_support.py` and `wire_toctree.py` are never called directly — `render_docs.py`
+calls them.
+
+| Reference | Load when |
 | --- | --- |
-| `scripts/scan_repo.py` | Step 1, always. Run it; you do not need to read it |
-| `scripts/validate_index.py` | Step 1, always. Run it; you do not need to read it |
-| `scripts/annotate_import_usage.py` | Step 2, when import usage is wanted |
-| `scripts/derive_claims.py` | Step 4, once — the structural claims you must not hand-write |
-| `scripts/query_graph.py` | Step 4, once per scope |
-| `scripts/validate_analysis.py` | Step 4, after the last statement |
-| `scripts/validate_architecture.py` | Step 6b, after writing the synthesis |
-| `scripts/assemble.py` | Step 5, always — before verifying |
-| `scripts/verify_doc.py` | Step 6, always — before writing anything |
-| `scripts/build_class_graph.py` | Step 7, when diagrams are wanted |
-| `scripts/build_diagrams.py` | Step 7, always |
-| `scripts/validate_diagrams.py` | Step 7, after generation |
-| `scripts/build_document_model.py` | Step 8 |
-| `scripts/render_docs.py` | Step 8 |
-| `scripts/sphinx_support.py` | Never directly — `render_docs.py --check` uses it |
-| `scripts/wire_toctree.py` | Never directly — `render_docs.py --wire-toctree` uses it |
-| `scripts/quality_docs.py` | Step 9, always — it is the only stage that measures the run |
-| `references/schemas.md` | Step 4, before emitting the first claim |
-| `references/presets.md` | Step 8, to choose a preset |
-| `references/diagram-policy.md` | Step 7, before drawing or reviewing a diagram |
+| `references/schemas.md` | Step 4, before emitting the first claim; every schema and finding code |
 | `references/context-policy.md` | Step 4, for packets, partitions and the append discipline |
+| `references/diagram-policy.md` | Step 7, before drawing or reviewing a diagram |
+| `references/presets.md` | Step 8, to choose a preset |
 | `references/rendering.md` | Step 8, before rendering into a project that already has documentation |
 
 ## Side effects

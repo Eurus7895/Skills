@@ -51,6 +51,7 @@ Standard library only. Reads its inputs; writes only --out.
 import argparse
 import json
 import os
+import re
 import sys
 
 FORMAT_VERSION = 2
@@ -508,13 +509,101 @@ def modules_page(index, fragments, claims_by_id, analysis, kinds):
     return blocks
 
 
-def flows_page(index, claims_by_id):
+def entity_label(entity):
+    """`symbol:src/pipeline/entry.py:main` -> `entry.main`, for a table a person reads."""
+    kind, _, rest = str(entity).partition(":")
+    if kind == "module":
+        return rest
+    path, _, name = rest.rpartition(":")
+    stem = os.path.splitext(os.path.basename(path))[0]
+    return "%s.%s" % (stem, name) if stem else name
+
+
+# How a flow's prose is introduced, by the status behind it. Same rule as BASIS above:
+# an `inferred` reading gets its hedge in the sentence, not in a parenthesis a reader
+# skims past. Without this the page said "Starts when: X" whatever the analysis recorded,
+# and an uncertain trigger read exactly like an observed one.
+FLOW_HEDGE = {
+    "declared": "%s",
+    "observed": "%s",
+    "inferred": "Inferred, not observed: %s",
+    "unknown": "Not recorded in the repository: %s",
+}
+
+
+def hedged(text, status):
+    return FLOW_HEDGE.get(status, FLOW_HEDGE["unknown"]) % str(text).strip()
+
+
+def traced_flows_page(flows):
+    """The flows a flow analysis traced, one section each.
+
+    Preferred over the call table below whenever a flow analysis exists, because the
+    ordering is the part a reader wants and a table of unordered calls does not have it.
+    Only what the analysis holds is rendered: this function adds no hop and drops none.
+    """
+    blocks = []
+    absent = flows.get("absent")
+    if isinstance(absent, dict) and absent.get("reason"):
+        return [prose("block:flows-absent", str(absent["reason"]).strip())]
+    for flow in flows.get("flows", ()) or ():
+        if not isinstance(flow, dict) or not flow.get("id"):
+            continue
+        stem = re.sub(r"[^a-z0-9]+", "-", str(flow["id"]).lower()).strip("-")
+        blocks.append(subheading("block:flow-%s" % stem,
+                                 str(flow.get("name") or flow["id"])))
+        trigger = flow.get("trigger") or {}
+        if isinstance(trigger, dict) and trigger.get("text"):
+            where = [cite(e["path"], e["line_start"])
+                     for e in trigger.get("evidence", ()) or ()
+                     if isinstance(e, dict) and e.get("path") and e.get("line_start")]
+            blocks.append(prose(
+                "block:flow-%s-trigger" % stem,
+                "Starts when: %s%s" % (hedged(trigger["text"], trigger.get("status")),
+                                       " (%s)" % ", ".join(where) if where else "")))
+        rows = []
+        for step in flow.get("steps", ()) or ():
+            if not isinstance(step, dict):
+                continue
+            where = next((cite(e["path"], e["line_start"])
+                          for e in step.get("evidence", ()) or ()
+                          if isinstance(e, dict) and e.get("path")
+                          and e.get("line_start")), "-")
+            rows.append((entity_label(step.get("from")), entity_label(step.get("to")),
+                         hedged(step.get("text", ""), step.get("status")), where))
+        if rows:
+            blocks.append(table("block:flow-%s-steps" % stem,
+                                ("From", "Calls", "What happens", "Read at"), rows))
+        outcome = flow.get("outcome") or {}
+        if isinstance(outcome, dict) and outcome.get("text"):
+            blocks.append(prose("block:flow-%s-outcome" % stem,
+                                "Ends with: %s"
+                                % hedged(outcome["text"], outcome.get("status"))))
+        unresolved = [str(u["reason"]).strip() for u in flow.get("unresolved", ()) or ()
+                      if isinstance(u, dict) and u.get("reason")]
+        if unresolved:
+            # Where the trace stopped, on the page rather than in a report nobody opens.
+            # A chain that quietly ends reads as a chain that ended in the code.
+            blocks.append(prose(
+                "block:flow-%s-unresolved" % stem,
+                "The trace does not continue past this point: %s"
+                % " ".join(unresolved)))
+    if not blocks:
+        return [prose("block:flows-none",
+                      "The flow analysis names no flow and gives no reason, so nothing "
+                      "is described here.")]
+    return blocks
+
+
+def flows_page(index, claims_by_id, flows=None):
     """Call chains, built only from calls that were verified at their call site.
 
     An import edge would give a much fuller-looking picture and would be a different,
     weaker claim. A flow assembled from imports says "these files reference each other",
     which is not what a reader takes "the request passes through here" to mean.
     """
+    if flows:
+        return traced_flows_page(flows)
     calls = [c for c in claims_by_id.values()
              if c.get("kind") == "calls" and c.get("status") == "verified"
              and isinstance(c.get("subject"), str) and isinstance(c.get("object"), str)]
@@ -679,17 +768,18 @@ def limitations_page(index, fragments, claims, analysis):
 
 
 BUILDERS = {
-    "overview": lambda ix, frags, claims, by_id, an, kinds: overview_page(ix, frags, by_id),
-    "entry-points": lambda ix, frags, claims, by_id, an, kinds: entry_points_page(ix),
-    "architecture": lambda ix, frags, claims, by_id, an, kinds: architecture_page(
+    "overview": lambda ix, frags, claims, by_id, an, kinds, extra: overview_page(ix, frags, by_id),
+    "entry-points": lambda ix, frags, claims, by_id, an, kinds, extra: entry_points_page(ix),
+    "architecture": lambda ix, frags, claims, by_id, an, kinds, extra: architecture_page(
         ix, by_id, an, kinds),
-    "dependencies": lambda ix, frags, claims, by_id, an, kinds: dependencies_page(ix),
-    "modules": lambda ix, frags, claims, by_id, an, kinds: modules_page(
+    "dependencies": lambda ix, frags, claims, by_id, an, kinds, extra: dependencies_page(ix),
+    "modules": lambda ix, frags, claims, by_id, an, kinds, extra: modules_page(
         ix, frags, by_id, an, kinds),
-    "flows": lambda ix, frags, claims, by_id, an, kinds: flows_page(ix, by_id),
-    "navigation": lambda ix, frags, claims, by_id, an, kinds: navigation_page(ix),
-    "class-views": lambda ix, frags, claims, by_id, an, kinds: class_views_page(ix),
-    "limitations": lambda ix, frags, claims, by_id, an, kinds: limitations_page(
+    "flows": lambda ix, frags, claims, by_id, an, kinds, extra: flows_page(
+        ix, by_id, extra.get("flows")),
+    "navigation": lambda ix, frags, claims, by_id, an, kinds, extra: navigation_page(ix),
+    "class-views": lambda ix, frags, claims, by_id, an, kinds, extra: class_views_page(ix),
+    "limitations": lambda ix, frags, claims, by_id, an, kinds, extra: limitations_page(
         ix, frags, claims, an),
 }
 
@@ -720,9 +810,14 @@ def section_coverage(preset, analysis, fragments):
     return out
 
 
-def build(index, fragments, claims, preset, diagrams=None, analysis=None):
+def build(index, fragments, claims, preset, diagrams=None, analysis=None, extra=None):
     by_id = {c.get("id"): c for c in claims}
     analysis = analysis if analysis is not None else Analysis()
+    # Optional material a page may use if it exists: the traced flows today, the
+    # operations analysis when C8's preset has a page to put it on. Passed as one
+    # mapping rather than a parameter each, so adding the next one is not another
+    # signature change in ten builders.
+    extra = extra or {}
     pages, authored = [], []
     for order, (page_id, title, mandatory, builder) in enumerate(PRESETS[preset], 1):
         if builder is None:
@@ -733,7 +828,7 @@ def build(index, fragments, claims, preset, diagrams=None, analysis=None):
                              "mandatory": mandatory})
             continue
         blocks = BUILDERS[builder](index, fragments, claims, by_id, analysis,
-                                   covers_of(preset, builder))
+                                   covers_of(preset, builder), extra)
         blocks.extend(diagram_blocks(diagrams, page_id))
         pages.append({"id": page_id, "title": title, "order": order,
                       "mandatory": mandatory, "blocks": blocks,
@@ -863,6 +958,9 @@ def main():
     parser.add_argument("--analysis", metavar="PATH",
                         help="module-analysis.jsonl; without it the pages carry only "
                              "what the graph can prove, which is an inventory")
+    parser.add_argument("--flows", metavar="PATH",
+                        help="flow-analysis.json; the flows page renders the traced "
+                             "chains instead of an unordered table of verified calls")
     parser.add_argument("--preset", default="onboarding", choices=sorted(PRESETS))
     parser.add_argument("--diagrams", metavar="DIR",
                         help="rendered diagram directory; pages reference what is there "
@@ -923,6 +1021,26 @@ def main():
         sys.stderr.write("      revise or drop them, then rerun verify_doc.py\n")
         return 2
 
+    extra = {}
+    if args.flows:
+        try:
+            with open(args.flows, encoding="utf-8") as fh:
+                flows = json.load(fh)
+        except (OSError, ValueError) as exc:
+            sys.stderr.write("FAIL  cannot read %s: %s\n" % (args.flows, exc))
+            return 2
+        if not isinstance(flows, dict):
+            sys.stderr.write("FAIL  %s does not contain a JSON object\n" % args.flows)
+            return 2
+        stated = flows.get("index_hash")
+        if stated != index.get("index_hash"):
+            # A flow file left from an earlier run names real files and renders fine.
+            # The identity is the only thing that tells it apart from today's.
+            sys.stderr.write("FAIL  %s was written against %s, the index is %s\n"
+                             % (args.flows, stated, index.get("index_hash")))
+            return 2
+        extra["flows"] = flows
+
     diagrams = find_diagrams(args.diagrams,
                              [page_id for page_id, _, _, _ in PRESETS[args.preset]])
     if args.diagrams and not diagrams:
@@ -930,7 +1048,7 @@ def main():
         # has no picture in it.
         sys.stderr.write("WARN  %s holds no generated PlantUML diagram; the pages will "
                          "have no diagram\n" % args.diagrams)
-    doc = build(index, fragments, claims, args.preset, diagrams, analysis)
+    doc = build(index, fragments, claims, args.preset, diagrams, analysis, extra)
     problems = validate(doc)
     if problems:
         for problem in problems:

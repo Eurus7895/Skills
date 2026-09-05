@@ -321,6 +321,33 @@ from nothing else.
 the sequence diagram is validated against the flow the way class diagrams are validated
 against the class graph.
 
+**Done.** Four notes for whoever reads this next:
+
+- **The "best-effort" caveat is much larger than it looks, and it is the honest finding of
+  this step.** `verify_doc.py` verifies a call when the cited line holds a call by that
+  name *and* the name was bound by an import from the callee's file. Ordinary
+  object-oriented code does not satisfy that: `self.service.record(...)` reaches its
+  target through an instance attribute, and no import binds `record`. So on most real
+  repositories there are no verified calls and therefore no steps, and `absent` is the
+  correct output. The alternative — assembling chains from import edges — is the exact
+  substitution this plan exists to prevent, so the rule stands and the caveat is stated on
+  the page instead. `tests/contracts/flow-repo` exists because the layered fixture cannot
+  produce a single traceable hop.
+- **Binding a citation to its subject is the check that carries the weight**, in both new
+  validators. A step that names any verified call inherits its standing without being that
+  call; the same hole was found in C6's `statement_ids` during review. Worth checking for
+  wherever an id crosses between two files.
+- **Order is the claim.** Every hop of a shuffled chain validates individually, so
+  continuity (`F004`) and message order in the diagram are separate checks from evidence.
+- The operations analogue of "read at the call site" is the literal quote: a `command`
+  must appear character for character in the lines it cites. `O008` — the file changed
+  since the scan — has to be kept apart from `O006`, or a stale tree produces confident
+  false failures.
+
+The operations *page* is not here; C8's outside-in preset is where it lands. C7 produced
+the artefact, the validator and the gate counters, and the flows page now renders traced
+chains via `build_document_model.py --flows`.
+
 ### C8. Outside-in documentation model
 
 `doc.json` v2 with `covers` and `analysis_ids` per page, checked in both directions: every
