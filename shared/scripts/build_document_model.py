@@ -248,6 +248,17 @@ def subheading(block_id, text):
             "claim_refs": [], "analysis_refs": []}
 
 
+def absence(block_id, text):
+    """Prose that exists to say there is nothing here, and why.
+
+    Marked rather than merely written, because the check below cannot tell a page that
+    reports an absence from a page whose builder quietly ran out of things to say --
+    and the first is an answer while the second is a defect. Renders as ordinary prose.
+    """
+    return {"id": block_id, "type": "prose", "text": text, "absence": True,
+            "claim_refs": [], "analysis_refs": []}
+
+
 class Analysis(object):
     """The per-module reading, indexed by the two questions the pages ask of it.
 
@@ -451,6 +462,11 @@ def overview_page(index, fragments, claims_by_id):
              for f in top],
             {c for f in top for c in f.get("claim_ids", ())
              if claims_by_id.get(c, {}).get("status") in PROSE_STATUSES}))
+    else:
+        blocks.append(absence(
+            "block:overview-none",
+            "No module description survived verification, so this page can say what was "
+            "scanned and not what any of it is for."))
     return blocks
 
 
@@ -491,8 +507,10 @@ def architecture_page(index, claims_by_id, analysis, kinds):
         blocks.append(table("block:architecture-edges",
                             ("From", "Imports", "At"), rows, refs))
     else:
-        blocks.append(prose("block:architecture-flat",
-                            "No import crosses a directory boundary in this repository."))
+        blocks.append(absence(
+            "block:architecture-flat",
+            "No import crosses a directory boundary in this repository, so there is no "
+            "cross-boundary structure to describe here."))
 
     # The table above says which modules reach into which. What that reaching is for,
     # and why the boundary sits where it does, is not in the graph and has to come from
@@ -539,7 +557,7 @@ def modules_page(index, fragments, claims_by_id, analysis, kinds):
             table("block:modules", ("Path", "Imported by", "Basis", "Role"), rows, refs),
         ]
     else:
-        blocks = [prose("block:modules-none",
+        blocks = [absence("block:modules-none",
                         "No module description survived verification, so there is no "
                         "index of modules here. Any reading that did survive is below.")]
     # Always, and not only when the table has rows. The fragment table and the analysis
@@ -587,7 +605,7 @@ def traced_flows_page(flows):
     blocks = []
     absent = flows.get("absent")
     if isinstance(absent, dict) and absent.get("reason"):
-        return [prose("block:flows-absent", str(absent["reason"]).strip())]
+        return [absence("block:flows-absent", str(absent["reason"]).strip())]
     for flow in flows.get("flows", ()) or ():
         if not isinstance(flow, dict) or not flow.get("id"):
             continue
@@ -631,7 +649,7 @@ def traced_flows_page(flows):
                 "The trace does not continue past this point: %s"
                 % " ".join(unresolved)))
     if not blocks:
-        return [prose("block:flows-none",
+        return [absence("block:flows-none",
                       "The flow analysis names no flow and gives no reason, so nothing "
                       "is described here.")]
     return blocks
@@ -650,7 +668,7 @@ def flows_page(index, claims_by_id, flows=None):
              if c.get("kind") == "calls" and c.get("status") == "verified"
              and isinstance(c.get("subject"), str) and isinstance(c.get("object"), str)]
     if not calls:
-        return [prose("block:flows-none",
+        return [absence("block:flows-none",
                       "No call was verified at its call site, so no flow is described "
                       "here. Import relationships appear under Architecture; they show "
                       "which modules reference each other, not what calls what.")]
@@ -673,12 +691,17 @@ def flows_page(index, claims_by_id, flows=None):
     ]
 
 
-def product_overview_page(index):
+def product_overview_page(index, fragments, claims_by_id):
     """What the repository is, before any of its internals.
 
     The outside-in preset opens here rather than on the dependency graph, because the
-    first question a reader has is not "what imports what" but "what is this". Only what
-    the scan can support: the languages, the revision, and the ways in.
+    first question a reader has is not "what imports what" but "what is this".
+
+    The first version of this page took only the index, and on a real repository it
+    rendered two sentences: a file count and a list of entry points. Both true, neither
+    an answer. What makes an overview an overview is the busiest modules with what they
+    are *for*, and that comes from the fragments -- so this reads them, as the onboarding
+    overview always did.
     """
     coverage = index.get("coverage", {})
     languages = ", ".join("%s (%d)" % (lang, count) for lang, count
@@ -694,13 +717,37 @@ def product_overview_page(index):
                        source.get("revision") or "an untracked working tree"))]
     entries = index.get("entry_points", ())
     if entries:
-        blocks.append(prose("block:product-ways-in",
-                            "The repository is entered through %s."
-                            % ", ".join(e["path"] for e in entries[:5])))
+        blocks.append(prose(
+            "block:product-ways-in",
+            "The scanner counts %d file(s) as a way in -- nothing imports them and each "
+            "carries a main guard or a launcher name. The first few are %s. On a "
+            "repository that is mostly scripts this rule matches broadly, so treat it "
+            "as a list of candidates rather than the supported entry points."
+            % (len(entries), ", ".join(e["path"] for e in entries[:5]))))
     else:
         blocks.append(prose("block:product-ways-in",
                             "Nothing in this repository is an entry point the scanner "
                             "recognises: it is read as a library, called from outside."))
+
+    # The busiest modules with what they are for. Without this the page is a file count.
+    fan_in = index.get("fan_in", {})
+    ranked = sorted(fragments, key=lambda f: -fan_in.get(f.get("source", ""), 0))
+    top = [f for f in ranked if f.get("status") in PROSE_STATUSES][:5]
+    if top:
+        blocks.append(table(
+            "block:product-key-modules",
+            ("Module", "Depended on by", "Basis", "What it is for"),
+            [(f["source"], str(fan_in.get(f["source"], 0)),
+              "verified" if f["status"] == "verified" else "inferred",
+              f.get("role", ""))
+             for f in top],
+            {c for f in top for c in f.get("claim_ids", ())
+             if claims_by_id.get(c, {}).get("status") in PROSE_STATUSES}))
+    else:
+        blocks.append(absence(
+            "block:product-none",
+            "No module description survived verification, so this page can say what was "
+            "scanned and not what any of it is for."))
     return blocks
 
 
@@ -712,12 +759,12 @@ def procedure_blocks(prefix, operations, kinds):
     already running it does.
     """
     if operations is None:
-        return [prose("block:%s-absent" % prefix,
+        return [absence("block:%s-absent" % prefix,
                       "No operations analysis was supplied for this run, so nothing "
                       "here describes how the repository is built or run.")]
     absent = operations.get("absent")
     if isinstance(absent, dict) and absent.get("reason"):
-        return [prose("block:%s-none" % prefix, str(absent["reason"]).strip())]
+        return [absence("block:%s-none" % prefix, str(absent["reason"]).strip())]
     blocks = []
     for procedure in operations.get("procedures", ()) or ():
         if not isinstance(procedure, dict) or procedure.get("kind") not in kinds:
@@ -746,7 +793,7 @@ def getting_started_page(operations):
     blocks = procedure_blocks("getting-started", operations,
                               ("install", "build", "test", "run"))
     if not blocks:
-        blocks = [prose("block:getting-started-none",
+        blocks = [absence("block:getting-started-none",
                         "The operations analysis records nothing about installing, "
                         "building, testing or running this repository.")]
     requirements = (operations or {}).get("requirements") or ()
@@ -766,7 +813,7 @@ def operations_page(operations):
     blocks = procedure_blocks("operations", operations,
                               ("configure", "deploy", "release", "observe"))
     if not blocks:
-        return [prose("block:operations-none",
+        return [absence("block:operations-none",
                       "The operations analysis records nothing about configuring, "
                       "deploying, releasing or watching this repository.")]
     return blocks
@@ -779,7 +826,7 @@ def components_page(architecture, analysis, kinds):
     nobody -- Detector B judged it and the document went on describing the import graph.
     """
     if architecture is None:
-        blocks = [prose("block:components-absent",
+        blocks = [absence("block:components-absent",
                         "No architecture analysis was supplied for this run, so the "
                         "modules are not grouped into components here.")]
         return blocks + statement_blocks("components", analysis, kinds)
@@ -787,7 +834,7 @@ def components_page(architecture, analysis, kinds):
     components = [c for c in architecture.get("components", ()) or ()
                   if isinstance(c, dict)]
     if not components:
-        blocks.append(prose("block:components-none",
+        blocks.append(absence("block:components-none",
                             "The architecture analysis names no component."))
     for component in components:
         stem = re.sub(r"[^a-z0-9]+", "-", str(component.get("id", "")).lower()).strip("-")
@@ -854,7 +901,16 @@ def rationale_page(architecture, analysis, kinds):
     if silent:
         blocks.append(table("block:rationale-unknown",
                             ("Component", "The question nobody answered"), silent))
-    blocks.extend(statement_blocks("rationale", analysis, kinds))
+    statements = statement_blocks("rationale", analysis, kinds)
+    blocks.extend(statements)
+    if not recorded and not silent and not statements:
+        blocks.append(absence(
+            "block:rationale-none",
+            "Neither the architecture analysis nor the module analysis records a reason "
+            "for any boundary in this repository --%s."
+            % ("no architecture analysis was supplied for this run"
+               if architecture is None else
+               "the components carry no rationale, recorded or unknown")))
     return blocks
 
 
@@ -891,7 +947,7 @@ def navigation_page(index):
 def class_views_page(index):
     """The inheritance forest, for the files where class detail was extracted."""
     if not index.get("coverage", {}).get("detail_requested"):
-        return [prose("block:class-views-none",
+        return [absence("block:class-views-none",
                       "The scan did not extract class detail, so no inheritance is "
                       "described here. Rerun the scanner with --detail.")]
 
@@ -906,7 +962,7 @@ def class_views_page(index):
                           "%s (not resolved to a file in this repository)" % base["name"])
                 rows.append((cls["name"], target, cite(record["path"], cls["line"])))
     if not rows:
-        return [prose("block:class-views-none",
+        return [absence("block:class-views-none",
                       "Class detail was extracted, but no class in this repository "
                       "inherits from another.")]
     return [
@@ -1005,7 +1061,7 @@ BUILDERS = {
     "flows": lambda ix, frags, claims, by_id, an, kinds, extra: flows_page(
         ix, by_id, extra.get("flows")),
     "product-overview": lambda ix, frags, claims, by_id, an, kinds, extra:
-        product_overview_page(ix),
+        product_overview_page(ix, frags, by_id),
     "getting-started": lambda ix, frags, claims, by_id, an, kinds, extra:
         getting_started_page(extra.get("operations")),
     "operations": lambda ix, frags, claims, by_id, an, kinds, extra:
@@ -1176,16 +1232,34 @@ def validate(doc):
             problems.append("statement %r (%s) is covered by page %r but appears on no "
                             "page" % (sid, kind, home[0]))
 
-    # A mandatory page that rendered nothing is a heading in a toctree. Whatever the
-    # reason -- an artefact not supplied, a builder that returned early -- the honest
-    # output is a page saying so, and every builder here does; a page with no block at
-    # all means one of them stopped saying anything.
+    # A mandatory page has to cite something, or say why it cannot. Checking only that
+    # it emitted *a block* was too weak: the first outside-in overview passed with two
+    # uncited sentences -- a file count and a list of entry points -- which is not an
+    # answer to "what is this" and is exactly the generic output this plan exists to
+    # stop. An `absence` block is the honest alternative and is marked as one, because
+    # nothing else distinguishes a page reporting there is nothing from a page whose
+    # builder quietly ran out of things to say.
     builders = {page_id: builder for page_id, _, _, builder in PRESETS[doc["preset"]]}
     mandatory_ids = {page_id for page_id, _, m, _ in PRESETS[doc["preset"]] if m}
     for page in doc["pages"]:
+        if page["id"] not in mandatory_ids:
+            continue
         content = [b for b in page["blocks"] if b["type"] not in ("ref", "subheading")]
-        if not content and page["id"] in mandatory_ids:
+        # Three ways a page earns its place: it cites something, it renders structured
+        # material an input actually holds, or it says what is missing. Requiring a
+        # citation alone was wrong -- the entry points, the dependency ranking and the
+        # operations procedures are real content drawn from the index and the analyses,
+        # and none of them is a claim. What is left over is the case this catches: a
+        # page of bare assertions with nothing behind them and no admission of it.
+        substantive = any(b["type"] in ("table", "plantuml") or b.get("claim_refs")
+                          or b.get("analysis_refs") or b.get("absence")
+                          for b in page["blocks"])
+        if not content:
             problems.append("page %r is required by preset %r and has nothing to say"
+                            % (page["id"], doc["preset"]))
+        elif not substantive:
+            problems.append("page %r is required by preset %r and carries only prose "
+                            "that cites nothing -- say what is missing instead"
                             % (page["id"], doc["preset"]))
 
     # Every required topic has a page, and a page a reader would look on for it.

@@ -377,6 +377,28 @@ denominator per required section rather than one figure for the tree.
   optional artefacts arrived in two commits; a fourth would have been a fourth signature
   change across ten lambdas.
 
+**Corrected after a real run.** Pointed at this repository, the outside-in overview
+rendered two sentences — a file count and a list of entry points — and passed, because
+the rule as first written caught an *empty* page rather than a thin one. Three fixes:
+the overview reads the fragments and carries the busiest modules with what they are for,
+as the onboarding one always did; a page must now cite something, render structured
+material, or carry a block explicitly marked as an **absence**; and every "nothing here"
+block in every builder is marked, since nothing else distinguishes a page reporting an
+absence from a builder that quietly ran out of things to say. Two pages failed the
+tightened rule immediately — `rationale` with no architecture analysis, and `architecture`
+on a repository whose imports cross no directory — which is the rule working.
+
+**Two findings for A8b, not fixed here because both are policy:**
+
+- **Fan-in ranks the fixtures above the product.** On this repository the top five by
+  fan-in are `tests/contracts/` and `fixtures/` files, because the pipeline's own scripts
+  are standalone CLIs invoked by subprocess and import nothing from each other. Step 3
+  picks scope by fan-in, so on a repository of scripts it selects the test data. The
+  overview is honest about what the graph shows; the graph is the wrong instrument here.
+- **The entry-point heuristic matches 50 of 104 files** for the same reason. The page now
+  says so and calls them candidates rather than the ways in, which is a caption fix, not
+  a heuristic fix.
+
 `conventions` is in the preset and deliberately unfilled — a team's conventions are not
 in a dependency graph. It is named so the skill updates it and the report can say it was
 not generated, exactly as `handbook` treats its authored pages.

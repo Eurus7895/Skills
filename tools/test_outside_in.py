@@ -252,6 +252,30 @@ def main():
             problems = model.validate(rebuilt)
             check("a mandatory page with nothing to say fails the build",
                   any("nothing to say" in p for p in problems), repr(problems)[:400])
+
+            # The rule that only caught *empty* let the first outside-in overview
+            # through: two uncited sentences, a file count and a list of entry points,
+            # which is not an answer to "what is this".
+            model.BUILDERS["operations"] = \
+                lambda ix, frags, claims, by_id, an, kinds, extra: [
+                    model.prose("block:operations-bare", "Operations are handled by the "
+                                                         "usual deployment process.")]
+            rebuilt = model.build(index_doc, [], [], "outside-in", None, model.Analysis(),
+                                  {})
+            problems = model.validate(rebuilt)
+            check("a mandatory page of uncited prose fails too",
+                  any("cites nothing" in p for p in problems), repr(problems)[:400])
+
+            # ...and the honest alternative is to say what is missing, marked as such.
+            model.BUILDERS["operations"] = \
+                lambda ix, frags, claims, by_id, an, kinds, extra: [
+                    model.absence("block:operations-bare", "No operations analysis was "
+                                                           "supplied for this run.")]
+            rebuilt = model.build(index_doc, [], [], "outside-in", None, model.Analysis(),
+                                  {})
+            check("while a page that says what is missing passes",
+                  not any("cites nothing" in p for p in model.validate(rebuilt)),
+                  repr(model.validate(rebuilt))[:400])
         finally:
             model.BUILDERS["operations"] = original_builder
 

@@ -64,9 +64,11 @@ build and say the analysis was not supplied — a visibly thinner document, neve
 - **A required topic must live on a page a reader would look on for it.** `interaction` belongs to
   `components` and `rationale` to `rationale`; a preset that homed either on the module reference would
   satisfy the coverage check while filing the system's shape under a list of files, and is rejected.
-- **A mandatory page must have something to say.** Every builder emits an explicit "nothing here, and why"
-  block rather than returning empty, so a page with no content block at all means one of them stopped
-  saying anything — that fails the build rather than shipping a heading in a toctree.
+- **A mandatory page must have something to say.** It has to cite a claim or statement, render structured
+  material an input actually holds, or carry a block marked as an *absence* — "nothing here, and why". Bare
+  prose satisfies none of those and fails the build. The first version of this preset's overview passed a
+  weaker version of the rule with two uncited sentences, a file count and a list of entry points, which is
+  not an answer to "what is this"; requiring the marker is what closed that.
 
 ## `handbook`
 
