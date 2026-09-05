@@ -37,6 +37,37 @@ inventory, and adds a fan-in ranking and the inheritance forest.
 **`architecture` has no module reference on purpose.** A reader who already knows the domain wants the shape,
 not the inventory; someone who wants a file-by-file list should generate `onboarding` instead.
 
+## `outside-in`
+
+What the thing is, then how to run it, then how it is built, then the inventory. Every other preset here
+opens on structure — the dependency graph, the entry points — which answers the question a reader has
+fourth. This is also the only preset that consumes the architecture and operations analyses, so it is the
+one to use when steps 6b and 6c were done.
+
+| Page | Contains | Mandatory |
+| --- | --- | --- |
+| `overview` | What was scanned, in what languages, at what revision, and the ways in | yes |
+| `getting-started` | Install, build, test and run procedures with their quoted commands, plus declared requirements | yes |
+| `conventions` | **Named, never written** — a team's conventions are not in a dependency graph | no |
+| `architecture` | Import edges that cross a directory boundary, each with the line that proves it | yes |
+| `components` | The components the architecture analysis names, what each holds, and what crosses between them | yes |
+| `rationale` | Why each boundary is where it is, and the ones nobody recorded a reason for | yes |
+| `flows` | The traced chains, or the stated reason there are none | yes |
+| `operations` | Configure, deploy, release and observe procedures | yes |
+| `reference` | One row per module whose description survived verification | yes |
+
+Pass `--architecture` and `--operations` alongside `--analysis` and `--flows`. Without them the pages still
+build and say the analysis was not supplied — a visibly thinner document, never a silently thinner one.
+
+**Two rules hold this preset together**, and both are checked before `doc.json` is written:
+
+- **A required topic must live on a page a reader would look on for it.** `interaction` belongs to
+  `components` and `rationale` to `rationale`; a preset that homed either on the module reference would
+  satisfy the coverage check while filing the system's shape under a list of files, and is rejected.
+- **A mandatory page must have something to say.** Every builder emits an explicit "nothing here, and why"
+  block rather than returning empty, so a page with no content block at all means one of them stopped
+  saying anything — that fails the build rather than shipping a heading in a toctree.
+
 ## `handbook`
 
 The layout a delivered manual usually has: `getting_started/`, `architecture/`, `usage/`, `development/`,

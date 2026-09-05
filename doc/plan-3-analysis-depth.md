@@ -360,6 +360,27 @@ and MyST rendering do not change.
 covering statement fails, the existing presets still render, and coverage reports a
 denominator per required section rather than one figure for the tree.
 
+**Done.** Three notes:
+
+- **`architecture-analysis.json` had no reader.** C6 built it, `validate_architecture.py`
+  checked it and Detector B judged whether it was a rename — and then the document went
+  on describing the import graph, because nothing wired the synthesis into
+  `build_document_model.py`. The same was true of `operations-analysis.json` after C7.
+  Both were validated artefacts nobody rendered. Worth checking, for any artefact this
+  plan adds, that something downstream actually consumes it; validation is not use.
+- The two rules are properties of a *preset*, not of a document, so the only way to
+  exercise them is to construct a bad preset. The tests patch `PRESET_COVERS` and
+  `BUILDERS` in process and call `validate` directly. A preset that homed `interaction`
+  on the module reference would otherwise satisfy every coverage check while filing the
+  system's shape under a list of files.
+- Builders now take an `extra` mapping rather than a positional parameter each. Three
+  optional artefacts arrived in two commits; a fourth would have been a fourth signature
+  change across ten lambdas.
+
+`conventions` is in the preset and deliberately unfilled — a team's conventions are not
+in a dependency graph. It is named so the skill updates it and the report can say it was
+not generated, exactly as `handbook` treats its authored pages.
+
 ### C8b. The prose may not say more than the analysis
 
 Everything up to here checks that a statement had evidence. Nothing checks that the

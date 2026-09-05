@@ -69,9 +69,8 @@ separately to prove it still is.
 
 Everything except the finished document is written to **`.docs-build/`** in the working directory:
 `structure.json`, the claims, fragments and analyses with their verified counterparts, `findings.jsonl`,
-`class-graph.json` and `doc.json`. Say so when you finish, and offer to delete it; nothing in there is meant
-to be committed. The rendered diagrams are the exception — they belong beside the document, under
-`docs/_diagrams/`.
+`class-graph.json` and `doc.json`. Say so when you finish, and offer to delete it; nothing in there is meant to
+be committed. The rendered diagrams are the exception — they belong beside the document, in `docs/_diagrams/`.
 
 ## Steps
 
@@ -299,9 +298,9 @@ python3 scripts/validate_architecture.py .docs-build/architecture-analysis.json 
 
 **The easy way to produce this file is to read the directory listing and rename it** — `src/api/` becomes
 "API layer", `src/core/` becomes "Core" — and the result has components, layers and a shape while telling a
-reader nothing `ls` would not. Step 9 measures exactly that and fails the run for it, so the work is to
-decide where the boundaries actually are: which modules serve one purpose whatever folder they sit in, which
-folder holds two unrelated things, and why each boundary is where it is.
+reader nothing `ls` would not. Step 9 measures that and fails the run for it. The work is deciding where the
+boundaries actually are: which modules serve one purpose whatever folder they sit in, which folder holds two
+unrelated things, and why each boundary is where it is.
 
 Three rules do most of the work: **a module belongs to one component**, **a relationship cites a line**
 whatever its status because it is the part that says what breaks what, and **a rationale of `unknown` is a
@@ -385,17 +384,18 @@ writes no diagram and exits 1 — the expected outcome, not a failure to work ar
 - **Read** the page count and the `--check` verdict.
 - **Decide** nothing about markup — the renderer owns it. Decide only whether `--check` genuinely passed.
 
-**Look at `docs/` before you render into it.** This is the step rule 8 is about: the renderer writes each
-page with `"w"` and will replace a hand-written `index.rst` or a page of the same name without saying so. If
-anything is there, list what would be overwritten and ask first — `git status` afterwards is not a safety
-net, because by then it has happened.
+**Look at `docs/` before you render into it.** This is the step rule 8 is about: the renderer writes each page
+with `"w"` and will replace a hand-written `index.rst` or a page of the same name without saying so. If
+anything is there, list what would be overwritten and ask first — `git status` afterwards is not a safety net.
 
 ```bash
 python3 scripts/build_document_model.py --index .docs-build/structure.json \
     --claims .docs-build/claims.verified.jsonl \
     --fragments .docs-build/fragments.verified.jsonl \
     --analysis .docs-build/module-analysis.jsonl --flows .docs-build/flow-analysis.json \
-    --preset onboarding --diagrams docs/_diagrams --out .docs-build/doc.json
+    --architecture .docs-build/architecture-analysis.json \
+    --operations .docs-build/operations-analysis.json \
+    --preset outside-in --diagrams docs/_diagrams --out .docs-build/doc.json
 
 python3 scripts/render_docs.py --doc .docs-build/doc.json --out docs \
     --diagrams docs/_diagrams --check
@@ -409,20 +409,20 @@ the same for the flows page: without it that page is an unordered table of verif
 what leads to what. `doc.json` contains no markup — **do not write RST, MyST or Sphinx directives
 yourself**; the renderer owns headings, tables, references, escaping and the toctree.
 
-**A project with no `conf.py` cannot build what you just wrote**, and the run says so when
-that is the case. Add `--write-conf --project "<name>"` to generate one; it is written only
-when the directory has none, and an existing one is never touched. Do not hand-write one
-either — say the flag exists and let the user choose.
+**A project with no `conf.py` cannot build what you just wrote**, and the run says so. Add `--write-conf
+--project "<name>"` to generate one; it is written only when the directory has none, and an existing one is
+never touched. Do not hand-write one either — say the flag exists and let the user choose.
 
-**`--check` answers with one of six outcomes, and `unwired` and `skipped` are not passes.**
-Neither fails the run; reporting either as a pass is the failure that distinction exists to
-prevent. The outcomes, the formats, `--wire-toctree` and `--assume-parser` are in
-[`references/rendering.md`](references/rendering.md) — read it before rendering into a
-project that already has documentation in it.
+**`--check` answers with one of six outcomes, and `unwired` and `skipped` are not passes.** Neither fails the
+run; reporting either as a pass is the failure that distinction exists to prevent. The outcomes, the formats,
+`--wire-toctree` and `--assume-parser` are in [`references/rendering.md`](references/rendering.md) — read it
+before rendering into a project that already has documentation in it.
 
-Presets are described in [`references/presets.md`](references/presets.md). `onboarding` is the default;
-`architecture` is denser and assumes the reader already knows the domain; `handbook` fits an existing
-documentation tree and **updates** its authored pages rather than generating over them.
+Presets are in [`references/presets.md`](references/presets.md). **`outside-in` is the one to use when steps
+6b and 6c were done** — it opens on what the repository is rather than on its dependency graph, and it is
+the only preset that puts the components, their rationale and the operations on a page. `onboarding` is the
+default and opens on structure; `architecture` is denser; `handbook` fits an existing tree and **updates**
+its authored pages rather than generating over them.
 
 ### 9. Report
 

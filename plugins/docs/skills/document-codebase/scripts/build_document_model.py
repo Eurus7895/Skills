@@ -98,6 +98,33 @@ PRESET_COVERS = {
         "architecture": ("interaction", "rationale", "responsibility", "state",
                          "interface", "failure"),
     },
+    # Outside-in splits what the other presets keep together: `interaction` belongs to
+    # the components page, which says what the parts are, and `rationale` gets a page of
+    # its own because "why is the boundary here" is the question a reader arrives with
+    # and the one a generated document is least likely to answer.
+    "outside-in": {
+        "components": ("interaction",),
+        "rationale": ("rationale",),
+        "modules": ("responsibility", "state", "interface", "failure"),
+        "architecture": (),
+    },
+}
+
+# Which builders may be the home of a required topic, per preset. Without this a preset
+# could satisfy its architecture requirement with the reference page -- the module
+# inventory would declare `interaction`, the two-way check would be content, and the
+# reader would find the system's shape filed under a list of files. Naming the allowed
+# homes is what makes "every mandatory topic has a page" mean a page a reader would look
+# on.
+REQUIRED_TOPICS = {
+    "outside-in": {
+        "interaction": ("components",),
+        "rationale": ("rationale",),
+        "responsibility": ("modules",),
+        "state": ("modules",),
+        "interface": ("modules",),
+        "failure": ("modules",),
+    },
 }
 
 
@@ -141,6 +168,24 @@ PRESETS = {
         ("class-views", "Classes and inheritance", True, "class-views"),
         ("flows", "Cross-component flows", True, "flows"),
         ("limitations", "Coverage and limitations", True, "limitations"),
+    ],
+    # Outside-in: what the thing is, then how to run it, then how it is built, then the
+    # inventory. The order is the point -- every other preset here opens on structure,
+    # which answers the question a reader has fourth. Filled from C5-C7: components and
+    # rationale from the architecture analysis, getting started and operations from the
+    # operations analysis, flows from the flow analysis.
+    "outside-in": [
+        ("overview", "What this is", True, "product-overview"),
+        ("getting-started", "Getting started", True, "getting-started"),
+        # Conventions are a thing a team knows, not a thing a graph holds. Named so the
+        # skill updates it and the report can say it was not generated; never written.
+        ("conventions", "Conventions", False, None),
+        ("architecture", "How it fits together", True, "architecture"),
+        ("components", "The parts", True, "components"),
+        ("rationale", "Why it is built this way", True, "rationale"),
+        ("flows", "What happens when it runs", True, "flows"),
+        ("operations", "Running it", True, "operations"),
+        ("reference", "Module reference", True, "modules"),
     ],
     # A handbook laid out the way a delivered manual usually is. Most of it is not
     # derivable from a dependency graph -- an installation guide, a changelog, a
@@ -631,6 +676,191 @@ def flows_page(index, claims_by_id, flows=None):
     ]
 
 
+def product_overview_page(index):
+    """What the repository is, before any of its internals.
+
+    The outside-in preset opens here rather than on the dependency graph, because the
+    first question a reader has is not "what imports what" but "what is this". Only what
+    the scan can support: the languages, the revision, and the ways in.
+    """
+    coverage = index.get("coverage", {})
+    languages = ", ".join("%s (%d)" % (lang, count) for lang, count
+                          in sorted(coverage.get("languages", {}).items(),
+                                    key=lambda kv: -kv[1]))
+    source = index.get("source") or {}
+    blocks = [prose("block:product-scope",
+                    "%d source file(s) written in %s, read at revision %s. Everything "
+                    "below cites the file and line it came from; what the repository "
+                    "does not say is named rather than filled in."
+                    % (coverage.get("files_scanned", 0),
+                       languages or "no language this scanner reads",
+                       source.get("revision") or "an untracked working tree"))]
+    entries = index.get("entry_points", ())
+    if entries:
+        blocks.append(prose("block:product-ways-in",
+                            "The repository is entered through %s."
+                            % ", ".join(e["path"] for e in entries[:5])))
+    else:
+        blocks.append(prose("block:product-ways-in",
+                            "Nothing in this repository is an entry point the scanner "
+                            "recognises: it is read as a library, called from outside."))
+    return blocks
+
+
+def procedure_blocks(prefix, operations, kinds):
+    """Procedures of the given kinds, each step with the line its command was quoted from.
+
+    Shared by the getting-started and operations pages because they differ only in which
+    kinds they take -- the first four are what a newcomer runs, the rest is what someone
+    already running it does.
+    """
+    if operations is None:
+        return [prose("block:%s-absent" % prefix,
+                      "No operations analysis was supplied for this run, so nothing "
+                      "here describes how the repository is built or run.")]
+    absent = operations.get("absent")
+    if isinstance(absent, dict) and absent.get("reason"):
+        return [prose("block:%s-none" % prefix, str(absent["reason"]).strip())]
+    blocks = []
+    for procedure in operations.get("procedures", ()) or ():
+        if not isinstance(procedure, dict) or procedure.get("kind") not in kinds:
+            continue
+        stem = re.sub(r"[^a-z0-9]+", "-", str(procedure.get("id", "")).lower()).strip("-")
+        blocks.append(subheading("block:%s-%s" % (prefix, stem),
+                                 str(procedure.get("name") or procedure.get("kind"))))
+        rows = []
+        for step in procedure.get("steps", ()) or ():
+            if not isinstance(step, dict):
+                continue
+            where = next((cite(e["path"], e["line_start"])
+                          for e in step.get("evidence", ()) or ()
+                          if isinstance(e, dict) and e.get("path")
+                          and e.get("line_start")), "-")
+            rows.append((hedged(step.get("text", ""), step.get("status")),
+                         step.get("command", "") or "-", where))
+        if rows:
+            blocks.append(table("block:%s-%s-steps" % (prefix, stem),
+                                ("Step", "Command", "Read at"), rows))
+    return blocks
+
+
+def getting_started_page(operations):
+    """Installing, building, testing and running -- what a newcomer does first."""
+    blocks = procedure_blocks("getting-started", operations,
+                              ("install", "build", "test", "run"))
+    if not blocks:
+        blocks = [prose("block:getting-started-none",
+                        "The operations analysis records nothing about installing, "
+                        "building, testing or running this repository.")]
+    requirements = (operations or {}).get("requirements") or ()
+    rows = [(str(r.get("name", "")), str(r.get("value", "") or "-"),
+             next((cite(e["path"], e["line_start"])
+                   for e in r.get("evidence", ()) or ()
+                   if isinstance(e, dict) and e.get("path") and e.get("line_start")), "-"))
+            for r in requirements if isinstance(r, dict)]
+    if rows:
+        blocks.insert(0, table("block:getting-started-requirements",
+                               ("Requires", "Version", "Read at"), rows))
+    return blocks
+
+
+def operations_page(operations):
+    """Configuring, deploying, releasing and watching -- what running it involves."""
+    blocks = procedure_blocks("operations", operations,
+                              ("configure", "deploy", "release", "observe"))
+    if not blocks:
+        return [prose("block:operations-none",
+                      "The operations analysis records nothing about configuring, "
+                      "deploying, releasing or watching this repository.")]
+    return blocks
+
+
+def components_page(architecture, analysis, kinds):
+    """What the modules add up to: the synthesis C6 produced, on a page at last.
+
+    Until this preset existed `architecture-analysis.json` was validated and then read by
+    nobody -- Detector B judged it and the document went on describing the import graph.
+    """
+    if architecture is None:
+        blocks = [prose("block:components-absent",
+                        "No architecture analysis was supplied for this run, so the "
+                        "modules are not grouped into components here.")]
+        return blocks + statement_blocks("components", analysis, kinds)
+    blocks = []
+    components = [c for c in architecture.get("components", ()) or ()
+                  if isinstance(c, dict)]
+    if not components:
+        blocks.append(prose("block:components-none",
+                            "The architecture analysis names no component."))
+    for component in components:
+        stem = re.sub(r"[^a-z0-9]+", "-", str(component.get("id", "")).lower()).strip("-")
+        blocks.append(subheading("block:components-%s" % stem,
+                                 str(component.get("name") or component.get("id"))))
+        members = [m for m in component.get("modules", ()) or () if isinstance(m, str)]
+        if members:
+            blocks.append(table("block:components-%s-modules" % stem, ("Module",),
+                                [(m,) for m in sorted(members)]))
+    relationships = [r for r in architecture.get("relationships", ()) or ()
+                     if isinstance(r, dict)]
+    if relationships:
+        names = {c.get("id"): c.get("name", c.get("id")) for c in components}
+        names.update({e.get("id"): e.get("name", e.get("id"))
+                      for e in architecture.get("external_systems", ()) or ()
+                      if isinstance(e, dict)})
+        blocks.append(subheading("block:components-relationships",
+                                 "What crosses between them"))
+        blocks.append(table(
+            "block:components-relationships-table",
+            ("From", "To", "Kind", "Read at"),
+            [(names.get(r.get("from"), r.get("from")),
+              names.get(r.get("to"), r.get("to")),
+              str(r.get("kind", "")).replace("_", " "),
+              next((cite(e["path"], e["line_start"])
+                    for e in r.get("evidence", ()) or ()
+                    if isinstance(e, dict) and e.get("path") and e.get("line_start")),
+                   "-"))
+             for r in relationships]))
+    blocks.extend(statement_blocks("components", analysis, kinds))
+    return blocks
+
+
+def rationale_page(architecture, analysis, kinds):
+    """Why the boundaries are where they are -- and where nobody wrote it down.
+
+    A rationale recorded as `unknown` belongs on this page rather than in limitations:
+    the page exists to answer "why", and "the repository never says" is that answer for
+    most boundaries in most repositories. It is rendered as the absence it is.
+    """
+    blocks = [prose("block:rationale-intro",
+                    "A boundary's reason is the part of a design least often written "
+                    "down. Where the repository records one it is cited; where it does "
+                    "not, that is said rather than guessed at.")]
+    recorded, silent = [], []
+    for component in (architecture or {}).get("components", ()) or ():
+        if not isinstance(component, dict):
+            continue
+        reason = component.get("rationale")
+        name = str(component.get("name") or component.get("id"))
+        if not isinstance(reason, dict) or not reason.get("text"):
+            continue
+        where = next((cite(e["path"], e["line_start"])
+                      for e in reason.get("evidence", ()) or ()
+                      if isinstance(e, dict) and e.get("path") and e.get("line_start")),
+                     "-")
+        if reason.get("status") == "unknown":
+            silent.append((name, str(reason["text"]).strip()))
+        else:
+            recorded.append((name, hedged(reason["text"], reason.get("status")), where))
+    if recorded:
+        blocks.append(table("block:rationale-recorded",
+                            ("Component", "Why", "Read at"), recorded))
+    if silent:
+        blocks.append(table("block:rationale-unknown",
+                            ("Component", "The question nobody answered"), silent))
+    blocks.extend(statement_blocks("rationale", analysis, kinds))
+    return blocks
+
+
 def navigation_page(index):
     """Where to start reading, from the directory grouping and the entry points."""
     grouped = {}
@@ -777,6 +1007,16 @@ BUILDERS = {
         ix, frags, by_id, an, kinds),
     "flows": lambda ix, frags, claims, by_id, an, kinds, extra: flows_page(
         ix, by_id, extra.get("flows")),
+    "product-overview": lambda ix, frags, claims, by_id, an, kinds, extra:
+        product_overview_page(ix),
+    "getting-started": lambda ix, frags, claims, by_id, an, kinds, extra:
+        getting_started_page(extra.get("operations")),
+    "operations": lambda ix, frags, claims, by_id, an, kinds, extra:
+        operations_page(extra.get("operations")),
+    "components": lambda ix, frags, claims, by_id, an, kinds, extra: components_page(
+        extra.get("architecture"), an, kinds),
+    "rationale": lambda ix, frags, claims, by_id, an, kinds, extra: rationale_page(
+        extra.get("architecture"), an, kinds),
     "navigation": lambda ix, frags, claims, by_id, an, kinds, extra: navigation_page(ix),
     "class-views": lambda ix, frags, claims, by_id, an, kinds, extra: class_views_page(ix),
     "limitations": lambda ix, frags, claims, by_id, an, kinds, extra: limitations_page(
@@ -939,6 +1179,32 @@ def validate(doc):
             problems.append("statement %r (%s) is covered by page %r but appears on no "
                             "page" % (sid, kind, home[0]))
 
+    # A mandatory page that rendered nothing is a heading in a toctree. Whatever the
+    # reason -- an artefact not supplied, a builder that returned early -- the honest
+    # output is a page saying so, and every builder here does; a page with no block at
+    # all means one of them stopped saying anything.
+    builders = {page_id: builder for page_id, _, _, builder in PRESETS[doc["preset"]]}
+    mandatory_ids = {page_id for page_id, _, m, _ in PRESETS[doc["preset"]] if m}
+    for page in doc["pages"]:
+        content = [b for b in page["blocks"] if b["type"] not in ("ref", "subheading")]
+        if not content and page["id"] in mandatory_ids:
+            problems.append("page %r is required by preset %r and has nothing to say"
+                            % (page["id"], doc["preset"]))
+
+    # Every required topic has a page, and a page a reader would look on for it.
+    for kind, allowed in sorted(REQUIRED_TOPICS.get(doc["preset"], {}).items()):
+        homes = [p["id"] for p in doc["pages"] if kind in p.get("covers", ())]
+        if not homes:
+            problems.append("preset %r requires a page covering %r and has none"
+                            % (doc["preset"], kind))
+            continue
+        for home in homes:
+            if builders.get(home) not in allowed:
+                problems.append("page %r covers %r, which belongs on a page built by "
+                                "%s -- a %s page cannot answer it"
+                                % (home, kind, " or ".join(allowed),
+                                   builders.get(home)))
+
     authored_ids = {p["id"] for p in doc.get("authored_pages", ())}
     for page_id, _, mandatory, builder in PRESETS[doc["preset"]]:
         if builder is None:
@@ -961,6 +1227,12 @@ def main():
     parser.add_argument("--flows", metavar="PATH",
                         help="flow-analysis.json; the flows page renders the traced "
                              "chains instead of an unordered table of verified calls")
+    parser.add_argument("--architecture", metavar="PATH",
+                        help="architecture-analysis.json; the components and rationale "
+                             "pages are built from it")
+    parser.add_argument("--operations", metavar="PATH",
+                        help="operations-analysis.json; the getting-started and "
+                             "operations pages are built from it")
     parser.add_argument("--preset", default="onboarding", choices=sorted(PRESETS))
     parser.add_argument("--diagrams", metavar="DIR",
                         help="rendered diagram directory; pages reference what is there "
@@ -1022,24 +1294,27 @@ def main():
         return 2
 
     extra = {}
-    if args.flows:
+    for option, key in ((args.flows, "flows"), (args.architecture, "architecture"),
+                        (args.operations, "operations")):
+        if not option:
+            continue
         try:
-            with open(args.flows, encoding="utf-8") as fh:
-                flows = json.load(fh)
+            with open(option, encoding="utf-8") as fh:
+                loaded = json.load(fh)
         except (OSError, ValueError) as exc:
-            sys.stderr.write("FAIL  cannot read %s: %s\n" % (args.flows, exc))
+            sys.stderr.write("FAIL  cannot read %s: %s\n" % (option, exc))
             return 2
-        if not isinstance(flows, dict):
-            sys.stderr.write("FAIL  %s does not contain a JSON object\n" % args.flows)
+        if not isinstance(loaded, dict):
+            sys.stderr.write("FAIL  %s does not contain a JSON object\n" % option)
             return 2
-        stated = flows.get("index_hash")
+        stated = loaded.get("index_hash")
         if stated != index.get("index_hash"):
-            # A flow file left from an earlier run names real files and renders fine.
-            # The identity is the only thing that tells it apart from today's.
+            # A file left from an earlier run names real modules and renders fine. The
+            # identity is the only thing that tells it apart from today's.
             sys.stderr.write("FAIL  %s was written against %s, the index is %s\n"
-                             % (args.flows, stated, index.get("index_hash")))
+                             % (option, stated, index.get("index_hash")))
             return 2
-        extra["flows"] = flows
+        extra[key] = loaded
 
     diagrams = find_diagrams(args.diagrams,
                              [page_id for page_id, _, _, _ in PRESETS[args.preset]])
