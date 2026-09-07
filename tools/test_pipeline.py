@@ -90,15 +90,24 @@ def units_tests(tmp):
     kept = [l.strip() for l in open(out, encoding="utf-8") if l.strip()]
     check("ties break by path", code == 0 and kept[:2] == sorted(kept[:2]), str(kept))
 
-    # A repository of standalone programs ranks nothing. Saying so is the point: an
-    # arbitrary top 25 reads exactly like a considered one.
-    flat = dict(index)
-    flat["fan_in"] = {r["path"]: 0 for r in index["files"]}
-    flat_path = os.path.join(tmp, "flat.json")
-    write(flat_path, json.dumps(flat))
-    code, text = run("select_units.py", "--index", flat_path, "--out", out)
-    check("a repository with no internal imports is warned about",
-          code == 0 and "carries no information" in text, text)
+    # A repository of standalone programs ranks nothing. Built as a real tree and
+    # scanned, not by editing an index: the scanner writes `fan_in` by counting incoming
+    # edges, so it is *empty* here rather than full of zeroes, and a synthesised map made
+    # this pass while the real case selected nothing at all.
+    independent = os.path.join(tmp, "independent")
+    os.makedirs(independent, exist_ok=True)
+    for name in ("tool_a.py", "tool_b.py", "tool_c.py"):
+        write(os.path.join(independent, name), "def go():\n    return 1\n")
+    flat_index = os.path.join(tmp, "independent.json")
+    run("scan_repo.py", "--root", independent, "--out", flat_index, "--detail")
+    check("the scanner really does leave fan_in empty here",
+          json.load(open(flat_index, encoding="utf-8"))["fan_in"] == {})
+    code, text = run("select_units.py", "--index", flat_index, "--out", out)
+    kept = [l.strip() for l in open(out, encoding="utf-8") if l.strip()]
+    check("a repository with no internal imports still selects its modules",
+          code == 0 and len(kept) == 3, "%d: %s" % (code, text[-200:]))
+    check("and is warned that the ranking means nothing",
+          "carries no information" in text, text)
 
     code, text = run("select_units.py", "--index", os.path.join(tmp, "nope.json"),
                      "--out", out)
@@ -152,6 +161,28 @@ def driver_tests(tmp, root):
     check("analyze derives the structural claims",
           os.path.exists(os.path.join(build, "claims.jsonl")))
 
+    # Two distinct module paths must not flatten to one packet name, or the second
+    # overwrites the first while the component reports success.
+    import hashlib
+    seen = {}
+    for path in ("a/b__c.py", "a__b/c.py", "a/b/c.py"):
+        flat = path.replace("/", "__")
+        seen.setdefault("%s.%s.json"
+                        % (flat, hashlib.sha256(path.encode()).hexdigest()[:8]),
+                        []).append(path)
+    check("distinct unit paths get distinct packet names",
+          all(len(v) == 1 for v in seen.values()), str(seen))
+
+    # A packet left by a wider earlier scope is a module the reader would analyse and
+    # `assemble` would then reject as out of scope, after the budget was spent.
+    stale = os.path.join(build, "packets", "gone__module.py.deadbeef.json")
+    write(stale, "{}")
+    code, text = run("pipeline.py", "analyze", "--root", root, "--build", build, "--force")
+    check("analyze clears packets from an earlier scope",
+          code == 0 and not os.path.exists(stale), text[-200:])
+    check("and still writes the current ones",
+          len(os.listdir(os.path.join(build, "packets"))) == len(units))
+
     # A stage that fails must stop its component, and its exit code must arrive unchanged.
     broken = os.path.join(tmp, "broken")
     os.makedirs(broken, exist_ok=True)
@@ -182,6 +213,17 @@ def driver_tests(tmp, root):
                      "--docs", os.path.join(tmp, "docs"), "--preset", "architecture",
                      "--dry-run")
     check("--preset overrides the choice", "preset: architecture" in text, text[:200])
+    # The three analyses are independently optional, so keying the choice on the
+    # architecture file alone would drop a run that only recorded how to operate the
+    # repository: onboarding has no builder that reads it.
+    os.remove(os.path.join(build, "architecture-analysis.json"))
+    write(os.path.join(build, "operations-analysis.json"), "{}")
+    code, text = run("pipeline.py", "document", "--root", root, "--build", build,
+                     "--docs", os.path.join(tmp, "docs"), "--dry-run")
+    check("an operations analysis alone still selects outside-in",
+          "preset: outside-in" in text, text[:200])
+    os.remove(os.path.join(build, "operations-analysis.json"))
+    write(os.path.join(build, "architecture-analysis.json"), "{}")
     code, text = run("pipeline.py", "publish", "--root", root, "--build", build,
                      "--docs", os.path.join(tmp, "docs"), "--dry-run")
     check("publish passes the analyses to the prose check and the gate",

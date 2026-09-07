@@ -207,6 +207,24 @@ def main():
         check("the same trigger with the hedge dropped is P004",
               "P004" in codes(report), "%d %s" % (code, repr(codes(report))))
 
+        # A requirement carries `name` and `value`, never `text`, so a checker looking
+        # only for `text` reaches none of them -- and the getting-started table renders
+        # an inferred requirement exactly like a declared one.
+        operations = write_json(os.path.join(tmp, "ops.json"), {
+            "operations_version": 1, "index_hash": "sha256:x", "procedures": [],
+            "requirements": [{"id": "req:py", "name": "Python 3.11 or newer",
+                              "value": "inferred from the syntax used",
+                              "status": "inferred"}]})
+        bald_req = doc_with(prose("block:r", "Python 3.11 or newer"))
+        code, report = check_prose(bald_req, "reqbald.json", "--operations", operations)
+        check("an inferred requirement stated as fact is P004",
+              "P004" in codes(report), "%d %s" % (code, repr(codes(report))))
+        hedged_req = doc_with(
+            prose("block:r", "Inferred, not observed: Python 3.11 or newer"))
+        code, report = check_prose(hedged_req, "reqok.json", "--operations", operations)
+        check("the same requirement with its hedge passes", code == 0,
+              repr(codes(report)))
+
         # --- Generator framing is listed, never failed.
         framing = doc_with(
             prose("block:intro", "Each row is an import edge that crosses a directory "
@@ -248,6 +266,22 @@ def main():
         check("and a verdict of overstated is a finding",
               "P007" in codes(report) and report["status"] == "failed",
               repr(codes(report)))
+
+        # A typo is not a decision. Treating one as reviewed is exactly how a block
+        # reaches a reader having been looked at by nobody.
+        with open(review, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"block": "block:c", "verdict": "okay"}) + "\n")
+        code, report = check_prose(queued, "queued5.json", "--require-review",
+                                   "--review", review)
+        check("a verdict outside the schema leaves the block unreviewed",
+              code == 1 and report["status"] == "review_required"
+              and report["unreviewed"] == ["block:c"],
+              "%s %r" % (report["status"], report.get("unreviewed")))
+        # Advisory, not an error: the run is already held at review_required, and a
+        # typo in a review row is not a defect in the document that was checked.
+        check("and the bad value is named",
+              any(f["code"] == "P006" and "okay" in f["message"]
+                  for f in report["findings"]), repr(report["findings"]))
 
         code, out, err = run("check_prose.py",
                              write_json(os.path.join(tmp, "typo.json"), honest),

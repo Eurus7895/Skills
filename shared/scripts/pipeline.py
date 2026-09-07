@@ -42,8 +42,10 @@ Standard library only. Exit codes: 0 ok, 1 a stage's policy was not met, 2 input
 """
 
 import argparse
+import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -157,6 +159,20 @@ def handwritten_claims(path):
     return found
 
 
+def packet_name(unit):
+    """A file name for this unit's packet that no other unit can also produce.
+
+    Flattening separators alone does not: `a/b__c.py` and `a__b/c.py` flatten to the same
+    name, and the second packet would overwrite the first while the component reported
+    success -- leaving no context for a unit whose analysis is still required. The digest
+    of the original path is what makes it injective; the flattened stem is kept so the
+    directory is still readable.
+    """
+    flat = unit.replace(os.sep, "__").replace("/", "__")
+    digest = hashlib.sha256(unit.encode("utf-8")).hexdigest()[:8]
+    return "%s.%s.json" % (flat, digest)
+
+
 def units_of(path):
     if not os.path.isfile(path):
         return []
@@ -194,10 +210,9 @@ def analyze(args):
     # the reading that comes next, and reading it from a file is what lets that reading be
     # fanned out without every task re-running the query.
     for unit in units_of(units_path):
-        slug = unit.replace(os.sep, "__").replace("/", "__")
         stages.append(Stage("analyze", "query_graph.py",
                             ["--index", index, "--root", args.root, "--packet", unit],
-                            capture=os.path.join(build, "packets", "%s.json" % slug),
+                            capture=os.path.join(build, "packets", packet_name(unit)),
                             label=" %s" % unit))
     return stages
 
@@ -224,15 +239,17 @@ def check(args):
     ]
 
 
-def preset_for(args, architecture):
+def preset_for(args, *analyses):
     """`outside-in` renders the components and the operations; nothing else does.
 
-    Choosing it when those analyses exist is not a judgement call -- every other preset
-    drops pages the run has content for. An explicit `--preset` always wins.
+    Choosing it when *any* of those analyses exists is not a judgement call -- every other
+    preset drops pages the run has content for, and the three are independently optional,
+    so keying on the architecture file alone would silently drop a run that recorded only
+    how the repository is operated. An explicit `--preset` always wins.
     """
     if args.preset != "auto":
         return args.preset
-    return "outside-in" if os.path.exists(architecture) else "onboarding"
+    return "outside-in" if any(os.path.exists(p) for p in analyses) else "onboarding"
 
 
 def document(args):
@@ -246,7 +263,7 @@ def document(args):
     operations = os.path.join(build, "operations-analysis.json")
     report = os.path.join(build, "flow-report.json")
     graph = os.path.join(build, "class-graph.json")
-    preset = preset_for(args, architecture)
+    preset = preset_for(args, architecture, operations, flows)
     print("preset: %s%s" % (preset, "" if args.preset != "auto" else " (chosen from what "
                             "the build directory holds; --preset overrides)"))
 
@@ -385,6 +402,14 @@ def main():
                         "if the scan is what changed."
                         % (os.path.join(args.build, "claims.jsonl"), len(written),
                            ", ".join(str(i) for i in written[:3])), 1)
+
+    if args.component == "analyze" and not args.dry_run:
+        # The skill tells the reader to work through every file in packets/, so one left
+        # behind by a wider earlier scope is a module they would analyse and `assemble`
+        # would then reject as outside the current units -- after the budget was spent.
+        packets = os.path.join(args.build, "packets")
+        if os.path.isdir(packets):
+            shutil.rmtree(packets)
 
     stages = COMPONENTS[args.component](args)
     print("== %s: %d stage(s)" % (args.component, len(stages)))

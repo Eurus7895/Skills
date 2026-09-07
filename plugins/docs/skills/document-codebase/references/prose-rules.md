@@ -10,7 +10,7 @@ is still verified, the statement still cites its line, the page still passes eve
 reader has been told something nobody established.
 
 ```bash
-python3 scripts/check_prose.py .docs-build/doc.json \
+python3 scripts/publish/check_prose.py .docs-build/doc.json \
     --architecture .docs-build/architecture-analysis.json \
     --flows .docs-build/flow-analysis.json \
     --operations .docs-build/operations-analysis.json \

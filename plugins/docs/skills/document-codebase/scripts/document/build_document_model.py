@@ -186,6 +186,11 @@ PRESETS = {
         ("flows", "What happens when it runs", True, "flows"),
         ("operations", "Running it", True, "operations"),
         ("reference", "Module reference", True, "modules"),
+        # Every preset that turns claims into prose keeps this page. Without it a
+        # `candidate` claim, an `unknown` statement and a scanner diagnostic stay in
+        # `doc.json` and reach no reader -- the document would disclose least about
+        # itself exactly where it is weakest.
+        ("limitations", "Coverage and limitations", True, "limitations"),
     ],
     # A handbook laid out the way a delivered manual usually is. Most of it is not
     # derivable from a dependency graph -- an installation guide, a changelog, a
@@ -856,12 +861,17 @@ def components_page(architecture, analysis, kinds):
                       if isinstance(e, dict)})
         blocks.append(subheading("block:components-relationships",
                                  "What crosses between them"))
+        # The status column is not decoration. This table is rendered mechanically, so
+        # the verb ceiling does not reach it; dropping the field is a one-line change
+        # that makes an `inferred` relationship read on the page exactly like an
+        # observed one. Carrying it is what keeps the reader able to tell them apart.
         blocks.append(table(
             "block:components-relationships-table",
-            ("From", "To", "Kind", "Read at"),
+            ("From", "To", "Kind", "Status", "Read at"),
             [(names.get(r.get("from"), r.get("from")),
               names.get(r.get("to"), r.get("to")),
               str(r.get("kind", "")).replace("_", " "),
+              str(r.get("status", "unknown")),
               next((cite(e["path"], e["line_start"])
                     for e in r.get("evidence", ()) or ()
                     if isinstance(e, dict) and e.get("path") and e.get("line_start")),

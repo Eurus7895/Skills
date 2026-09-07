@@ -91,6 +91,9 @@ CLAIM_CEILING = {
 
 # A statement recorded as a reading, rendered as though it were a fact, is the second
 # failure this file exists for. One of these has to survive the rewrite.
+# The only two a review row may carry. Anything else is an unreviewed block.
+VERDICTS = ("ok", "overstated")
+
 HEDGES = ("inferred", "not observed", "not recorded", "appears to", "seems to",
           "probably", "may ", "might ", "nobody answered", "does not say",
           "no reason", "unknown", "cannot be", "could not be")
@@ -188,7 +191,10 @@ def uncertain_texts(architecture=None, flows=None, operations=None):
         for step in procedure.get("steps", ()) or ():
             take(step)
     for requirement in (operations or {}).get("requirements", ()) or ():
-        take(requirement)
+        # A requirement has no `text`: the page renders its name and its value, so those
+        # are the fields whose status can be dropped on the way to the reader.
+        take(requirement, text_key="name")
+        take(requirement, text_key="value")
     return [t for t in texts if t]
 
 
@@ -350,9 +356,17 @@ def main():
     if verdicts is not None:
         for entry in checker.queue:
             verdict = verdicts.get(entry["block"])
-            if verdict is None:
+            decision = verdict.get("verdict") if verdict else None
+            if decision not in VERDICTS:
+                # A typo is not a decision. Counting one as reviewed is how a block gets
+                # past the gate having been looked at by nobody, which is the single
+                # thing --require-review exists to prevent.
                 unreviewed.append(entry["block"])
-            elif verdict.get("verdict") == "overstated":
+                if verdict is not None:
+                    checker.finding("P006", "review verdict %r is not one of %s"
+                                    % (decision, ", ".join(sorted(VERDICTS))),
+                                    entry["block"], severity="advisory")
+            elif decision == "overstated":
                 checker.finding("P007", "the model pass found this says more than its "
                                 "source: %s" % verdict.get("note", "no note given"),
                                 entry["block"])

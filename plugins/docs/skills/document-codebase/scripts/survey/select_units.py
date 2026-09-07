@@ -43,8 +43,13 @@ def select(index, top):
     `entry_point` or both, and `ranked` is the fan-in ordering the cutoff was taken from.
     """
     fan_in = index.get("fan_in") or {}
-    known = {record["path"] for record in index.get("files", ())}
-    ranked = sorted(((path, count) for path, count in fan_in.items() if path in known),
+    known = sorted(record["path"] for record in index.get("files", ()))
+    # Rank every scanned file, not every key of `fan_in`: the scanner builds that map by
+    # counting incoming edges, so a module nothing imports is absent from it rather than
+    # present with 0. Ranking only its keys would drop those modules from the cutoff
+    # entirely, and a repository of independent programs -- which has no keys at all --
+    # would select nothing and be reported as having no module to describe.
+    ranked = sorted(((path, fan_in.get(path, 0)) for path in known),
                     key=lambda kv: (-kv[1], kv[0]))
 
     reasons = {}
@@ -96,8 +101,7 @@ def main():
 
     paths, reasons, ranked = select(index, args.top)
     if not paths:
-        return fail("the index holds no module to describe: nothing has fan-in and "
-                    "nothing was found as an entry point")
+        return fail("the index holds no file to describe")
 
     directory = os.path.dirname(args.out)
     if directory:

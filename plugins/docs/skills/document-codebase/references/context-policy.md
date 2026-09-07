@@ -47,7 +47,7 @@ prevent: a model given half a file describes it confidently and has no way to kn
 A retry sends the **same scope** plus exactly what the finding asked for:
 
 ```bash
-python3 scripts/query_graph.py --index .docs-build/structure.json \
+python3 scripts/analyze/query_graph.py --index .docs-build/structure.json \
     --packet src/api.py --include src/service.py --findings .docs-build/findings.jsonl
 ```
 
@@ -76,10 +76,10 @@ part is always visible in the manifest.
 Other query modes, for when a finding asks for something specific:
 
 ```bash
-python3 scripts/query_graph.py --index .docs-build/structure.json --inheritance src/models.py
-python3 scripts/query_graph.py --index .docs-build/structure.json --cross-dir-edges
-python3 scripts/query_graph.py --index .docs-build/structure.json --clusters
-python3 scripts/query_graph.py --index .docs-build/structure.json --call-candidates src/api.py --to src/db.py
+python3 scripts/analyze/query_graph.py --index .docs-build/structure.json --inheritance src/models.py
+python3 scripts/analyze/query_graph.py --index .docs-build/structure.json --cross-dir-edges
+python3 scripts/analyze/query_graph.py --index .docs-build/structure.json --clusters
+python3 scripts/analyze/query_graph.py --index .docs-build/structure.json --call-candidates src/api.py --to src/db.py
 ```
 
 Call candidates always come back `verified: false`. They tell you where to look; only reading

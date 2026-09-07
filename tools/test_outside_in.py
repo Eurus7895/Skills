@@ -178,8 +178,13 @@ def main():
         page_ids = [p["id"] for p in doc["pages"]]
         check("the pages are in outside-in order, structure last",
               page_ids == ["overview", "getting-started", "architecture", "components",
-                           "rationale", "flows", "operations", "reference"],
+                           "rationale", "flows", "operations", "reference",
+                           "limitations"],
               repr(page_ids))
+        # Every preset that renders prose from claims keeps this page: it is where a
+        # candidate claim and an unknown statement reach a reader at all.
+        check("outside-in discloses its own coverage",
+              "limitations" in page_ids, repr(page_ids))
         check("conventions is named as the author's, not generated",
               [p["id"] for p in doc["authored_pages"]] == ["conventions"]
               and not os.path.exists(os.path.join(out_dir, "conventions.rst")),
