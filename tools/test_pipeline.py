@@ -8,7 +8,7 @@ not a claim somebody wrote by hand. So the tests here are about what a driver ge
 It must stop at the first failure rather than running on; it must pass the failing stage's
 exit code out unchanged, because converting a verdict into a different number is the same
 as hiding it; it must skip a stage whose input was never written instead of failing; and
-the two stages allowed to fail must not take the phase down with them.
+the two stages allowed to fail must not take their component down with them.
 
     python3 tools/test_pipeline.py
 """
