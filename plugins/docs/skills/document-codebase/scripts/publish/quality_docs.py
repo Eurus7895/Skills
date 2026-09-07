@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/quality_docs.py
+# Source: shared/scripts/publish/quality_docs.py
 # Regenerate: python3 tools/materialize.py
 """Say what the run actually produced, and refuse to call the shortcut a success.
 
@@ -40,8 +40,16 @@ import json
 import os
 import sys
 
-import validate_analysis
-from build_document_model import PRESETS
+# The gate is the one script that reads across components: it counts statements the way
+# `check` validates them and it needs the presets `document` builds from, so both have to
+# agree with it or the figures would be about a different document. The layout is the same
+# in `shared/` and in a materialized plugin, so this resolves in both.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+for _sibling in ("check", "document"):
+    sys.path.insert(0, os.path.join(os.path.dirname(_HERE), _sibling))
+
+import validate_analysis  # noqa: E402
+from build_document_model import PRESETS  # noqa: E402
 
 REPORT_VERSION = 1
 

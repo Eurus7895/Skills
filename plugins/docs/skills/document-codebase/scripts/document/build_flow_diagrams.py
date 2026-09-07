@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/build_flow_diagrams.py
+# Source: shared/scripts/document/build_flow_diagrams.py
 # Regenerate: python3 tools/materialize.py
 """Generate deterministic PlantUML sequence diagrams from a validated flow analysis.
 

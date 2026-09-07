@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/validate_operations.py
+# Source: shared/scripts/document/validate_operations.py
 # Regenerate: python3 tools/materialize.py
 """Hold `operations-analysis.json` to its schema, its evidence, and to quoting correctly.
 

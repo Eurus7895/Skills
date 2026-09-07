@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/annotate_import_usage.py
+# Source: shared/scripts/survey/annotate_import_usage.py
 # Regenerate: python3 tools/materialize.py
 """Annotate which imported bindings Ruff cannot see being used. Report only.
 

@@ -33,26 +33,36 @@ copilot plugin install docs@CopilotBox
   under `docs/`. Fires on "document this repo", "write architecture docs", "explain how this codebase fits
   together", "map the dependencies".
 
-## Scripts
+## Components
 
-| Script | Does |
-| --- | --- |
-| `scan_repo.py` | Extracts the index: symbols, imports, classes, edges, a hash per file, the revision scanned |
-| `validate_index.py` | Re-derives what can be re-derived and reports findings; catches an index gone stale |
-| `annotate_import_usage.py` | Optional Ruff F401 pass, report-only, marking bindings nothing reads |
-| `query_graph.py` | Builds one bounded context packet per scope, partitioning rather than truncating |
-| `verify_doc.py` | Decides every claim against the graph and the source; never rewrites prose |
-| `derive_claims.py` | Writes the structural claims the index already holds, so no model budget is spent copying a table |
-| `validate_analysis.py` | Cannot ask whether a reading is right, so asks whether one was made: evidence, anchoring, repetition |
-| `assemble.py` | Fails the run when a dispatched module returned no row, or every row says the same thing |
-| `build_class_graph.py` | Builds the canonical class graph: packages, modules, classes, relationships in layers |
-| `build_diagrams.py` | Generates deterministic PlantUML Diagram as Code from the class graph |
-| `validate_diagrams.py` | Checks PlantUML declarations and relationships against the graph |
-| `quality_docs.py` | Says how much of the document was read and how much was copied; a derived-only run is never `passed` |
-| `build_document_model.py` | Turns verified claims into pages and blocks, with no markup in them |
-| `render_docs.py` | Renders that to RST or MyST, wires it into an existing Sphinx project, and checks the result |
-| `sphinx_support.py` | Runs the build and says which of six things went wrong, rather than "failed" |
-| `wire_toctree.py` | Adds the generated pages to an index someone else wrote, or refuses to touch it |
+`scripts/` holds one directory per component, and `pipeline.py` beside them runs one component per
+invocation. Each component answers one kind of question and hands the next a file rather than a call.
+
+| Component | Script | Does |
+| --- | --- | --- |
+| `survey` | `scan_repo.py` | Extracts the index: symbols, imports, classes, edges, a hash per file, the revision scanned |
+| | `validate_index.py` | Re-derives what can be re-derived and reports findings; catches an index gone stale |
+| | `annotate_import_usage.py` | Optional Ruff F401 pass, report-only, marking bindings nothing reads |
+| | `select_units.py` | Picks the modules worth a model call, and says when fan-in is a bad way to pick them |
+| `analyze` | `derive_claims.py` | Writes the structural claims the index already holds, so no model budget is spent copying a table |
+| | `query_graph.py` | Builds one bounded context packet per scope, partitioning rather than truncating |
+| `check` | `validate_analysis.py` | Cannot ask whether a reading is right, so asks whether one was made: evidence, anchoring, repetition |
+| | `assemble.py` | Fails the run when a dispatched module returned no row, or every row says the same thing |
+| | `verify_doc.py` | Decides every claim against the graph and the source; never rewrites prose |
+| `document` | `validate_architecture.py` | Checks the components, their boundaries and their evidence — never whether the grouping is a good one |
+| | `validate_flows.py` | Accepts a step only where a verified call joins the two entities it names |
+| | `validate_operations.py` | Refuses a quoted command that is not in the lines it cites |
+| | `build_class_graph.py` | Builds the canonical class graph: packages, modules, classes, relationships in layers |
+| | `build_diagrams.py` | Generates deterministic PlantUML Diagram as Code from the class graph |
+| | `validate_diagrams.py` | Checks PlantUML declarations and relationships against the graph |
+| | `build_flow_diagrams.py` | Draws a validated flow as a sequence, and refuses one edited since it was validated |
+| | `validate_flow_diagrams.py` | Reads the drawing back, because a `.puml` is a text file |
+| | `build_document_model.py` | Turns verified claims and statements into pages and blocks, with no markup in them |
+| `publish` | `render_docs.py` | Renders that to RST or MyST, wires it into an existing Sphinx project, and checks the result |
+| | `sphinx_support.py` | Runs the build and says which of six things went wrong, rather than "failed" |
+| | `wire_toctree.py` | Adds the generated pages to an index someone else wrote, or refuses to touch it |
+| | `check_prose.py` | Holds a rendered sentence to the strength its sources carry |
+| | `quality_docs.py` | Says how much of the document was read and how much was copied; a derived-only run is never `passed` |
 
 **MyST needs `myst_parser` enabled in the project it lands in.** Sphinx does not read `.md` without it, so
 `render_docs.py --format myst` refuses to write into a `conf.py` that does not enable it rather than leaving a

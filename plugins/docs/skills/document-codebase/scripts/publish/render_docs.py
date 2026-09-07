@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/render_docs.py
+# Source: shared/scripts/publish/render_docs.py
 # Regenerate: python3 tools/materialize.py
 """Render doc.json to reStructuredText or MyST. The model decides what; this decides how.
 

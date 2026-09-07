@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/wire_toctree.py
+# Source: shared/scripts/publish/wire_toctree.py
 # Regenerate: python3 tools/materialize.py
 """Add generated pages to an index that someone else wrote, or refuse to.
 

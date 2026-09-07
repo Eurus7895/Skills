@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/check_prose.py
+# Source: shared/scripts/publish/check_prose.py
 # Regenerate: python3 tools/materialize.py
 """Hold the rendered sentence to what the analysis behind it actually said.
 

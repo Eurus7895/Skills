@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/validate_flows.py
+# Source: shared/scripts/document/validate_flows.py
 # Regenerate: python3 tools/materialize.py
 """Hold `flow-analysis.json` to its schema, its evidence, and to being a chain of calls.
 

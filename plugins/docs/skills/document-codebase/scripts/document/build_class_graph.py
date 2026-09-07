@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/build_class_graph.py
+# Source: shared/scripts/document/build_class_graph.py
 # Regenerate: python3 tools/materialize.py
 """Build the canonical class graph. No geometry, no renderer, no opinions about layout.
 

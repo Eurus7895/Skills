@@ -18,8 +18,10 @@ import subprocess
 import sys
 import tempfile
 
+from component_scripts import script
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPT = os.path.join(REPO, "shared", "scripts", "validate_analysis.py")
+SCRIPT = script("validate_analysis.py")
 CONTRACTS = os.path.join(REPO, "tests", "contracts")
 INDEX = os.path.join(CONTRACTS, "structure-v2-minimal.json")
 VALID = os.path.join(CONTRACTS, "module-analysis-v1-valid.jsonl")

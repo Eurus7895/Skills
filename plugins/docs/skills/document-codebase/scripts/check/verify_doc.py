@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/verify_doc.py
+# Source: shared/scripts/check/verify_doc.py
 # Regenerate: python3 tools/materialize.py
 """Check every claim against the index and the source; report, never rewrite.
 

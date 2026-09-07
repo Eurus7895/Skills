@@ -23,8 +23,9 @@ import subprocess
 import sys
 import tempfile
 
+from component_scripts import script
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPTS = os.path.join(REPO, "shared", "scripts")
 
 FAILURES = []
 
@@ -37,8 +38,8 @@ def check(name, condition, detail=""):
         FAILURES.append(name)
 
 
-def run(script, *args):
-    proc = subprocess.run([sys.executable, os.path.join(SCRIPTS, script)] + list(args),
+def run(name, *args):
+    proc = subprocess.run([sys.executable, script(name)] + list(args),
                           capture_output=True, text=True)
     return proc.returncode, proc.stdout, proc.stderr
 

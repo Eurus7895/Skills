@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/validate_diagrams.py
+# Source: shared/scripts/document/validate_diagrams.py
 # Regenerate: python3 tools/materialize.py
 """Validate generated PlantUML views against their class graph and manifest."""
 

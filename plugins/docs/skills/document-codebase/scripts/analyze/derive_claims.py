@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/derive_claims.py
+# Source: shared/scripts/analyze/derive_claims.py
 # Regenerate: python3 tools/materialize.py
 """Write the structural claims that are already in the index.
 

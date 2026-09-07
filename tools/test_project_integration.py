@@ -17,9 +17,11 @@ import subprocess
 import sys
 import tempfile
 
+from component_scripts import component_paths, script
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RENDERER = os.path.join(REPO, "shared", "scripts", "render_docs.py")
-sys.path.insert(0, os.path.join(REPO, "shared", "scripts"))
+RENDERER = script("render_docs.py")
+sys.path[:0] = component_paths()
 
 import sphinx_support                                        # noqa: E402
 import wire_toctree                                          # noqa: E402

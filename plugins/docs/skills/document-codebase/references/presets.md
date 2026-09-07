@@ -42,7 +42,7 @@ not the inventory; someone who wants a file-by-file list should generate `onboar
 What the thing is, then how to run it, then how it is built, then the inventory. Every other preset here
 opens on structure — the dependency graph, the entry points — which answers the question a reader has
 fourth. This is also the only preset that consumes the architecture and operations analyses, so it is the
-one to use when steps 6b and 6c were done.
+one to use when step 4 was done.
 
 | Page | Contains | Mandatory |
 | --- | --- | --- |
@@ -105,7 +105,7 @@ Page ids in this preset contain `/`, and a page id is its path under the output 
 
 ## What the model may and may not decide
 
-The agent chooses which modules are in scope (step 3 of `SKILL.md`), what each one's role is, and which
+The agent chooses which modules are in scope (`units.txt`, from step 1 of `SKILL.md`), what each one's role is, and which
 claims support it. It does **not** choose whether the limitations page exists. Every mandatory page is
 generated whether or not there is much to put on it, because a document that silently omits its own coverage
 section reads exactly like one with nothing to disclose.

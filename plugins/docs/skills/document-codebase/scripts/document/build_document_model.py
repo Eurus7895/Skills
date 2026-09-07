@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/build_document_model.py
+# Source: shared/scripts/document/build_document_model.py
 # Regenerate: python3 tools/materialize.py
 """Organise verified claims into a format-independent document model.
 

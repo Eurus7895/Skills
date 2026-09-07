@@ -446,6 +446,34 @@ caller.
 SKILL.md is at its 500-line ceiling with nothing left to compress. The step 6 finding-to-
 action table moved to `references/schemas.md` to make room for step 8b. C9 has none.
 
+### C8c. Five components, and a driver for the deterministic stretch
+
+**Done.** An audit of the twelve steps found six of them carrying no model judgement at
+all -- two said "decide nothing" in their own text -- and eleven of about nineteen
+invocations existing only to move files between fixed paths under `.docs-build/`. The
+step-3 scope selection was the one piece of pipeline logic with no script behind it, so no
+test and no exit code; it is now `survey/select_units.py`, which also breaks ties by path
+and warns when fan-in ranks nothing, the A8b finding it was closest to.
+
+`scripts/` is now one directory per component -- `survey`, `analyze`, `check`, `document`,
+`publish` -- with `pipeline.py` running one component per invocation. It stops at the first
+stage that fails, names it, and passes the exit code through unchanged; two stages may fail
+without stopping their component and say so as they do. SKILL.md went from 500 lines to
+356, and the mechanics moved to `references/pipeline.md`.
+
+Two things the wiring turned up, both fixed here. `validate_flow_diagrams.py` reported the
+class diagram as an unclaimed `.puml`, because both families are written into
+`docs/_diagrams/` on the skill's own instructions and each validator read back only its
+own -- so following step 7 verbatim had always produced a `G007`. And a re-run of the
+survey silently destroyed hand-written `calls` claims, since `derive_claims` owns the file
+they are appended to; `analyze` now refuses rather than overwriting, and `--force` says the
+scan is what changed.
+
+The boundary leaks in two places, both deliberate and both written down:
+`publish/quality_docs.py` imports from `check/` and `document/` because it has to agree with
+them about what it is counting, and `document/` writes the diagrams that `publish/` renders
+references to.
+
 ### C9. A8b, then A9
 
 Run the whole thing on a real repository (plan 2's A8b), read the output as a reader

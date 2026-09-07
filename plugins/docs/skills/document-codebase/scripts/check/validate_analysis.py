@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/validate_analysis.py
+# Source: shared/scripts/check/validate_analysis.py
 # Regenerate: python3 tools/materialize.py
 """Hold `module-analysis.jsonl` to its schema, its evidence, and to saying something.
 

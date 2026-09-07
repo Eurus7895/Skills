@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/validate_architecture.py
+# Source: shared/scripts/document/validate_architecture.py
 # Regenerate: python3 tools/materialize.py
 """Hold `architecture-analysis.json` to its schema, its evidence, and to being a synthesis.
 

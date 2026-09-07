@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/build_diagrams.py
+# Source: shared/scripts/document/build_diagrams.py
 # Regenerate: python3 tools/materialize.py
 """Generate deterministic PlantUML class diagrams from a verified class graph.
 

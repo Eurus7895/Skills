@@ -114,7 +114,7 @@ Printed on stdout by `query_graph.py --packet`. Never stored; it is context for 
 Beyond the scope's own source and symbols, the fields that matter are:
 
 - `imports` / `imported_by` — each with a `cite` of the form `path:line` ready to quote, and `edge_id`.
-- `binding_usage_advisory` — present only where step 2 ran. Advisory, and named so at the point of use.
+- `binding_usage_advisory` — present only where the survey's Ruff stage ran. Advisory, and named so at the point of use.
 - `neighbour_interfaces` — public symbols of each neighbour, not their bodies.
 - `import_usage_coverage` — `absent`, `partial` or `complete`. When it is `absent`, "not marked unused" means
   "never looked at", which is not the same claim as "used".

@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-# GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/validate_flow_diagrams.py
-# Regenerate: python3 tools/materialize.py
 """Validate generated PlantUML sequence diagrams against the flow analysis behind them.
 
     python3 scripts/validate_flow_diagrams.py docs/_diagrams \\
@@ -197,6 +194,29 @@ def expected_notes(flow):
     return notes
 
 
+def class_diagram_files(directory):
+    """The `.puml` files the class-diagram manifest in this directory already owns.
+
+    Both diagram families are written side by side, on the skill's own instructions, and
+    each validator reads back only its own. Without this the class views would look
+    unclaimed to the flow validator and every complete run would report `G007`.
+    """
+    path = os.path.join(directory, "diagram-manifest.json")
+    if not os.path.isfile(path):
+        return set()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            manifest = json.load(fh)
+    except (OSError, ValueError):
+        # Its own validator reports an unreadable class manifest. Claiming nothing here
+        # is the safe reading: an unclaimed file is still flagged below.
+        return set()
+    if not isinstance(manifest, dict):
+        return set()
+    return {entry.get("file") for entry in manifest.get("views", ())
+            if isinstance(entry, dict) and entry.get("file")}
+
+
 def validate_view(entry, parsed, flow, index_hash, findings):
     view = entry.get("flow")
     meta = parsed["sequence"]
@@ -329,10 +349,14 @@ def main():
     for flow_id in sorted(drawn & skipped):
         add(findings, "G007", "the manifest both draws and skips this flow", flow_id)
 
-    # A .puml nobody claims renders as readily as one the manifest owns.
+    # A .puml nobody claims renders as readily as one the manifest owns. The class
+    # diagrams live in this same directory and are owned by their own manifest, so a file
+    # that one names is claimed -- flagging it would fail every run that drew both, which
+    # is every run that got this far.
+    claimed = set(files) | class_diagram_files(args.directory)
     for name in sorted(os.listdir(args.directory)):
-        if name.endswith(".puml") and name not in set(files):
-            add(findings, "G007", "%s is not named by the manifest" % name)
+        if name.endswith(".puml") and name not in claimed:
+            add(findings, "G007", "%s is not named by any diagram manifest" % name)
 
     if not manifest.get("validated"):
         # The diagrams may be perfectly faithful to a flow analysis nothing checked.

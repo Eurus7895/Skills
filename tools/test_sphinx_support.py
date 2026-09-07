@@ -16,8 +16,10 @@ import shutil
 import sys
 import tempfile
 
+from component_scripts import component_paths
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(REPO, "shared", "scripts"))
+sys.path[:0] = component_paths()
 
 import sphinx_support                                        # noqa: E402
 

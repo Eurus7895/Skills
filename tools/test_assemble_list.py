@@ -18,8 +18,10 @@ import subprocess
 import sys
 import tempfile
 
+from component_scripts import script
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPT = os.path.join(REPO, "shared", "scripts", "assemble.py")
+SCRIPT = script("assemble.py")
 
 SCHEMA = "fragment_id:str, source:str, role:str, claim_ids:list, status:str"
 

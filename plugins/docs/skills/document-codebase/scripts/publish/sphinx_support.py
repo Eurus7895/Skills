@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/sphinx_support.py
+# Source: shared/scripts/publish/sphinx_support.py
 # Regenerate: python3 tools/materialize.py
 """Build a rendered documentation tree and say precisely what went wrong.
 

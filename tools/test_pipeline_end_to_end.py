@@ -22,8 +22,9 @@ import subprocess
 import sys
 import tempfile
 
+from component_scripts import script
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPTS = os.path.join(REPO, "shared", "scripts")
 
 FAILURES = []
 
@@ -43,8 +44,8 @@ def write(root, rel, body=""):
         fh.write(body)
 
 
-def script(name, *args):
-    return [sys.executable, os.path.join(SCRIPTS, name)] + list(args)
+def command(name, *args):
+    return [sys.executable, script(name)] + list(args)
 
 
 def run(argv, cwd):
@@ -158,27 +159,27 @@ def write_rows(path, rows):
 def pipeline(root, out="docs"):
     """Run every stage in order. Returns [(stage, code, output)]."""
     steps = [
-        ("scan", script("scan_repo.py", "--root", ".", "--out",
+        ("scan", command("scan_repo.py", "--root", ".", "--out",
                         ".docs-build/structure.json", "--detail")),
         # The fixture writes its rows before the scan exists, so it stamps them here.
         # In a real run the model writes each row after step 1 and copies in the hash
         # the scanner reported, which is the same thing in the right order.
         ("stamp", [sys.executable, "-c", STAMP]),
-        ("validate-index", script("validate_index.py", ".docs-build/structure.json",
+        ("validate-index", command("validate_index.py", ".docs-build/structure.json",
                                   "--root", ".")),
-        ("annotate", script("annotate_import_usage.py", ".docs-build/structure.json",
+        ("annotate", command("annotate_import_usage.py", ".docs-build/structure.json",
                             "--root", ".", "--policy", "optional")),
-        ("packet", script("query_graph.py", "--index", ".docs-build/structure.json",
+        ("packet", command("query_graph.py", "--index", ".docs-build/structure.json",
                           "--root", ".", "--packet", "app.py")),
-        ("verify", script("verify_doc.py", "--claims", ".docs-build/claims.jsonl",
+        ("verify", command("verify_doc.py", "--claims", ".docs-build/claims.jsonl",
                           "--fragments", ".docs-build/fragments.jsonl",
                           "--index", ".docs-build/structure.json", "--root", ".",
                           "--out-dir", ".docs-build")),
-        ("model", script("build_document_model.py", "--index", ".docs-build/structure.json",
+        ("model", command("build_document_model.py", "--index", ".docs-build/structure.json",
                          "--claims", ".docs-build/claims.verified.jsonl",
                          "--fragments", ".docs-build/fragments.verified.jsonl",
                          "--preset", "onboarding", "--out", ".docs-build/doc.json")),
-        ("render", script("render_docs.py", "--doc", ".docs-build/doc.json",
+        ("render", command("render_docs.py", "--doc", ".docs-build/doc.json",
                           "--out", out, "--check")),
     ]
     results = []

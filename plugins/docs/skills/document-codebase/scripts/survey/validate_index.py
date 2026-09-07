@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/validate_index.py
+# Source: shared/scripts/survey/validate_index.py
 # Regenerate: python3 tools/materialize.py
 """Check that a structure.json says something a later step can safely build on.
 

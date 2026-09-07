@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # GENERATED FILE -- DO NOT EDIT.
-# Source: shared/scripts/query_graph.py
+# Source: shared/scripts/analyze/query_graph.py
 # Regenerate: python3 tools/materialize.py
 """Select a bounded, labelled slice of the index for one analysis task.
 

@@ -19,10 +19,11 @@ import subprocess
 import sys
 import tempfile
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPTS = os.path.join(REPO, "shared", "scripts")
+from component_scripts import component_paths, script
 
-sys.path.insert(0, SCRIPTS)
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+sys.path[:0] = component_paths()
 import sphinx_support                                         # noqa: E402
 
 FAILURES = []
@@ -36,8 +37,8 @@ def check(name, condition, detail=""):
         FAILURES.append(name)
 
 
-def run(script, *args):
-    proc = subprocess.run([sys.executable, os.path.join(SCRIPTS, script)] + list(args),
+def run(name, *args):
+    proc = subprocess.run([sys.executable, script(name)] + list(args),
                           capture_output=True, text=True)
     return proc.returncode, proc.stdout + proc.stderr
 
