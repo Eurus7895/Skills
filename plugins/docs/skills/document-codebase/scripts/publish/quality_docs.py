@@ -228,6 +228,33 @@ def depth_of(kinds_by_path, in_budget):
     }
 
 
+def decisions_of(directory):
+    """What was decided at each checkpoint, and what is still open.
+
+    The report is where a run is accounted for afterwards, and "who agreed this scope" is
+    part of that account. A run made unattended is a legitimate answer and shows up here
+    as one -- which is the point of requiring the note.
+    """
+    decided, pending = [], []
+    if not directory or not os.path.isdir(directory):
+        return {"decided": decided, "pending": pending}
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(directory, name), encoding="utf-8") as fh:
+                record = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        entry = {"checkpoint": record.get("checkpoint"), "ask": record.get("ask")}
+        if record.get("state") == "decided":
+            entry["note"] = record.get("note")
+            decided.append(entry)
+        else:
+            pending.append(entry)
+    return {"decided": decided, "pending": pending}
+
+
 def mode_of(coverage, full_ratio, statements):
     """The mode, from how many modules were read and how many were answered in full.
 
@@ -423,6 +450,8 @@ def main():
     parser.add_argument("--units", help="units.txt: the modules this run paid to read")
     parser.add_argument("--claims", help="claims.verified.jsonl")
     parser.add_argument("--doc", help="doc.json")
+    parser.add_argument("--checkpoints", help="the checkpoints directory, so the report "
+                                              "carries who decided the run's judgements")
     parser.add_argument("--architecture", help="architecture-analysis.json, so Detector B "
                                                "can ask whether it is a synthesis")
     parser.add_argument("--flows", help="flow-analysis.json, for the flow denominator")
@@ -502,6 +531,9 @@ def main():
             "depth": depth,
         },
         "statements": statements,
+        # Never a pass or a failure on its own: an open checkpoint means a component that
+        # would have refused was not reached, so it is reported and left to the reader.
+        "checkpoints": decisions_of(args.checkpoints),
         "findings": findings,
     }
 

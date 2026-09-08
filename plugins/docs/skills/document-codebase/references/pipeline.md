@@ -18,9 +18,32 @@ included flows nothing had validated. Neither is reachable from here.
 
 **There is no command that runs the whole pipeline**, and that is the design rather than a gap. Four of the
 judgements the document rests on — the scope, the module roles, the architecture, the prose promotions — sit
-between components, and every one of them is a checkpoint where `SKILL.md` requires the run to stop and ask.
-A driver that chained all five would step over all four, and none of the validators downstream can tell a
-wrong role or a wrong boundary from a right one.
+between components, and none of the validators downstream can tell a wrong role or a wrong boundary from a
+right one.
+
+**Three of them are enforced here, and the fourth elsewhere.** `survey` opens `P1` and `analyze` refuses while
+it is open; `analyze` opens `P2` and `check` refuses; `check` opens `P3` and `document` refuses. Each refusal
+prints what to put in front of the person, what to ask them, and the command that records the answer:
+
+| | Opened by | Blocks | Asks |
+| --- | --- | --- | --- |
+| `P1` | `survey` | `analyze` | is this the right scope to spend the budget on |
+| `P2` | `analyze` | `check` | do these roles match what the repository is |
+| `P3` | `check` | `document` | is this the architecture, and are the boundaries right |
+
+`P4`, the prose queue, needs nothing added: an undecided block already holds the run at `review_required`.
+
+They are enforced because they used to be prose, and prose was the only rule in this pipeline that failed
+silently. Everything else here refuses — `analyze` will not overwrite hand-written claims, `assemble` will not
+accept a unit with no row, the gate will not call a thin run `passed` — so a checkpoint that merely asked was
+the one a reader could skip without ever seeing an error.
+
+`decide --checkpoint <id> --note "<text>"` records one. The note is required, because a decision the closing
+report cannot carry is not a decision anybody can check later; running unattended is a legitimate answer as
+long as it is written down. Decisions are bound to the `index_hash` they were made against, so a rescan
+reopens them — the scope approved against the old tree says nothing about the new one. Deleting a checkpoint
+file bypasses it, in the same way deleting `claims.jsonl` bypasses the claims: the mechanism is against
+forgetting, not against intent.
 
 **The driver decides nothing.** Every stage is a script that was already the authority on its own question,
 invoked with the paths its component fixes. Where a genuine choice exists — the fan-in cutoff, the preset,
@@ -77,7 +100,8 @@ the prose check and the gate. A run without them is a visibly thinner document, 
 | `--format` | `publish` | `rst` | `rst` or `myst` |
 | `--review` | `publish` | — | your `prose-review.jsonl` verdicts |
 | `--write-conf`, `--project` | `publish` | off | generate a Sphinx `conf.py` if the output directory has none |
-| `--dry-run` | all | off | print the commands, run nothing |
+| `--dry-run` | all | off | print the commands, run nothing (and neither open nor consult a checkpoint) |
+| `--checkpoint`, `--note` | `decide` | — | which judgement is being recorded, and what was decided |
 
 ## Why `analyze` can refuse to run
 

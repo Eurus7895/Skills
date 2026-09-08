@@ -86,10 +86,22 @@ the next component.**
 | **P3 shape** | step 4 | the components and their boundaries, the flows traced and the ones refused, the operations found | is this the architecture, and are the boundaries where they would put them |
 | **P4 prose** | step 7 | each queued block with the verb you propose and the evidence under it | are these the intended readings |
 
+**P1, P2 and P3 are enforced by the driver.** The component before each one opens it, and the component after
+it refuses to run until a decision is recorded:
+
+```bash
+python3 scripts/pipeline.py decide --checkpoint P1 --note "<what they said>"
+```
+
+The note is required and goes in the closing report, so "ran unattended, kept the default scope" is a
+permitted answer and a recorded one. A decision is bound to the `index_hash` it was made against: rescanning
+reopens the checkpoints, because the units may now be different. **P4 needs no such machinery** — a queued
+block nobody decided already holds the run at `review_required`.
+
 A pause is a question with the material attached, not a request for permission: the user should be able to
 answer without opening a file. Summarise — a pause that pastes a whole JSONL file is not a question. Then
 **carry the answer back into the artefact** before continuing; a correction agreed in chat and not written
-into `module-analysis.jsonl` is lost at the next stage.
+into `module-analysis.jsonl` is lost at the next stage, and the decision note is not a substitute for it.
 
 **Do not pause anywhere else.** Steps 3, 5, 6 and 8 read findings a script produced and act on a documented
 table, and step 3's re-dispatch is bounded at two attempts. Asking about those spends the user's attention on

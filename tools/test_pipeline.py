@@ -193,6 +193,26 @@ def driver_tests(tmp, root):
           os.path.exists(os.path.join(build, "structure.json"))
           and os.path.exists(os.path.join(build, "units.txt")))
 
+    # The scope checkpoint. Every other invariant in this pipeline is a script that
+    # refuses; this one was a paragraph in SKILL.md, so a run that read the units and
+    # kept going saw no error at all and carried a wrong scope through every check
+    # downstream -- checks compare claims against evidence, never against whether the
+    # right modules were chosen.
+    check("survey opens the scope checkpoint",
+          os.path.isfile(os.path.join(build, "checkpoints", "P1.json")),
+          str(os.listdir(build)))
+    code, text = run("pipeline.py", "analyze", "--root", root, "--build", build)
+    check("analyze refuses while the scope checkpoint is open", code == 1, text[-300:])
+    check("and the refusal says what to ask and how to record the answer",
+          "is this the right scope" in text and "decide --checkpoint P1" in text, text)
+
+    code, text = run("pipeline.py", "decide", "--checkpoint", "P1", "--build", build,
+                     "--note", "top 25 plus the entry points, agreed as the scope")
+    check("a decision is recorded", code == 0, text)
+    code, text = run("pipeline.py", "decide", "--checkpoint", "P1", "--build", build)
+    check("and a decision with no note is refused, since the report would carry nothing",
+          code == 2, text)
+
     # analyze puts a packet on disk per unit, so the reading that follows can be fanned
     # out without every task re-running the query.
     code, text = run("pipeline.py", "analyze", "--root", root, "--build", build)

@@ -332,6 +332,7 @@ def publish(args):
             "--units", os.path.join(build, "units.txt"),
             "--claims", os.path.join(build, "claims.verified.jsonl"),
             "--doc", doc, "--diagrams", diagrams, "--prose", prose,
+            "--checkpoints", os.path.join(build, "checkpoints"),
             "--out", os.path.join(build, "generation-report.json")]
     for flag, path in (("--architecture", architecture), ("--flows", flows),
                        ("--operations", operations)):
@@ -357,11 +358,111 @@ COMPONENTS = {"survey": survey, "analyze": analyze, "check": check,
               "document": document, "publish": publish}
 ORDER = ["survey", "analyze", "check", "document", "publish"]
 
+# The judgements the document rests on that no script can make, and the component each
+# one stands in front of.
+#
+# These were written in `SKILL.md` as prose and nothing enforced them, which made them the
+# only rule in this pipeline that fails silently. Every other invariant here is a script
+# that refuses -- `analyze` will not overwrite hand-written claims, `assemble` will not
+# accept a unit with no row, the gate will not call a thin run `passed`. A checkpoint that
+# only exists in a paragraph is one a reader skips without ever seeing an error, and then
+# a wrong scope or a wrong set of module roles survives every check downstream, because a
+# check compares a claim against evidence and never against what the repository is *for*.
+#
+# There is no fourth entry. P4, the prose queue, is already enforced: a block queued by
+# `check_prose` and not decided holds the run at `review_required`, which is the same
+# mechanism arrived at from the other direction.
+CHECKPOINTS = (
+    {"id": "P1", "opened_by": "survey", "blocks": "analyze",
+     "show": "the selected units with their fan-in, the cutoff, and every warning the "
+             "selection printed",
+     "ask": "is this the right scope to spend the budget on"},
+    {"id": "P2", "opened_by": "analyze", "blocks": "check",
+     "show": "one line per module -- what you decided it is for -- and every `unknown`",
+     "ask": "do these roles match what the repository is"},
+    {"id": "P3", "opened_by": "check", "blocks": "document",
+     "show": "the components and their boundaries, the flows traced and the ones "
+             "refused, the operations found",
+     "ask": "is this the architecture, and are the boundaries where they would put them"},
+)
+
+
+def invoked_as():
+    """The command the reader typed, so the one this prints can be retyped."""
+    return sys.argv[0] or "scripts/pipeline.py"
+
+
+def checkpoint_path(build, checkpoint_id):
+    return os.path.join(build, "checkpoints", "%s.json" % checkpoint_id)
+
+
+def index_hash_of(build):
+    """Which scan the build directory currently describes, or None before the survey."""
+    try:
+        with open(os.path.join(build, "structure.json"), encoding="utf-8") as fh:
+            return json.load(fh).get("index_hash")
+    except (OSError, ValueError):
+        return None
+
+
+def decision_for(build, checkpoint_id, digest):
+    """A recorded decision on this checkpoint for this scan, or None.
+
+    Bound to `index_hash` for the same reason every other artifact here is: a scope
+    approved against one scan says nothing about a tree that has since moved. Rescanning
+    reopens the checkpoints, which is the honest outcome -- the units may be different.
+    """
+    try:
+        with open(checkpoint_path(build, checkpoint_id), encoding="utf-8") as fh:
+            record = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if record.get("state") != "decided":
+        return None
+    if digest and record.get("index_hash") != digest:
+        return None
+    return record
+
+
+def open_checkpoint(build, checkpoint, digest):
+    """Mark a checkpoint pending, unless it is already decided for this scan."""
+    if decision_for(build, checkpoint["id"], digest):
+        return False
+    path = checkpoint_path(build, checkpoint["id"])
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"checkpoint": checkpoint["id"], "state": "pending",
+                   "index_hash": digest, "show": checkpoint["show"],
+                   "ask": checkpoint["ask"]}, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+    return True
+
+
+def blocking_checkpoint(build, component, digest):
+    """The open checkpoint standing in front of this component, if there is one.
+
+    A checkpoint that was never opened does not block. It is opened by the component
+    before it, so its absence means that component never succeeded -- and then the honest
+    error is the one this component's own first stage gives about its missing input, not
+    a question about a decision nobody was ever asked to make.
+    """
+    for checkpoint in CHECKPOINTS:
+        if checkpoint["blocks"] != component:
+            continue
+        if not os.path.isfile(checkpoint_path(build, checkpoint["id"])):
+            continue
+        if not decision_for(build, checkpoint["id"], digest):
+            return checkpoint
+    return None
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("component", choices=ORDER, metavar="COMPONENT",
-                        help="one of: %s" % ", ".join(ORDER))
+    parser.add_argument("component", choices=ORDER + ["decide"], metavar="COMPONENT",
+                        help="one of: %s, or decide" % ", ".join(ORDER))
+    parser.add_argument("--checkpoint", help="decide: which checkpoint (P1, P2, P3)")
+    parser.add_argument("--note", help="decide: what was decided, and by whom -- this is "
+                                       "what the closing report carries")
     parser.add_argument("--root", default=".", help="the repository being documented")
     parser.add_argument("--build", default=".docs-build", help="where intermediates go")
     parser.add_argument("--docs", default="docs", help="where the document is written")
@@ -393,6 +494,45 @@ def main():
     if args.review and not os.path.isfile(args.review):
         return fail("no such review file: %s" % args.review)
     os.makedirs(args.build, exist_ok=True)
+    digest = index_hash_of(args.build)
+
+    if args.component == "decide":
+        known = {c["id"]: c for c in CHECKPOINTS}
+        if args.checkpoint not in known:
+            return fail("--checkpoint must be one of: %s" % ", ".join(sorted(known)))
+        if not (args.note or "").strip():
+            return fail("--note is required: a decision with no record of what was "
+                        "decided is not one the closing report can carry")
+        path = checkpoint_path(args.build, args.checkpoint)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"checkpoint": args.checkpoint, "state": "decided",
+                       "index_hash": digest, "note": args.note.strip(),
+                       "ask": known[args.checkpoint]["ask"]}, fh, indent=1,
+                      sort_keys=True)
+            fh.write("\n")
+        print("%s decided: %s" % (args.checkpoint, args.note.strip()))
+        print("wrote %s" % path)
+        return 0
+
+    # Refuse rather than run on. The message has to be enough to act on without opening
+    # anything: what to put in front of the person, what to ask them, and the one command
+    # that records the answer.
+    if not args.dry_run:
+        blocked = blocking_checkpoint(args.build, args.component, digest)
+        if blocked is not None:
+            sys.stderr.write(
+                "FAIL  %s is held at checkpoint %s, which %s opens and nothing has "
+                "decided.\n"
+                "      Show them: %s\n"
+                "      Ask them:  %s\n"
+                "      Then:      python3 %s decide --checkpoint %s --note '<what they "
+                "said>'\n"
+                "      Running unattended is a decision too -- record what you chose and "
+                "why, and it will be in the closing report.\n"
+                % (args.component, blocked["id"], blocked["opened_by"], blocked["show"],
+                   blocked["ask"], invoked_as(), blocked["id"]))
+            return 1
 
     if args.component == "analyze" and not args.force:
         written = handwritten_claims(os.path.join(args.build, "claims.jsonl"))
@@ -415,6 +555,19 @@ def main():
     print("== %s: %d stage(s)" % (args.component, len(stages)))
     code = run(stages, dry_run=args.dry_run)
     print("\n== %s %s" % (args.component, "ok" if code == 0 else "exited %d" % code))
+
+    # Opened only on success, and only by the component that produces the material the
+    # question is about. A failed survey has no scope to approve.
+    if code == 0 and not args.dry_run:
+        for checkpoint in CHECKPOINTS:
+            if checkpoint["opened_by"] != args.component:
+                continue
+            if open_checkpoint(args.build, checkpoint, index_hash_of(args.build)):
+                print("\n-- checkpoint %s is open, and %s will not run until it is "
+                      "decided.\n   Show them: %s\n   Ask them:  %s\n   Then:      "
+                      "python3 %s decide --checkpoint %s --note '<what they said>'"
+                      % (checkpoint["id"], checkpoint["blocks"], checkpoint["show"],
+                         checkpoint["ask"], invoked_as(), checkpoint["id"]))
     return code
 
 

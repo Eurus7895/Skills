@@ -244,7 +244,16 @@ PRESETS = {
         ("development/ci_cd_and_release", "CI, CD and release", True, "release"),
         ("appendix/supported_elements", "Supported elements", False, None),
         ("appendix/glossary", "Glossary", False, None),
+        ("appendix/faq", "Frequently asked questions", False, None),
         ("appendix/troubleshooting", "Troubleshooting", False, None),
+        # A delivered manual carries these and a graph cannot write any of them: what the
+        # repository was measured against, what it cites, and what changed between
+        # releases. They are here so a tree that already has them has somewhere to land --
+        # without a row, an authored page is one the renderer neither writes nor names,
+        # and it is simply lost when a document is regenerated over its directory.
+        ("appendix/references", "References", False, None),
+        ("appendix/compliance", "Compliance", False, None),
+        ("appendix/changelog", "Changelog", False, None),
         ("appendix/limitations", "Limitations", True, "limitations"),
         ("appendix/traceability", "Traceability", True, "traceability"),
     ],

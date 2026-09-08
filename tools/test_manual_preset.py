@@ -219,6 +219,12 @@ def build_tests(tmp):
     check("the pages a graph cannot answer are named as the author's",
           {"usage/python_api", "appendix/glossary", "appendix/troubleshooting",
            "getting_started/quick_start"}.issubset(set(authored)), repr(authored))
+    # Listed although nothing generates them: a page with no row is one the renderer
+    # neither writes nor names, so an authored changelog in the output directory is lost
+    # the next time a document is generated over it.
+    check("and the appendix a delivered manual carries has rows too",
+          {"appendix/faq", "appendix/references", "appendix/compliance",
+           "appendix/changelog"}.issubset(set(authored)), repr(authored))
     check("and none of them was written",
           not (set(authored) & set(pages)), repr(sorted(set(authored) & set(pages))))
 
