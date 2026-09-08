@@ -72,6 +72,13 @@ REVIEW_REQUIRED = "review_required"
 PER_MODULE_COVERAGE = 0.90
 PARTIAL_COVERAGE = 0.50
 
+# The four questions that are about a module rather than about the tree it sits in.
+# `interaction` and `rationale` are the architecture's, and a module page renders exactly
+# these -- `COVERS["modules"]` in `build_document_model`, which is where a reader meets
+# them as four headings. Depth is measured against them for that reason: a module missing
+# one is a heading with nothing under it.
+MODULE_KINDS = ("responsibility", "state", "interface", "failure")
+
 # Rejections that mean the evidence could not be looked at, as opposed to the statement
 # being malformed. Reported apart because they call for a different fix.
 EVIDENCE_CODES = ("A004", "A006", "A007", "A008", "A015")
@@ -133,7 +140,11 @@ def budget_of(index, units_path):
 
 
 def analyse(index, analysis_path):
-    """Run C2's checker and turn its verdicts into counts."""
+    """Run C2's checker and turn its verdicts into counts.
+
+    Returns `(kinds_by_path, tally, findings)`. The first is what a module was actually
+    asked and answered -- not whether it was read, which is a weaker thing entirely.
+    """
     rows = load_jsonl(analysis_path)
     checker = validate_analysis.Checker(index)
     verdicts, seen = {}, set()
@@ -144,7 +155,7 @@ def analyse(index, analysis_path):
     evidence_failures = {finding["statement"] for finding in checker.findings
                          if finding["code"] in EVIDENCE_CODES and finding["statement"]}
     by_kind, by_status = {}, {}
-    analysed = set()
+    kinds_by_path = {}
     for row in rows:
         for statement in row.get("statements", ()):
             if not isinstance(statement, dict):
@@ -153,7 +164,8 @@ def analyse(index, analysis_path):
             by_status[statement.get("status")] = by_status.get(
                 statement.get("status"), 0) + 1
             if verdicts.get(statement.get("id")) == "valid":
-                analysed.add(row.get("path"))
+                kinds_by_path.setdefault(row.get("path"), set()).add(
+                    statement.get("kind"))
 
     tally = {"total": len(verdicts), "valid": 0, "unanchored": 0,
              "near_duplicate": 0, "rejected": 0}
@@ -162,7 +174,39 @@ def analyse(index, analysis_path):
     tally["with_valid_evidence"] = tally["total"] - len(evidence_failures)
     tally["by_kind"] = by_kind
     tally["by_status"] = by_status
-    return analysed, tally, checker.findings
+    return kinds_by_path, tally, checker.findings
+
+
+def depth_of(kinds_by_path, in_budget):
+    """How many of the four module questions each module in the budget answered.
+
+    Coverage says a module was read. It says so on one surviving statement, which is why
+    a run can be `per_module` and still render a page with four headings and one line
+    under them -- the shape the reader complains about, and the shape no other check in
+    this pipeline can see.
+
+    `unknown` is a status, not a silence: a module with nothing recorded about how it
+    fails answers that question with a `failure`/`unknown` statement. So a missing kind
+    here means the question went unasked, never that the repository had no answer.
+    """
+    counts = [len(set(kinds_by_path.get(path, ())) & set(MODULE_KINDS))
+              for path in in_budget]
+    histogram = {str(n): counts.count(n) for n in range(len(MODULE_KINDS) + 1)}
+    # Lower median on an even split. Two modules answering one and four questions is a
+    # run with a hole in it, and reporting that as "the median module answers four"
+    # would round in the run's own favour -- the one direction this file must not.
+    ordered = sorted(counts)
+    median = ordered[(len(ordered) - 1) // 2] if ordered else 0
+    thin = sorted(path for path in in_budget
+                  if len(set(kinds_by_path.get(path, ())) & set(MODULE_KINDS))
+                  < len(MODULE_KINDS))
+    return {
+        "kinds": list(MODULE_KINDS),
+        "histogram": histogram,
+        "median_kinds": median,
+        "full": len(in_budget) - len(thin),
+        "thin": thin[:20],
+    }
 
 
 def mode_of(coverage, statements):
@@ -383,18 +427,19 @@ def main():
         if not os.path.isfile(args.analysis):
             return fail("no such analysis file: %s" % args.analysis)
         try:
-            analysed, statements, findings = analyse(index, args.analysis)
+            kinds_by_path, statements, findings = analyse(index, args.analysis)
         except ValueError as exc:
             return fail("cannot read %s: %s" % (args.analysis, exc))
     else:
-        analysed, statements = set(), {"total": 0, "valid": 0, "unanchored": 0,
-                                       "near_duplicate": 0, "rejected": 0,
-                                       "with_valid_evidence": 0,
-                                       "by_kind": {}, "by_status": {}}
+        kinds_by_path, statements = {}, {"total": 0, "valid": 0, "unanchored": 0,
+                                         "near_duplicate": 0, "rejected": 0,
+                                         "with_valid_evidence": 0,
+                                         "by_kind": {}, "by_status": {}}
         reasons.append("no module analysis was supplied, so nothing was read")
 
     in_budget = set(budget)
-    analysed_in_budget = analysed & in_budget
+    analysed_in_budget = set(kinds_by_path) & in_budget
+    depth = depth_of(kinds_by_path, in_budget)
     coverage = (len(analysed_in_budget) / float(len(in_budget))) if in_budget else 0.0
     mode = mode_of(coverage, statements["total"])
 
@@ -413,6 +458,9 @@ def main():
                                   if not record.get("is_test")
                                   and record["path"] not in in_budget]),
             "unanalysed": sorted(in_budget - analysed_in_budget)[:20],
+            # Reported beside coverage rather than folded into it: the two answer
+            # different questions, and collapsing them would hide whichever is worse.
+            "depth": depth,
         },
         "statements": statements,
         "findings": findings,
@@ -434,6 +482,16 @@ def main():
         status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
         reasons.append("analysis mode is partial: %d of %d module(s) in the budget were "
                        "read" % (len(analysed_in_budget), len(in_budget)))
+
+    # Reported whatever the mode, and deliberately not folded into it: a run can be
+    # `per_module` on coverage and still answer one question in four, which is the
+    # document that comes back looking like an outline. Stated so the shortfall is in
+    # the report rather than in the reader's first impression of the pages.
+    if depth["full"] < len(in_budget):
+        reasons.append("depth: %d of %d module(s) in the budget answer all four of %s; "
+                       "the median module answers %d"
+                       % (depth["full"], len(in_budget), ", ".join(MODULE_KINDS),
+                          depth["median_kinds"]))
 
     if args.claims:
         try:

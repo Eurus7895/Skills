@@ -229,7 +229,7 @@ PRESETS = {
         ("architecture/module_reference", "Module reference", True, "modules"),
         ("architecture/class_diagrams", "Class diagrams", True, "class-views"),
         ("usage/python_api", "Python API", False, None),
-        ("usage/command_line", "Command line", False, None),
+        ("usage/command_line", "Command line", True, "running"),
         ("usage/configuration", "Configuration", True, "configuration"),
         ("usage/semantics", "Semantics", False, None),
         ("usage/output_and_side_effects", "Output and side effects", False, None),
@@ -857,6 +857,23 @@ def requirements_table(prefix, operations):
     return table("block:%s-requirements" % prefix, ("Requires", "Version", "Read at"), rows)
 
 
+# Which procedure page is the home of which operation kinds. Declared here rather than
+# left inline in each builder so `tools/test_operations_homes.py` can prove that a preset
+# renders every kind the operations schema defines. It could not, before: `manual` split
+# the procedures four ways and dropped `run` between the pieces, and nothing noticed --
+# the two-way `covers` check is about statement kinds, so a procedure with no page is a
+# silent loss of something the analysis actually recorded.
+PROCEDURE_HOMES = {
+    "getting-started": ("install", "build", "test", "run"),
+    "operations": ("configure", "deploy", "release", "observe"),
+    "installation": ("install", "build"),
+    "testing": ("test",),
+    "running": ("run",),
+    "configuration": ("configure",),
+    "release": ("deploy", "release", "observe"),
+}
+
+
 def procedure_page(prefix, operations, kinds, nothing_recorded):
     """One page's worth of procedures, from the kinds that page is the home of.
 
@@ -873,7 +890,7 @@ def procedure_page(prefix, operations, kinds, nothing_recorded):
 def installation_page(operations):
     """What must be present, and what installs or builds it."""
     blocks = procedure_page(
-        "installation", operations, ("install", "build"),
+        "installation", operations, PROCEDURE_HOMES["installation"],
         "The operations analysis records nothing about installing or building this "
         "repository.")
     requirements = requirements_table("installation", operations)
@@ -885,14 +902,28 @@ def installation_page(operations):
 def testing_page(operations):
     """The commands the repository declares run its tests."""
     return procedure_page(
-        "testing", operations, ("test",),
+        "testing", operations, PROCEDURE_HOMES["testing"],
         "The operations analysis records no test procedure for this repository.")
+
+
+def running_page(operations):
+    """The commands the repository declares actually run it.
+
+    Its own page because a manual's reader arrives wanting this one and nothing else,
+    and because the alternative -- filing it under installation -- is how it went
+    missing.
+    """
+    return procedure_page(
+        "running", operations, PROCEDURE_HOMES["running"],
+        "The operations analysis records no procedure for running this repository. A "
+        "library invoked from other code has none to record; a program that is started "
+        "some way does, and it was not written down.")
 
 
 def release_page(operations):
     """Deploying, releasing and watching -- what happens after the tests pass."""
     return procedure_page(
-        "release", operations, ("deploy", "release", "observe"),
+        "release", operations, PROCEDURE_HOMES["release"],
         "The operations analysis records nothing about deploying, releasing or watching "
         "this repository.")
 
@@ -900,7 +931,7 @@ def release_page(operations):
 def configuration_page(operations):
     """How the repository declares it is configured."""
     return procedure_page(
-        "configuration", operations, ("configure",),
+        "configuration", operations, PROCEDURE_HOMES["configuration"],
         "The operations analysis records no configuration procedure. What a "
         "configuration file must contain is a schema question, not a graph one.")
 
@@ -959,7 +990,7 @@ def traceability_page(index, claims, analysis, extra):
 def getting_started_page(operations):
     """Installing, building, testing and running -- what a newcomer does first."""
     blocks = procedure_page(
-        "getting-started", operations, ("install", "build", "test", "run"),
+        "getting-started", operations, PROCEDURE_HOMES["getting-started"],
         "The operations analysis records nothing about installing, building, testing or "
         "running this repository.")
     requirements = requirements_table("getting-started", operations)
@@ -971,7 +1002,7 @@ def getting_started_page(operations):
 def operations_page(operations):
     """Configuring, deploying, releasing and watching -- what running it involves."""
     blocks = procedure_blocks("operations", operations,
-                              ("configure", "deploy", "release", "observe"))
+                              PROCEDURE_HOMES["operations"])
     if not blocks:
         return [absence("block:operations-none",
                       "The operations analysis records nothing about configuring, "
@@ -1243,6 +1274,8 @@ BUILDERS = {
         installation_page(extra.get("operations")),
     "testing": lambda ix, frags, claims, by_id, an, kinds, extra:
         testing_page(extra.get("operations")),
+    "running": lambda ix, frags, claims, by_id, an, kinds, extra:
+        running_page(extra.get("operations")),
     "release": lambda ix, frags, claims, by_id, an, kinds, extra:
         release_page(extra.get("operations")),
     "configuration": lambda ix, frags, claims, by_id, an, kinds, extra:

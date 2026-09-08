@@ -93,7 +93,8 @@ author even on a run that has all four. Here they are generated.
 | `architecture/module_reference` | one row per module whose description survived verification | generated |
 | `architecture/class_diagrams` | the class graph and its rendered views | generated |
 | `usage/configuration` | the `configure` procedures | generated |
-| `usage/python_api`, `command_line`, `semantics`, `output_and_side_effects`, `errors_and_recovery` | — | **authored** |
+| `usage/command_line` | the `run` procedures, with their commands quoted | generated |
+| `usage/python_api`, `semantics`, `output_and_side_effects`, `errors_and_recovery` | — | **authored** |
 | `development/testing` | the `test` procedures, with their commands quoted | generated |
 | `development/ci_cd_and_release` | the `deploy`, `release` and `observe` procedures | generated |
 | `development/local_setup`, `code_quality`, `extending` | — | **authored** |
@@ -102,9 +103,16 @@ author even on a run that has all four. Here they are generated.
 | `appendix/supported_elements`, `glossary`, `troubleshooting` | — | **authored** |
 
 **The procedure kinds are partitioned across pages, never repeated.** `install`/`build` go to installation,
-`test` to testing, `deploy`/`release`/`observe` to CI and release, `configure` to configuration. A command
-shown on two pages reads as two different commands, so no kind has two homes — which is why this preset does
-not reuse the `getting-started` and `operations` builders that pack four kinds onto one page each.
+`test` to testing, `run` to the command-line page, `deploy`/`release`/`observe` to CI and release, `configure`
+to configuration. A command shown on two pages reads as two different commands, so no kind has two homes —
+which is why this preset does not reuse the `getting-started` and `operations` builders that pack four kinds
+onto one page each.
+
+**Every kind has a home, and `tools/test_operations_homes.py` proves it.** The partition is declared in
+`PROCEDURE_HOMES` rather than written into each builder, because when it was inline this preset covered seven
+kinds of eight: a `run` procedure quoted out of a README rendered nowhere, and the page a reader opens to find
+out how to start the thing was an authored stub. An empty page says the analysis recorded nothing; a dropped
+kind says nothing at all.
 
 **Rationale gets its own page**, as in `outside-in`, rather than being folded into the architecture overview.
 The content has its own builder and its own required-topic home; filing it under the module reference would
