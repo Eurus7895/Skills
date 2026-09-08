@@ -16,6 +16,12 @@ their arguments never vary, and the failures that came of typing them out were s
 left off produced a document that read like an inventory, a `--flow-report` left off produced counts that
 included flows nothing had validated. Neither is reachable from here.
 
+**There is no command that runs the whole pipeline**, and that is the design rather than a gap. Four of the
+judgements the document rests on — the scope, the module roles, the architecture, the prose promotions — sit
+between components, and every one of them is a checkpoint where `SKILL.md` requires the run to stop and ask.
+A driver that chained all five would step over all four, and none of the validators downstream can tell a
+wrong role or a wrong boundary from a right one.
+
 **The driver decides nothing.** Every stage is a script that was already the authority on its own question,
 invoked with the paths its component fixes. Where a genuine choice exists — the fan-in cutoff, the preset,
 whether Ruff runs — it is a flag with a default, not a rule hidden in the driver.

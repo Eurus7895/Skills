@@ -71,20 +71,46 @@ Everything except the finished document is written to **`.docs-build/`** in the 
 `structure.json`, the claims, fragments and analyses with their verified counterparts, `findings.jsonl`,
 `class-graph.json` and `doc.json`. Say so when you finish, and offer to delete it; nothing in there is meant to
 be committed. The rendered diagrams are the exception — they belong beside the document, in `docs/_diagrams/`.
+
+## Where the run pauses for the user
+
+Four steps below are not lookups. They are judgements the rest of the run is built on, and a wrong one
+survives every check that follows — a check compares a claim against evidence, never against what the
+repository is *for*. At each of them **stop, show what you have, ask, and wait for an answer before running
+the next component.**
+
+| Pause | After | Put in front of the user | Ask |
+| --- | --- | --- | --- |
+| **P1 scope** | step 1 | the selected units with their fan-in, the cutoff, and every warning the selection printed | is this the right scope to spend the budget on |
+| **P2 roles** | step 2 | one line per module — what you decided it is *for* — and every `unknown` | do these roles match what the repository is |
+| **P3 shape** | step 4 | the components and their boundaries, the flows traced and the ones refused, the operations found | is this the architecture, and are the boundaries where they would put them |
+| **P4 prose** | step 7 | each queued block with the verb you propose and the evidence under it | are these the intended readings |
+
+A pause is a question with the material attached, not a request for permission: the user should be able to
+answer without opening a file. Summarise — a pause that pastes a whole JSONL file is not a question. Then
+**carry the answer back into the artefact** before continuing; a correction agreed in chat and not written
+into `module-analysis.jsonl` is lost at the next stage.
+
+**Do not pause anywhere else.** Steps 3, 5, 6 and 8 read findings a script produced and act on a documented
+table, and step 3's re-dispatch is bounded at two attempts. Asking about those spends the user's attention on
+something already decided. If the user says to run unattended, note at each pause what you chose and why,
+and put the same list in the closing report.
+
 ## Steps
 
-The pipeline is five components, each a directory under `scripts/` and each run by one command. **The three
-pauses between them are the pipeline**: a module's purpose is not in an index, what the modules add up to is
-not in a claim, and a sentence a reader sees may not outrun the analysis behind it. What you write goes in
-`.docs-build/`; the next component reads it from there.
+The pipeline is five components, each a directory under `scripts/` and each run by one command. **The gaps
+between them are the pipeline**: a module's purpose is not in an index, what the modules add up to is not in a
+claim, and a sentence a reader sees may not outrun the analysis behind it. What you write goes in
+`.docs-build/`; the next component reads it from there. The driver runs one component per invocation for this
+reason — the pauses above fall in the gaps, and nothing chains past one on its own.
 
-| Component | Asks | Run it, then write |
-| --- | --- | --- |
-| `survey` | what is in this repository | — |
-| `analyze` | what you need in front of you | `module-analysis.jsonl`, `fragments.jsonl`, any `calls` claim |
-| `check` | whether the claims hold | `architecture-analysis.json`, `flow-analysis.json`, `operations-analysis.json` |
-| `document` | what the pages will say | — fix what its findings name |
-| `publish` | what a reader gets, and whether the run is done | `prose-review.jsonl`, then rerun `publish --review` |
+| Component | Asks | Run it, then write | Pause |
+| --- | --- | --- | --- |
+| `survey` | what is in this repository | — | P1 |
+| `analyze` | what you need in front of you | `module-analysis.jsonl`, `fragments.jsonl`, any `calls` claim | P2 |
+| `check` | whether the claims hold | `architecture-analysis.json`, `flow-analysis.json`, `operations-analysis.json` | P3 |
+| `document` | what the pages will say | — fix what its findings name | — |
+| `publish` | what a reader gets, and whether the run is done | `prose-review.jsonl`, then rerun `publish --review` | P4 |
 
 A component stops at the first stage that fails and names it, and exit codes pass through unchanged: `0` fine,
 `1` a policy the stage enforces was not met, `2` bad input or a missing dependency, `3` internal. **`1` is a
@@ -128,6 +154,9 @@ Ruff's import-usage annotation is advisory and additive. **An unused import is n
 is unnecessary** — re-export, side effects, registration and dynamic discovery all look identical from here.
 Report the count in the limitations with that caveat, and never propose removing an import as part of
 documenting. `--policy disabled` if the user does not want an external tool invoked.
+
+**Pause here — P1.** The scope is the one decision that cannot be corrected later without paying for the
+analysis twice. Show the units, the cutoff and the warnings, and ask before spending the budget.
 
 ### 2. Analyze one scope at a time, from a context packet
 
@@ -183,6 +212,9 @@ Three rules hold for every row you write, whatever else you skip:
 Why each of those matters, how to read a packet and its omission manifest, and the other query modes are in
 [`references/context-policy.md`](references/context-policy.md).
 
+**Pause here — P2.** Every page downstream is built on these roles, and no later stage can tell a wrong role
+from a right one. List them, one line per module, mark the `unknown`s, and ask.
+
 ### 3. Check
 
 ```bash
@@ -231,6 +263,10 @@ commands from the file**: a `command` or a requirement `value` must appear chara
 lines it cites.
 
 Both of the last two are best effort, and a repository that yields neither says so.
+
+**Pause here — P3.** Detector B in step 8 can tell you the components are the directory tree; nobody but the
+user can tell you they are the wrong components. Show the boundaries and the rationale for each, name what was
+traced and what came back `absent`, and ask.
 
 ### 5. Document
 
@@ -286,6 +322,9 @@ Every check before this asks whether a statement had evidence; none asks whether
 still says what it said. **A block may not use a stronger relationship verb than its sources carry** — an
 import proves a reference, so it may not be rendered *depends on* — and **a reading must stay a reading**.
 Read every `P003` and `P004`: they are promotions, not style.
+
+**Pause here — P4.** A verdict of `ok` is you telling the reader the stronger sentence is true, on evidence
+that does not carry it. Put each queued block next to its evidence and ask before writing the file.
 
 Write your verdicts to `.docs-build/prose-review.jsonl` and run the component again:
 
