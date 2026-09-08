@@ -249,11 +249,13 @@ class graph and its diagrams, draws any traced flow as a sequence, and builds `d
 `view-spec.json` may choose detail, layers and emphasis; it may **not** add a class, drop one, change what
 connects to what, or set its own scope. See [`references/diagram-policy.md`](references/diagram-policy.md).
 
-The preset is chosen from what the build directory holds: `outside-in` once an architecture analysis exists,
+The preset is chosen from what the build directory holds: `outside-in` once any of the three analyses exists,
 `onboarding` otherwise, and `--preset` overrides. `outside-in` opens on what the repository is rather than on
-its dependency graph, and it is the only preset that puts the components, their rationale and the operations
-on a page. `handbook` fits an existing tree and **updates** its authored pages rather than generating over
-them. All of them are in [`references/presets.md`](references/presets.md).
+its dependency graph. **`--preset manual`** lays the same material out as a delivered manual —
+`getting_started/`, `architecture/`, `usage/`, `development/`, `appendix/` — generating what those analyses
+can fill and naming the rest as the author's; use it when the deliverable is a product manual rather than an
+architecture report. `handbook` fits an existing tree and **updates** its authored pages rather than
+generating over them. All of them are in [`references/presets.md`](references/presets.md).
 
 ### 6. Publish
 

@@ -105,6 +105,14 @@ PRESET_COVERS = {
         "modules": ("responsibility", "state", "interface", "failure"),
         "architecture": (),
     },
+    # Same split as outside-in: this preset gives rationale and interaction their own
+    # pages too, so the module reference must not also claim them.
+    "manual": {
+        "components": ("interaction",),
+        "rationale": ("rationale",),
+        "modules": ("responsibility", "state", "interface", "failure"),
+        "architecture": (),
+    },
 }
 
 # Which builders may be the home of a required topic, per preset. Without this a preset
@@ -114,6 +122,14 @@ PRESET_COVERS = {
 # homes is what makes "every mandatory topic has a page" mean a page a reader would look
 # on.
 REQUIRED_TOPICS = {
+    "manual": {
+        "interaction": ("components",),
+        "rationale": ("rationale",),
+        "responsibility": ("modules",),
+        "state": ("modules",),
+        "interface": ("modules",),
+        "failure": ("modules",),
+    },
     "outside-in": {
         "interaction": ("components",),
         "rationale": ("rationale",),
@@ -194,6 +210,41 @@ PRESETS = {
     # glossary are things a person knows -- so this pipeline fills the four pages that
     # are, lists the rest, and writes none of them. Those stay the author's, and the
     # skill updates them against verified claims one at a time.
+    # The five-area tree a delivered manual usually has, filled from everything C5-C7
+    # produced. It differs from `handbook` in what it can generate rather than in shape:
+    # handbook predates the architecture, flow and operations analyses, so it leaves the
+    # component map, the processing flow, the procedures and the coverage page to an
+    # author. Here those are generated, and what remains authored is what genuinely
+    # cannot be read off a dependency graph -- an API guide, a configuration schema, a
+    # glossary, a troubleshooting table.
+    "manual": [
+        ("getting_started/introduction", "Introduction", True, "product-overview"),
+        ("getting_started/installation", "Installation", True, "installation"),
+        ("getting_started/quick_start", "Quick start", False, None),
+        ("architecture/overview", "Architecture overview", True, "components"),
+        ("architecture/processing_flow", "Processing flow", True, "flows"),
+        ("architecture/boundaries", "Boundaries and what crosses them", True,
+         "architecture"),
+        ("architecture/design_decisions", "Design decisions", True, "rationale"),
+        ("architecture/module_reference", "Module reference", True, "modules"),
+        ("architecture/class_diagrams", "Class diagrams", True, "class-views"),
+        ("usage/python_api", "Python API", False, None),
+        ("usage/command_line", "Command line", False, None),
+        ("usage/configuration", "Configuration", True, "configuration"),
+        ("usage/semantics", "Semantics", False, None),
+        ("usage/output_and_side_effects", "Output and side effects", False, None),
+        ("usage/errors_and_recovery", "Errors and recovery", False, None),
+        ("development/local_setup", "Local setup", False, None),
+        ("development/testing", "Testing", True, "testing"),
+        ("development/code_quality", "Code quality", False, None),
+        ("development/extending", "Extending it", False, None),
+        ("development/ci_cd_and_release", "CI, CD and release", True, "release"),
+        ("appendix/supported_elements", "Supported elements", False, None),
+        ("appendix/glossary", "Glossary", False, None),
+        ("appendix/troubleshooting", "Troubleshooting", False, None),
+        ("appendix/limitations", "Limitations", True, "limitations"),
+        ("appendix/traceability", "Traceability", True, "traceability"),
+    ],
     "handbook": [
         ("getting_started/introduction", "Introduction", True, None),
         ("getting_started/installation_integrators", "Installation", True, None),
@@ -793,23 +844,127 @@ def procedure_blocks(prefix, operations, kinds):
     return blocks
 
 
-def getting_started_page(operations):
-    """Installing, building, testing and running -- what a newcomer does first."""
-    blocks = procedure_blocks("getting-started", operations,
-                              ("install", "build", "test", "run"))
-    if not blocks:
-        blocks = [absence("block:getting-started-none",
-                        "The operations analysis records nothing about installing, "
-                        "building, testing or running this repository.")]
-    requirements = (operations or {}).get("requirements") or ()
+def requirements_table(prefix, operations):
+    """What the repository declares it needs, or nothing if it declares nothing."""
     rows = [(str(r.get("name", "")), str(r.get("value", "") or "-"),
              next((cite(e["path"], e["line_start"])
                    for e in r.get("evidence", ()) or ()
                    if isinstance(e, dict) and e.get("path") and e.get("line_start")), "-"))
-            for r in requirements if isinstance(r, dict)]
-    if rows:
-        blocks.insert(0, table("block:getting-started-requirements",
-                               ("Requires", "Version", "Read at"), rows))
+            for r in (operations or {}).get("requirements") or ()
+            if isinstance(r, dict)]
+    if not rows:
+        return None
+    return table("block:%s-requirements" % prefix, ("Requires", "Version", "Read at"), rows)
+
+
+def procedure_page(prefix, operations, kinds, nothing_recorded):
+    """One page's worth of procedures, from the kinds that page is the home of.
+
+    A preset that gives testing and releasing their own pages needs the procedures split
+    the way its tree splits them; the alternative is one page carrying every kind and the
+    reader hunting for the two commands that concern them.
+    """
+    blocks = procedure_blocks(prefix, operations, kinds)
+    if not blocks:
+        return [absence("block:%s-none" % prefix, nothing_recorded)]
+    return blocks
+
+
+def installation_page(operations):
+    """What must be present, and what installs or builds it."""
+    blocks = procedure_page(
+        "installation", operations, ("install", "build"),
+        "The operations analysis records nothing about installing or building this "
+        "repository.")
+    requirements = requirements_table("installation", operations)
+    if requirements is not None:
+        blocks.insert(0, requirements)
+    return blocks
+
+
+def testing_page(operations):
+    """The commands the repository declares run its tests."""
+    return procedure_page(
+        "testing", operations, ("test",),
+        "The operations analysis records no test procedure for this repository.")
+
+
+def release_page(operations):
+    """Deploying, releasing and watching -- what happens after the tests pass."""
+    return procedure_page(
+        "release", operations, ("deploy", "release", "observe"),
+        "The operations analysis records nothing about deploying, releasing or watching "
+        "this repository.")
+
+
+def configuration_page(operations):
+    """How the repository declares it is configured."""
+    return procedure_page(
+        "configuration", operations, ("configure",),
+        "The operations analysis records no configuration procedure. What a "
+        "configuration file must contain is a schema question, not a graph one.")
+
+
+def join_names(names):
+    """"a", "a and b", "a, b and c" -- an Oxford-free list a sentence can hold."""
+    names = list(names)
+    if len(names) < 3:
+        return " and ".join(names)
+    return "%s and %s" % (", ".join(names[:-1]), names[-1])
+
+
+def traceability_page(index, claims, analysis, extra):
+    """Which scan this document is about, and what may be checked against what.
+
+    A reviewer's first question is not what the document says but whether they can tell
+    where any of it came from. The scan identity and the artefact list answer that, and
+    both are facts about the run rather than readings of the repository -- which is why
+    this page can be generated at all while most of an appendix cannot.
+    """
+    source = index.get("source") or {}
+    revision = source.get("revision")
+    rows = [
+        ("index hash", str(index.get("index_hash", "-"))),
+        ("revision scanned", str(revision or "not a git repository")),
+        # Outside a git repository there is no clean state to be dirty against, and the
+        # scanner's default would otherwise read as "someone had uncommitted work".
+        ("working tree dirty at scan",
+         "-" if not revision else "yes" if source.get("dirty") else "no"),
+        ("files scanned", str((index.get("coverage") or {}).get("files_scanned", 0))),
+        ("claims carried", str(len(claims))),
+        ("modules read", str(len(getattr(analysis, "rows", ()) or ()))),
+        ("statements carried", str(len(getattr(analysis, "by_id", {}) or {}))),
+    ]
+    supplied = [name for name, key in (("architecture", "architecture"),
+                                       ("flows", "flows"),
+                                       ("operations", "operations"))
+                if (extra or {}).get(key)]
+    blocks = [
+        prose("block:traceability-intro",
+              "Every structural claim in this document cites a file and a line in the "
+              "scan named below. A statement that reads rather than reports is labelled "
+              "as a reading; where the repository never said, the page says so instead "
+              "of supplying a reason."),
+        table("block:traceability-scan", ("Measure", "Value"), rows),
+        prose("block:traceability-artifacts",
+              "Generated from: the index, the derived and verified claims, the module "
+              "analyses%s, and the rendered diagrams. Each is written under the build "
+              "directory and none of it is meant to be committed."
+              % ("" if not supplied else ", the %s analys%s"
+                 % (join_names(supplied), "is" if len(supplied) == 1 else "es"))),
+    ]
+    return blocks
+
+
+def getting_started_page(operations):
+    """Installing, building, testing and running -- what a newcomer does first."""
+    blocks = procedure_page(
+        "getting-started", operations, ("install", "build", "test", "run"),
+        "The operations analysis records nothing about installing, building, testing or "
+        "running this repository.")
+    requirements = requirements_table("getting-started", operations)
+    if requirements is not None:
+        blocks.insert(0, requirements)
     return blocks
 
 
@@ -1084,6 +1239,16 @@ BUILDERS = {
     "class-views": lambda ix, frags, claims, by_id, an, kinds, extra: class_views_page(ix),
     "limitations": lambda ix, frags, claims, by_id, an, kinds, extra: limitations_page(
         ix, frags, claims, an),
+    "installation": lambda ix, frags, claims, by_id, an, kinds, extra:
+        installation_page(extra.get("operations")),
+    "testing": lambda ix, frags, claims, by_id, an, kinds, extra:
+        testing_page(extra.get("operations")),
+    "release": lambda ix, frags, claims, by_id, an, kinds, extra:
+        release_page(extra.get("operations")),
+    "configuration": lambda ix, frags, claims, by_id, an, kinds, extra:
+        configuration_page(extra.get("operations")),
+    "traceability": lambda ix, frags, claims, by_id, an, kinds, extra:
+        traceability_page(ix, claims, an, extra),
 }
 
 

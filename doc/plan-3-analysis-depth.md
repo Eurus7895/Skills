@@ -474,6 +474,33 @@ The boundary leaks in two places, both deliberate and both written down:
 them about what it is counting, and `document/` writes the diagrams that `publish/` renders
 references to.
 
+### C8d. A preset shaped like a delivered manual
+
+**Done.** A blueprint supplied for a real repository asked for the five-area tree a
+manual usually has -- `getting_started/`, `architecture/`, `usage/`, `development/`,
+`appendix/` -- and `handbook` was the closest preset to it while being the one that can
+fill the least: it predates C6 and C7, so it leaves the component map, the processing
+flow, the procedures and the coverage page to an author even when the run has all four.
+
+`manual` is that tree with those pages generated. Thirteen of its twenty-six pages are
+filled from the index and the three analyses; the rest are named as the author's, because
+an API guide, a configuration schema, a glossary and a troubleshooting table do not
+follow from a dependency graph and generating them anyway is the unverifiable prose this
+skill exists to prevent.
+
+Two things it needed that did not exist. The operations procedures had to be **split four
+ways** -- install/build, test, deploy/release/observe, configure -- because the existing
+two builders pack four kinds onto one page each, and a command shown on two pages reads
+as two commands; `procedure_page` takes the kinds its page is the home of. And
+`appendix/traceability` is a new page: the scan identity, the citation convention and the
+artefact list are facts about the run rather than readings of the repository, which is
+why that appendix page can be generated when most cannot.
+
+Building it caught two defects in its own output before anything shipped: a non-git tree
+reported as having a dirty working tree, because the scanner's default is `true` and
+there is no clean state to be dirty against; and the analysis list rendering as "the
+architecture and flows and operations analyses".
+
 ### C9. A8b, then A9
 
 Run the whole thing on a real repository (plan 2's A8b), read the output as a reader
