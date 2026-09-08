@@ -18,8 +18,10 @@ import subprocess
 import sys
 import tempfile
 
+from component_scripts import script
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPT = os.path.join(REPO, "shared", "scripts", "validate_analysis.py")
+SCRIPT = script("validate_analysis.py")
 CONTRACTS = os.path.join(REPO, "tests", "contracts")
 INDEX = os.path.join(CONTRACTS, "structure-v2-minimal.json")
 VALID = os.path.join(CONTRACTS, "module-analysis-v1-valid.jsonl")
@@ -127,10 +129,19 @@ def main():
         rows = rows_of(VALID)
         anchorless = [["Serves as the primary boundary between the outside world and "
                        "everything behind it.",
-                       "Coordinates the pieces below it without owning any of them."],
+                       "Coordinates the pieces below it without owning any of them.",
+                       "Retains nothing once a request has been dealt with.",
+                       "Presents a small surface to whoever arrives first.",
+                       "Gives up quietly when the layer beneath refuses."],
                       ["Holds persistent structures used widely across the system.",
-                       "Offers a stable surface that callers elsewhere depend upon."]]
+                       "Offers a stable surface that callers elsewhere depend upon.",
+                       "Keeps what it was handed for as long as it lives.",
+                       "Answers to one caller at a time and no more.",
+                       "Reports nothing in particular when a write cannot happen."]]
+        # Every statement, not the first two: a row with one anchored sentence left in it
+        # counts as read, and the assertion below would pass on the wrong evidence.
         for row, texts in zip(rows, anchorless):
+            assert len(texts) >= len(row["statements"]), "not enough anchorless prose"
             for statement, text in zip(row["statements"], texts):
                 statement["text"] = text
         code, report = run(write(tmp, "anchorless.jsonl", rows))

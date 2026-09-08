@@ -37,6 +37,92 @@ inventory, and adds a fan-in ranking and the inheritance forest.
 **`architecture` has no module reference on purpose.** A reader who already knows the domain wants the shape,
 not the inventory; someone who wants a file-by-file list should generate `onboarding` instead.
 
+## `outside-in`
+
+What the thing is, then how to run it, then how it is built, then the inventory. Every other preset here
+opens on structure — the dependency graph, the entry points — which answers the question a reader has
+fourth. This is also the only preset that consumes the architecture and operations analyses, so it is the
+one to use when step 4 was done.
+
+| Page | Contains | Mandatory |
+| --- | --- | --- |
+| `overview` | What was scanned, in what languages, at what revision, and the ways in | yes |
+| `getting-started` | Install, build, test and run procedures with their quoted commands, plus declared requirements | yes |
+| `conventions` | **Named, never written** — a team's conventions are not in a dependency graph | no |
+| `architecture` | Import edges that cross a directory boundary, each with the line that proves it | yes |
+| `components` | The components the architecture analysis names, what each holds, and what crosses between them | yes |
+| `rationale` | Why each boundary is where it is, and the ones nobody recorded a reason for | yes |
+| `flows` | The traced chains, or the stated reason there are none | yes |
+| `operations` | Configure, deploy, release and observe procedures | yes |
+| `reference` | One row per module whose description survived verification | yes |
+
+Pass `--architecture` and `--operations` alongside `--analysis` and `--flows`. Without them the pages still
+build and say the analysis was not supplied — a visibly thinner document, never a silently thinner one.
+
+**Two rules hold this preset together**, and both are checked before `doc.json` is written:
+
+- **A required topic must live on a page a reader would look on for it.** `interaction` belongs to
+  `components` and `rationale` to `rationale`; a preset that homed either on the module reference would
+  satisfy the coverage check while filing the system's shape under a list of files, and is rejected.
+- **A mandatory page must have something to say.** It has to cite a claim or statement, render structured
+  material an input actually holds, or carry a block marked as an *absence* — "nothing here, and why". Bare
+  prose satisfies none of those and fails the build. The first version of this preset's overview passed a
+  weaker version of the rule with two uncited sentences, a file count and a list of entry points, which is
+  not an answer to "what is this"; requiring the marker is what closed that.
+
+## `manual`
+
+The five-area tree a delivered manual usually has — `getting_started/`, `architecture/`, `usage/`,
+`development/`, `appendix/` — filled from everything steps 2 to 4 produced. Use it when the deliverable is a
+product manual rather than an architecture report, and when the run has the architecture, flow and operations
+analyses to fill it with.
+
+**It differs from `handbook` in what it can generate, not in shape.** `handbook` predates those three
+analyses, so it leaves the component map, the processing flow, the procedures and the coverage page to an
+author even on a run that has all four. Here they are generated.
+
+| Page | Filled from | |
+| --- | --- | --- |
+| `getting_started/introduction` | what was scanned, its languages, the ways in | generated |
+| `getting_started/installation` | declared requirements, and the install and build procedures | generated |
+| `getting_started/quick_start` | — | **authored** |
+| `architecture/overview` | the components, their layers, and what crosses between them | generated |
+| `architecture/processing_flow` | the traced chains, or the stated reason there are none | generated |
+| `architecture/boundaries` | import edges that cross a directory, each with its proof line | generated |
+| `architecture/design_decisions` | why each boundary is there, and the ones nobody recorded | generated |
+| `architecture/module_reference` | one row per module whose description survived verification | generated |
+| `architecture/class_diagrams` | the class graph and its rendered views | generated |
+| `usage/configuration` | the `configure` procedures | generated |
+| `usage/command_line` | the `run` procedures, with their commands quoted | generated |
+| `usage/python_api`, `semantics`, `output_and_side_effects`, `errors_and_recovery` | — | **authored** |
+| `development/testing` | the `test` procedures, with their commands quoted | generated |
+| `development/ci_cd_and_release` | the `deploy`, `release` and `observe` procedures | generated |
+| `development/local_setup`, `code_quality`, `extending` | — | **authored** |
+| `appendix/limitations` | coverage counts, unresolved claims, scanner diagnostics | generated |
+| `appendix/traceability` | the scan identity, the citation convention, the artefacts | generated |
+| `appendix/supported_elements`, `glossary`, `troubleshooting` | — | **authored** |
+
+**The procedure kinds are partitioned across pages, never repeated.** `install`/`build` go to installation,
+`test` to testing, `run` to the command-line page, `deploy`/`release`/`observe` to CI and release, `configure`
+to configuration. A command shown on two pages reads as two different commands, so no kind has two homes —
+which is why this preset does not reuse the `getting-started` and `operations` builders that pack four kinds
+onto one page each.
+
+**Every kind has a home, and `tools/test_operations_homes.py` proves it.** The partition is declared in
+`PROCEDURE_HOMES` rather than written into each builder, because when it was inline this preset covered seven
+kinds of eight: a `run` procedure quoted out of a README rendered nowhere, and the page a reader opens to find
+out how to start the thing was an authored stub. An empty page says the analysis recorded nothing; a dropped
+kind says nothing at all.
+
+**Rationale gets its own page**, as in `outside-in`, rather than being folded into the architecture overview.
+The content has its own builder and its own required-topic home; filing it under the module reference would
+satisfy the coverage check while putting "why is this boundary here" in a list of files.
+
+Two pages a reader might expect are deliberately not here. There is no root overview page beyond
+`getting_started/introduction` — `index.rst` is the renderer's, and a second front page competes with it. And
+there is no separate components page: `architecture/overview` is that page, because the blueprint this tree
+follows asks the overview to be a component map rather than a list of imports.
+
 ## `handbook`
 
 The layout a delivered manual usually has: `getting_started/`, `architecture/`, `usage/`, `development/`,
@@ -72,7 +158,7 @@ Page ids in this preset contain `/`, and a page id is its path under the output 
 
 ## What the model may and may not decide
 
-The agent chooses which modules are in scope (step 3 of `SKILL.md`), what each one's role is, and which
+The agent chooses which modules are in scope (`units.txt`, from step 1 of `SKILL.md`), what each one's role is, and which
 claims support it. It does **not** choose whether the limitations page exists. Every mandatory page is
 generated whether or not there is much to put on it, because a document that silently omits its own coverage
 section reads exactly like one with nothing to disclose.
@@ -104,6 +190,10 @@ with the extension enabled will never show this, so the check belongs against th
 Presets live in `PRESETS` in `build_document_model.py`, as `(page_id, title, mandatory, builder)` rows.
 `builder` names an entry in `BUILDERS`, so a new preset that reuses existing builders needs no new code — the
 page id and the builder are separate, which is how `architecture/data_flow` is filled by the `flows` builder.
+
+A preset whose tree splits a subject finer than an existing builder does needs its own builders rather than
+the same one on two pages: `manual` splits the operations procedures four ways for that reason, over
+`procedure_page`, which takes the kinds its page is the home of.
 
 `builder` may be `None`. That declares a page the pipeline cannot fill: it is listed in `authored_pages`,
 reported as not generated, and never written. Prefer `None` over a builder that would emit a placeholder —

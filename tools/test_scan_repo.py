@@ -18,8 +18,10 @@ import subprocess
 import sys
 import tempfile
 
+from component_scripts import script
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPT = os.path.join(REPO, "shared", "scripts", "scan_repo.py")
+SCRIPT = script("scan_repo.py")
 
 FAILURES = []
 

@@ -360,6 +360,49 @@ and MyST rendering do not change.
 covering statement fails, the existing presets still render, and coverage reports a
 denominator per required section rather than one figure for the tree.
 
+**Done.** Three notes:
+
+- **`architecture-analysis.json` had no reader.** C6 built it, `validate_architecture.py`
+  checked it and Detector B judged whether it was a rename — and then the document went
+  on describing the import graph, because nothing wired the synthesis into
+  `build_document_model.py`. The same was true of `operations-analysis.json` after C7.
+  Both were validated artefacts nobody rendered. Worth checking, for any artefact this
+  plan adds, that something downstream actually consumes it; validation is not use.
+- The two rules are properties of a *preset*, not of a document, so the only way to
+  exercise them is to construct a bad preset. The tests patch `PRESET_COVERS` and
+  `BUILDERS` in process and call `validate` directly. A preset that homed `interaction`
+  on the module reference would otherwise satisfy every coverage check while filing the
+  system's shape under a list of files.
+- Builders now take an `extra` mapping rather than a positional parameter each. Three
+  optional artefacts arrived in two commits; a fourth would have been a fourth signature
+  change across ten lambdas.
+
+**Corrected after a real run.** Pointed at this repository, the outside-in overview
+rendered two sentences — a file count and a list of entry points — and passed, because
+the rule as first written caught an *empty* page rather than a thin one. Three fixes:
+the overview reads the fragments and carries the busiest modules with what they are for,
+as the onboarding one always did; a page must now cite something, render structured
+material, or carry a block explicitly marked as an **absence**; and every "nothing here"
+block in every builder is marked, since nothing else distinguishes a page reporting an
+absence from a builder that quietly ran out of things to say. Two pages failed the
+tightened rule immediately — `rationale` with no architecture analysis, and `architecture`
+on a repository whose imports cross no directory — which is the rule working.
+
+**Two findings for A8b, not fixed here because both are policy:**
+
+- **Fan-in ranks the fixtures above the product.** On this repository the top five by
+  fan-in are `tests/contracts/` and `fixtures/` files, because the pipeline's own scripts
+  are standalone CLIs invoked by subprocess and import nothing from each other. Step 3
+  picks scope by fan-in, so on a repository of scripts it selects the test data. The
+  overview is honest about what the graph shows; the graph is the wrong instrument here.
+- **The entry-point heuristic matches 50 of 104 files** for the same reason. The page now
+  says so and calls them candidates rather than the ways in, which is a caption fix, not
+  a heuristic fix.
+
+`conventions` is in the preset and deliberately unfilled — a team's conventions are not
+in a dependency graph. It is named so the skill updates it and the report can say it was
+not generated, exactly as `handbook` treats its authored pages.
+
 ### C8b. The prose may not say more than the analysis
 
 Everything up to here checks that a statement had evidence. Nothing checks that the
@@ -376,6 +419,87 @@ what survives those rules goes to a bounded model pass, under the budgets above.
 *Done when* a seeded contradiction fails — a page saying *owns* over a `calls` claim, a page
 asserting a rationale recorded as `unknown` — the honest fixture passes, and exhausting the
 budget returns `review_required` rather than a verdict.
+
+**Done**, and the limits are worth stating plainly because the check is easy to overrate.
+
+- **The verb ladder only reaches blocks that carry a citation.** On the outside-in preset
+  that is 5 of 22 blocks: the components, rationale, flows and operations tables are
+  rendered mechanically from their analyses and record no `claim_refs` or `analysis_refs`.
+  That is defensible — a mechanical render is not a rewrite, and there is nothing to have
+  overstated — but it means rule 1 is a check on *statement-derived prose*, not on the
+  document. Uncited blocks are reported as `P005` advisory rather than quietly skipped.
+- **Rule 2 reaches those tables, and does it by substring.** The renderer prefixes a hedge
+  to the analysis's own sentence, so dropping the hedge leaves that sentence bare and the
+  match finds it. A *rewritten* sentence escapes. That is the model pass's job, and saying
+  so is better than implying the deterministic pass is tighter than it is.
+- **`block_text` has to include table column headers.** Leaving them out made the rationale
+  page's "The question nobody answered" table read as a set of assertions — a false
+  positive on the one page written to be honest about not knowing. A checker that fails the
+  honest fixture gets switched off, so this was the bug most worth catching.
+
+`review_required` is now a real status in `quality_docs.py`, ranked below `partial` and
+above `failed`: it can never be reported as a pass, and a real defect still outranks "could
+not tell". The model pass itself is not run by the script — the agent runs it and writes
+verdicts to a JSONL — which is the only shape that fits a pipeline whose model is the
+caller.
+
+SKILL.md is at its 500-line ceiling with nothing left to compress. The step 6 finding-to-
+action table moved to `references/schemas.md` to make room for step 8b. C9 has none.
+
+### C8c. Five components, and a driver for the deterministic stretch
+
+**Done.** An audit of the twelve steps found six of them carrying no model judgement at
+all -- two said "decide nothing" in their own text -- and eleven of about nineteen
+invocations existing only to move files between fixed paths under `.docs-build/`. The
+step-3 scope selection was the one piece of pipeline logic with no script behind it, so no
+test and no exit code; it is now `survey/select_units.py`, which also breaks ties by path
+and warns when fan-in ranks nothing, the A8b finding it was closest to.
+
+`scripts/` is now one directory per component -- `survey`, `analyze`, `check`, `document`,
+`publish` -- with `pipeline.py` running one component per invocation. It stops at the first
+stage that fails, names it, and passes the exit code through unchanged; two stages may fail
+without stopping their component and say so as they do. SKILL.md went from 500 lines to
+356, and the mechanics moved to `references/pipeline.md`.
+
+Two things the wiring turned up, both fixed here. `validate_flow_diagrams.py` reported the
+class diagram as an unclaimed `.puml`, because both families are written into
+`docs/_diagrams/` on the skill's own instructions and each validator read back only its
+own -- so following step 7 verbatim had always produced a `G007`. And a re-run of the
+survey silently destroyed hand-written `calls` claims, since `derive_claims` owns the file
+they are appended to; `analyze` now refuses rather than overwriting, and `--force` says the
+scan is what changed.
+
+The boundary leaks in two places, both deliberate and both written down:
+`publish/quality_docs.py` imports from `check/` and `document/` because it has to agree with
+them about what it is counting, and `document/` writes the diagrams that `publish/` renders
+references to.
+
+### C8d. A preset shaped like a delivered manual
+
+**Done.** A blueprint supplied for a real repository asked for the five-area tree a
+manual usually has -- `getting_started/`, `architecture/`, `usage/`, `development/`,
+`appendix/` -- and `handbook` was the closest preset to it while being the one that can
+fill the least: it predates C6 and C7, so it leaves the component map, the processing
+flow, the procedures and the coverage page to an author even when the run has all four.
+
+`manual` is that tree with those pages generated. Thirteen of its twenty-six pages are
+filled from the index and the three analyses; the rest are named as the author's, because
+an API guide, a configuration schema, a glossary and a troubleshooting table do not
+follow from a dependency graph and generating them anyway is the unverifiable prose this
+skill exists to prevent.
+
+Two things it needed that did not exist. The operations procedures had to be **split four
+ways** -- install/build, test, deploy/release/observe, configure -- because the existing
+two builders pack four kinds onto one page each, and a command shown on two pages reads
+as two commands; `procedure_page` takes the kinds its page is the home of. And
+`appendix/traceability` is a new page: the scan identity, the citation convention and the
+artefact list are facts about the run rather than readings of the repository, which is
+why that appendix page can be generated when most cannot.
+
+Building it caught two defects in its own output before anything shipped: a non-git tree
+reported as having a dirty working tree, because the scanner's default is `true` and
+there is no clean state to be dirty against; and the analysis list rendering as "the
+architecture and flows and operations analyses".
 
 ### C9. A8b, then A9
 

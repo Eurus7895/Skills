@@ -23,10 +23,12 @@ import subprocess
 import sys
 import tempfile
 
+from component_scripts import script
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCANNER = os.path.join(REPO, "shared", "scripts", "scan_repo.py")
-BUILDER = os.path.join(REPO, "shared", "scripts", "build_document_model.py")
-RENDERER = os.path.join(REPO, "shared", "scripts", "render_docs.py")
+SCANNER = script("scan_repo.py")
+BUILDER = script("build_document_model.py")
+RENDERER = script("render_docs.py")
 
 FAILURES = []
 
@@ -339,7 +341,7 @@ def main():
         contracts = os.path.join(REPO, "tests", "contracts")
         diagrams = os.path.join(tmp, "_diagrams")
         subprocess.run([sys.executable,
-                        os.path.join(REPO, "shared", "scripts", "build_diagrams.py"),
+                        script("build_diagrams.py"),
                         "--class-graph",
                         os.path.join(contracts, "class-graph-v1-minimal.json"),
                         "--detail-views",

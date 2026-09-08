@@ -18,8 +18,10 @@ import subprocess
 import sys
 import tempfile
 
+from component_scripts import script
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPT = os.path.join(REPO, "shared", "scripts", "detect_stack.py")
+SCRIPT = script("detect_stack.py")
 
 FAILURES = []
 

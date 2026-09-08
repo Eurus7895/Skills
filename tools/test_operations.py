@@ -23,8 +23,9 @@ import subprocess
 import sys
 import tempfile
 
+from component_scripts import script
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPTS = os.path.join(REPO, "shared", "scripts")
 FIXTURE = os.path.join(REPO, "tests", "contracts", "flow-repo")
 
 FAILURES = []
@@ -38,8 +39,8 @@ def check(name, condition, detail=""):
         FAILURES.append(name)
 
 
-def run(script, *args):
-    proc = subprocess.run([sys.executable, os.path.join(SCRIPTS, script)] + list(args),
+def run(name, *args):
+    proc = subprocess.run([sys.executable, script(name)] + list(args),
                           capture_output=True, text=True)
     return proc.returncode, proc.stdout, proc.stderr
 
@@ -245,6 +246,24 @@ def main():
         code, report = validate(both, "both.json")
         check("claiming operations and absence at once is O013",
               "O013" in codes(report), repr(codes(report)))
+
+        # A key the schema does not define renders nowhere, and saying nothing about it
+        # leaves the author to discover that by reading the pages. Requirements are a
+        # top-level field; one written inside a procedure validated cleanly and vanished.
+        misplaced = json.loads(json.dumps(honest))
+        misplaced["procedures"][0]["requirements"] = [
+            {"id": "req:x", "name": "PATH_VAR", "status": "observed"}]
+        code, report = validate(misplaced, "misplaced.json")
+        check("a key this schema does not define is reported",
+              "O014" in codes(report), repr(codes(report)))
+        check("and only as advice, since it says nothing false about the code",
+              code == 0 and all(f["severity"] == "advisory"
+                                for f in report["findings"] if f["code"] == "O014"),
+              repr([f for f in report["findings"] if f["code"] == "O014"]))
+        check("and it names the key, so the author can move it",
+              any("requirements" in f["message"]
+                  for f in report["findings"] if f["code"] == "O014"),
+              repr(report["findings"]))
 
         stale = json.loads(json.dumps(honest))
         stale["index_hash"] = "sha256:" + "0" * 64

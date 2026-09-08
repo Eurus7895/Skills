@@ -114,7 +114,7 @@ Printed on stdout by `query_graph.py --packet`. Never stored; it is context for 
 Beyond the scope's own source and symbols, the fields that matter are:
 
 - `imports` / `imported_by` — each with a `cite` of the form `path:line` ready to quote, and `edge_id`.
-- `binding_usage_advisory` — present only where step 2 ran. Advisory, and named so at the point of use.
+- `binding_usage_advisory` — present only where the survey's Ruff stage ran. Advisory, and named so at the point of use.
 - `neighbour_interfaces` — public symbols of each neighbour, not their bodies.
 - `import_usage_coverage` — `absent`, `partial` or `complete`. When it is `absent`, "not marked unused" means
   "never looked at", which is not the same claim as "used".
@@ -311,6 +311,21 @@ information the tree already gave. Counting it would let a rename inflate the fi
 empty rationale to every component. It does not change the
 verdict; it is what a maintainer needs to tell "lazy" from "correct, because the layout already matches".
 
+## The verification loop
+
+What to do with each finding `verify_doc.py` returns. Group them by code first; acting on them one at a time
+is how a loop stops converging.
+
+| Finding | Do this |
+| --- | --- |
+| `needs_context` naming an entity | Fetch it with `query_graph.py --include`, revise **only that fragment**, verify again |
+| `rejected` — the graph has no such edge | Drop the claim. There is nothing to retry |
+| `rejected` — the cited line calls something else | Read the line again; either cite correctly or drop it |
+| `V014` `unsupported` — the call target is computed at run time | Nothing. Do not retry; it belongs in the limitations |
+| `V005` stale evidence | Rerun from step 1. The tree changed under you |
+| `V020` the same finding twice | Stop. Report it unresolved; the loop is not converging |
+| Anything unresolved after two attempts | Leave it `candidate` and let it appear in the limitations |
+
 ## `flow-analysis.json` — flow_version 1
 
 The traced paths through the repository. Both this file and the operations one below are **best effort**: a
@@ -394,7 +409,9 @@ pytest` runs, does the same job, and is not what this repository does. Findings:
 evidence the index does not hold, `O005` duplicate id, `O006` a quoted command or value that is not there,
 `O007` evidence that does not resolve, `O008` the evidence file changed since the scan so the quote cannot be
 checked, `O010` a procedure with no step, `O011` missing evidence, `O012` an unknown kind or status, `O013`
-`procedures` and `absent` disagreeing.
+`procedures` and `absent` disagreeing, `O014` a key this schema does not define.
+
+**`O014` is advisory, and is the one finding here about the author rather than the document.** A key outside the schema is never wrong about the code, so nothing is rejected for it; but nothing renders it either, and without the finding the only way to discover that is to read the pages and notice an absence. It was written for the case that produced it: a `requirements` list inside a procedure, where requirements are a top-level field, validating cleanly and appearing nowhere.
 
 `O008` is not `O006`. A file that moved on since the scan may now say anything, so matching against today's
 text would prove nothing about the run that wrote the claim. It is an **error**, not advice: a command

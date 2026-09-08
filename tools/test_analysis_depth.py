@@ -28,8 +28,9 @@ import subprocess
 import sys
 import tempfile
 
+from component_scripts import script
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPTS = os.path.join(REPO, "shared", "scripts")
 FIXTURE = os.path.join(REPO, "tests", "contracts", "layered-repo")
 
 # The role an agent taking the shortcut writes: true of every module, therefore about
@@ -63,6 +64,56 @@ READINGS = (
 
 FAILURES = []
 
+# The other three questions a module page renders, for the same six modules. Written out
+# rather than templated because the gate is measuring exactly the thing a template
+# defeats: six statements differing only in their nouns are one statement, and the
+# checker says so.
+DEPTH = {
+    "src/app/api/cli.py": {
+        "state": "The module binds nothing at import beyond main itself, and argv is "
+                 "read and discarded within the call.",
+        "interface": "main is the only name a caller reaches here, and it takes the "
+                     "argument list.",
+        "failure": "Nothing in main catches what OrderService raises; which errors "
+                   "reach the shell is not recorded anywhere.",
+    },
+    "src/app/api/http.py": {
+        "state": "Handler carries no request state between calls -- post reads the body "
+                 "and returns.",
+        "interface": "Handler.post is what a client reaches, and it expects a body "
+                     "carrying sku.",
+        "failure": "post refuses a body with no sku, but what that refusal becomes on "
+                   "the wire is not written down.",
+    },
+    "src/app/core/models.py": {
+        "state": "Order owns sku; total is derived when asked for rather than held.",
+        "interface": "Order and Record are what other modules import from here.",
+        "failure": "Nothing validates sku on Order, and no path for a malformed one is "
+                   "recorded.",
+    },
+    "src/app/core/service.py": {
+        "state": "OrderService keeps only the Store it was built with; record leaves "
+                 "nothing behind it.",
+        "interface": "OrderService.record is the single operation offered, taking a "
+                     "sku.",
+        "failure": "record does not guard the Store write, so a failure there surfaces "
+                   "unchanged.",
+    },
+    "src/app/infra/store.py": {
+        "state": "Store holds its rows for the life of the instance, beside settings "
+                 "read once at construction.",
+        "interface": "Store is built once and written to; what it keeps is not exposed "
+                     "for reading.",
+        "failure": "No refused write is reported by Store, and no recovery is recorded.",
+    },
+    "src/app/infra/config.py": {
+        "state": "load keeps nothing -- ORDERLOG_PATH is read on each call.",
+        "interface": "load is the only function here and takes no argument.",
+        "failure": "load falls back to a fixed name where ORDERLOG_PATH is unset rather "
+                   "than refusing; why that default was chosen is not stated.",
+    },
+}
+
 
 def check(name, condition, detail=""):
     if condition:
@@ -72,8 +123,8 @@ def check(name, condition, detail=""):
         FAILURES.append(name)
 
 
-def run(script, *args):
-    proc = subprocess.run([sys.executable, os.path.join(SCRIPTS, script)] + list(args),
+def run(name, *args):
+    proc = subprocess.run([sys.executable, script(name)] + list(args),
                           capture_output=True, text=True)
     return proc.returncode, proc.stdout + proc.stderr
 
@@ -247,12 +298,43 @@ def main():
                            "--require", "passed", "--out", report_path)
         with open(report_path, encoding="utf-8") as fh:
             read_report = json.load(fh)
-        check("six modules read gives per_module and passes",
+        # One question answered per module is not a read module. Every claim behind it
+        # verifies, every page builds, and the document is an outline -- which is the
+        # whole reason this figure is separate from whether the claims held.
+        check("one statement each is not per_module, however clean it is",
+              read_report["analysis_mode"] != "per_module"
+              and read_report["status"] != "passed", output)
+        check("and the report says the modules are thin rather than missing",
+              read_report["modules"]["touched"] == 6
+              and read_report["modules"]["analysed"] == 0
+              and read_report["modules"]["depth"]["median_kinds"] == 1,
+              repr(read_report["modules"]))
+
+        # Answer the other three for each of them and the same six modules pass.
+        for row in rows:
+            for kind, text in sorted(DEPTH[row["path"]].items()):
+                record = next(r for r in index["files"] if r["path"] == row["path"])
+                row["statements"].append({
+                    "id": "%s-%s" % (row["statements"][0]["id"], kind),
+                    "kind": kind, "status": "observed", "text": text,
+                    "evidence": [{"path": row["path"], "line_start": 1,
+                                  "line_end": record["loc"]}]})
+        write_rows(analysis_path, rows)
+        code, output = run("quality_docs.py", "--index", index_path,
+                           "--analysis", analysis_path, "--doc", doc_path,
+                           "--require", "passed", "--out", report_path)
+        with open(report_path, encoding="utf-8") as fh:
+            read_report = json.load(fh)
+        check("six modules answered in full gives per_module and passes",
               code == 0 and read_report["analysis_mode"] == "per_module"
               and read_report["status"] == "passed", output)
+        check("and the depth figure agrees with the mode",
+              read_report["modules"]["depth"]["full"] == 6
+              and read_report["modules"]["full_coverage"] == 1.0,
+              repr(read_report["modules"]["depth"]))
         check("and the statements are counted by kind and status",
-              read_report["statements"]["valid"] == 6
-              and read_report["statements"]["by_status"] == {"observed": 6},
+              read_report["statements"]["valid"] == 24
+              and read_report["statements"]["by_status"] == {"observed": 24},
               repr(read_report["statements"]))
 
         # Freshness already works, and plan 3 relies on it rather than rebuilding it:

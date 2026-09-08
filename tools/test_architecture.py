@@ -20,11 +20,12 @@ import subprocess
 import sys
 import tempfile
 
+from component_scripts import component_paths, script
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPTS = os.path.join(REPO, "shared", "scripts")
 FIXTURE = os.path.join(REPO, "tests", "contracts", "layered-repo")
 
-sys.path.insert(0, SCRIPTS)
+sys.path[:0] = component_paths()
 import quality_docs                                           # noqa: E402
 from quality_docs import DETECTOR_B_FAIL, DETECTOR_B_PARTIAL   # noqa: E402
 
@@ -39,8 +40,8 @@ def check(name, condition, detail=""):
         FAILURES.append(name)
 
 
-def run(script, *args):
-    proc = subprocess.run([sys.executable, os.path.join(SCRIPTS, script)] + list(args),
+def run(name, *args):
+    proc = subprocess.run([sys.executable, script(name)] + list(args),
                           capture_output=True, text=True)
     return proc.returncode, proc.stdout, proc.stderr
 

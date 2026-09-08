@@ -9,9 +9,11 @@ import subprocess
 import sys
 import tempfile
 
+from component_scripts import script
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BUILD = os.path.join(REPO, "shared", "scripts", "build_diagrams.py")
-VALIDATE = os.path.join(REPO, "shared", "scripts", "validate_diagrams.py")
+BUILD = script("build_diagrams.py")
+VALIDATE = script("validate_diagrams.py")
 GRAPH = os.path.join(REPO, "tests", "contracts", "class-graph-v1-minimal.json")
 SPEC = os.path.join(REPO, "tests", "contracts", "view-spec-v1-valid.json")
 FAILURES = []
