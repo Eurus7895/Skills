@@ -192,6 +192,13 @@ something that is in the module it describes** — a sentence true of every modu
 none of them. And `unknown` is a real answer: where the repository never says why, say that instead of
 inventing a reason.
 
+**Answer all four of `responsibility`, `state`, `interface` and `failure` for every module.** They are the four
+headings a module page renders, so a kind you skip is a heading a reader meets empty — and the gate in step 8
+counts them: two of four is a module read, four of four is one answered, and a run of one-line modules is
+`partial` no matter how cleanly its claims verify. This is also where `unknown` earns its place. A module with
+no recorded failure behaviour gets a `failure` statement saying the repository does not record one; silence
+there reads to the gate as a question nobody asked, because that is usually what it is.
+
 Each scope also produces **one fragment line** in `.docs-build/fragments.jsonl`, naming the derived claims it
 stands on — flat JSON, one object per line, no array:
 
@@ -343,9 +350,16 @@ A queued block you did not decide is reported as undecided, never as passed, and
 
 **`analysis_mode` is the honest summary**, and no other check can produce it: every other stage passes on a
 document derived entirely from `structure.json`, because a claim taken out of the index and checked against
-the index agrees with itself. `derived_only` means fewer than half the modules in the budget carry a statement
-that survived, and such a run is never `passed` however green everything else is. Modules outside `units.txt`
-are counted apart and never lower the coverage — staying inside the budget is the plan, not a shortfall.
+the index agrees with itself. Modules outside `units.txt` are counted apart and never lower the coverage —
+staying inside the budget is the plan, not a shortfall.
+
+**It reads two figures, and they call for different work.** A module counts as *read* when it answers two of
+`responsibility`, `state`, `interface`, `failure`, and *answered in full* when it answers all four — the ones a
+module page renders as headings. `derived_only` means fewer than half were read and is never `passed`, however
+green everything else is. `partial` with high coverage and low `full_coverage` is the other failure and the
+easier one to miss: every module is present and most are a line long. The first calls for dispatching the
+modules nobody read; the second for going back to the ones already done and asking what they did not answer.
+The reason line says which of the two you have.
 
 **Detector B** reports under `architecture`. It compares your components against the directory tree by
 counting module pairs, not by comparing names, so renaming every folder does not fool it. `failed` means the

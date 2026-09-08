@@ -11,9 +11,16 @@ They all pass on a document derived entirely from `structure.json`, because a cl
 taken out of the index and checked against the index agrees with itself. This one asks
 the question none of them can: **how much of this was read, and how much was copied?**
 
-    per_module     nine in ten modules in the budget carry a statement that survived
-    partial        between half and nine in ten did
-    derived_only   fewer than half, or no statement was written at all
+    per_module     nine in ten modules answer all four module questions
+    partial        half were read, but fewer than nine in ten were answered in full
+    derived_only   fewer than half were read, or nothing was written at all
+
+A module is *read* when it answers two of the four -- responsibility, state, interface,
+failure -- and *answered in full* when it answers all of them. Two tiers because they
+fail differently: too few modules read is a dispatch that stopped early, while enough
+read and few answered in full is the document that has every module in it and a line
+under each heading. One surviving statement used to be the whole bar, and a run of
+one-line modules reported `per_module` at coverage 1.0.
 
 `passed` is impossible under `derived_only`, whatever else is green. A document with no
 reading in it can still be true -- it is `structure.json` in prose, and every sentence
@@ -68,6 +75,17 @@ REVIEW_REQUIRED = "review_required"
 # repository and starts being an index with sentences around it.
 PER_MODULE_COVERAGE = 0.90
 PARTIAL_COVERAGE = 0.50
+
+# A module counts as read once it answers two of the four questions below, and the run
+# may only call itself `per_module` when nine in ten answer all four.
+#
+# One statement was the old bar, and it let a run report `per_module` at coverage 1.0
+# while the median module answered one question -- true in every particular and an
+# outline to read. Two is where a reading starts: a module with a responsibility and an
+# interface has been looked at, a module with a responsibility alone has been named.
+# Four is what a module page renders, so a module short of it is a heading with nothing
+# under it.
+READ_KINDS_FLOOR = 2
 
 # The four questions that are about a module rather than about the tree it sits in.
 # `interaction` and `rationale` are the architecture's, and a module page renders exactly
@@ -206,10 +224,18 @@ def depth_of(kinds_by_path, in_budget):
     }
 
 
-def mode_of(coverage, statements):
+def mode_of(coverage, full_ratio, statements):
+    """The mode, from how many modules were read and how many were answered in full.
+
+    Two tiers, because they fail differently and the fix differs with them. `coverage`
+    asks how many modules were read at all; `full_ratio` asks how many answered all four
+    questions their page renders. A run can be excellent on the first and poor on the
+    second -- that is a document with every module present and most of them a line long,
+    and it is `partial`, not `per_module`.
+    """
     if not statements:
         return DERIVED_ONLY
-    if coverage >= PER_MODULE_COVERAGE:
+    if coverage >= PER_MODULE_COVERAGE and full_ratio >= PER_MODULE_COVERAGE:
         return PER_MODULE
     if coverage >= PARTIAL_COVERAGE:
         return PARTIAL
@@ -435,10 +461,17 @@ def main():
         reasons.append("no module analysis was supplied, so nothing was read")
 
     in_budget = set(budget)
-    analysed_in_budget = set(kinds_by_path) & in_budget
     depth = depth_of(kinds_by_path, in_budget)
+    # Read means answered at least `READ_KINDS_FLOOR` of the four, not "has a surviving
+    # statement". A module named once and left there is counted below as touched, so the
+    # difference between the two numbers is visible rather than argued about.
+    analysed_in_budget = {path for path in in_budget
+                          if len(set(kinds_by_path.get(path, ())) & set(MODULE_KINDS))
+                          >= READ_KINDS_FLOOR}
+    touched = set(kinds_by_path) & in_budget
     coverage = (len(analysed_in_budget) / float(len(in_budget))) if in_budget else 0.0
-    mode = mode_of(coverage, statements["total"])
+    full_ratio = (depth["full"] / float(len(in_budget))) if in_budget else 0.0
+    mode = mode_of(coverage, full_ratio, statements["total"])
 
     report = {
         "schema_version": REPORT_VERSION,
@@ -448,7 +481,12 @@ def main():
             "budget_from": budget_source,
             "in_budget": len(in_budget),
             "analysed": len(analysed_in_budget),
+            "read_floor": READ_KINDS_FLOOR,
+            # Modules carrying any surviving statement at all. Never the coverage figure
+            # -- it was, and that is how a run of one-line modules passed for a read one.
+            "touched": len(touched),
             "coverage": round(coverage, 4),
+            "full_coverage": round(full_ratio, 4),
             # Outside the budget by design: covered in a line, never read in full. They
             # are not failures and must not move the coverage above.
             "out_of_budget": len([record["path"] for record in index.get("files", ())
@@ -473,12 +511,23 @@ def main():
         # not `failed`; it is a document with no reading in it, so it is never `passed`.
         status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
         reasons.append("analysis mode is derived_only: %d of %d module(s) in the budget "
-                       "carry a statement that survived"
-                       % (len(analysed_in_budget), len(in_budget)))
+                       "answer at least %d of %s"
+                       % (len(analysed_in_budget), len(in_budget), READ_KINDS_FLOOR,
+                          ", ".join(MODULE_KINDS)))
     elif mode == PARTIAL:
         status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
-        reasons.append("analysis mode is partial: %d of %d module(s) in the budget were "
-                       "read" % (len(analysed_in_budget), len(in_budget)))
+        # Which of the two tiers fell short decides what to do next, so say which. Too
+        # few modules read means dispatch the rest; enough read but thin means go back
+        # to the ones already done and ask them the questions they did not answer.
+        if coverage < PER_MODULE_COVERAGE:
+            reasons.append("analysis mode is partial: %d of %d module(s) in the budget "
+                           "were read" % (len(analysed_in_budget), len(in_budget)))
+        else:
+            reasons.append("analysis mode is partial: %d of %d module(s) were read, but "
+                           "only %d answer all four of %s -- the modules are present "
+                           "and thin"
+                           % (len(analysed_in_budget), len(in_budget), depth["full"],
+                              ", ".join(MODULE_KINDS)))
 
     # Reported whatever the mode, and deliberately not folded into it: a run can be
     # `per_module` on coverage and still answer one question in four, which is the
