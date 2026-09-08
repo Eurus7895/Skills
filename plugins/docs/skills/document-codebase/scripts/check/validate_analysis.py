@@ -59,6 +59,23 @@ REQUIRED_STATEMENT = ("id", "kind", "status", "text", "evidence")
 NEAR_DUPLICATE = 0.8
 TEMPLATE_RATIO = 0.2
 
+# A statement must name something in its module -- that is `anchored`, and it is a floor
+# rather than a standard. A sentence that names the one identifier the floor demands and
+# nothing else describes the module in isolation, which is the shape a reading takes when
+# it was written from the file name: "main handles the duties assigned to this module."
+# A reading relates the module to what it works with, and so names more than itself.
+#
+# Measured before it was written, on the same repository described twice. A real analysis
+# of six modules named two or more identifiers in 70% of its statements, and had one
+# module -- a single-function leaf -- where no statement named more than one. A flat one,
+# phrased so that no two sentences were near-duplicates, named exactly one in every
+# statement of every module and passed every other check with no finding at all.
+#
+# So: a module whose every statement names only one thing is advisory, because that leaf
+# module is a real answer. Past the ratio it is an error, because a whole analysis of them
+# is not. The measured runs sit at 17% and 100%, either side of a wide gap.
+RELATED_RATIO = 0.5
+
 # An identifier shorter than this matches by accident: `os`, `id`, `to`.
 MIN_IDENTIFIER = 3
 
@@ -301,6 +318,44 @@ class Checker(object):
             if verdicts.get(statement_id) == "valid":
                 verdicts[statement_id] = "near_duplicate"
 
+    def check_relatedness(self, rows):
+        """Modules described without reference to anything but themselves.
+
+        Reported, never rejected. A statement here is true, cites a line that resolves,
+        and names something in its own module -- every existing check passes it, and it
+        still tells a reader nothing. So the finding says which modules read that way and
+        leaves the verdicts alone: the fix is to go back and say more, not to throw away
+        a sentence that is not wrong.
+        """
+        lonely = []
+        for row in rows:
+            record = self.by_path.get(row.get("path"))
+            if record is None:
+                continue
+            names = identifiers_of(record)
+            texts = [s.get("text", "") for s in row.get("statements", ())
+                     if isinstance(s, dict)]
+            if not texts:
+                continue
+            most = max(len(names & set(WORD.findall(str(t)))) for t in texts)
+            # Exactly one, not "at most one". A module whose statements name *nothing*
+            # is A014's, and A014 is advisory on purpose -- an abstract sentence is not
+            # an error, and the coverage count already sends a document made of them to
+            # `derived_only`. Counting those here would escalate that decision through
+            # the back door. What this is for is the module that clears the anchoring
+            # floor and stops there.
+            if most == 1:
+                lonely.append(row.get("path"))
+                self.finding("A016", "no statement about this module names more than one "
+                             "thing in it, so it is described in isolation -- a reading "
+                             "says what it works with", row.get("path"),
+                             severity="advisory")
+        described = [r.get("path") for r in rows if r.get("statements")]
+        if described and len(lonely) > RELATED_RATIO * len(described):
+            self.finding("A016", "%d of %d module(s) are described without naming more "
+                         "than one thing in them: this reads as an analysis written from "
+                         "the file names" % (len(lonely), len(described)))
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -328,6 +383,7 @@ def main():
     for row in rows:
         verdicts.update(checker.check_row(row, seen_ids))
     checker.check_repetition(rows, verdicts)
+    checker.check_relatedness(rows)
 
     modules = []
     for row in rows:

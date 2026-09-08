@@ -90,6 +90,24 @@ def units_tests(tmp):
     check("a module that defines nothing is not selected",
           not [p for p in kept if p.endswith("__init__.py")], str(kept))
 
+    # A test file is evidence the code works, not part of the system a reader is being
+    # introduced to. Documenting it spends the budget on scaffolding and puts the test
+    # beside the thing it tests in the module reference.
+    os.makedirs(os.path.join(root, "tests"), exist_ok=True)
+    with open(os.path.join(root, "tests", "test_transform.py"), "w",
+              encoding="utf-8") as fh:
+        fh.write("def test_normalise():\n    assert True\n")
+    run("scan_repo.py", "--root", root, "--out", index_path, "--detail")
+    with open(index_path, encoding="utf-8") as fh:
+        scanned = json.load(fh)
+    check("the scanner marks the test file as one",
+          any(r.get("is_test") and r.get("symbols") for r in scanned["files"]),
+          str([(r["path"], r.get("is_test")) for r in scanned["files"]]))
+    run("select_units.py", "--index", index_path, "--out", out)
+    kept = [l.strip() for l in open(out, encoding="utf-8") if l.strip()]
+    check("a test module is not selected for documentation",
+          not [p for p in kept if "test" in p], str(kept))
+
     # Every entry point is added whatever the cutoff, which is right with two or three
     # ways in and wrong in a tree of standalone scripts. There the number that decides
     # the cost of the run is not the one that was typed, and it has to say so.

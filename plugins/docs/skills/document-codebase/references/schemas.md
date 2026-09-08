@@ -237,10 +237,25 @@ be a number no check could ever disagree with.
 | `A012` | the same statement made about two modules — it was about neither |
 | `A013` | two statements differing only in their nouns; past a fifth of the set, one template |
 | `A014` | the statement names nothing that is in the module it describes |
+| `A015` | the statement carries no evidence to look at |
+| `A016` | a module described without naming more than one thing in it; past half the set, an analysis written from the file names |
 
 `A013` between one pair and `A014` are **advisory**: they do not fail the run, they stop the statement
 counting as analysis. A document made of anchorless prose then falls to `derived_only` on its own, without
 an argument about whether one sentence was too abstract.
+
+**`A016` is the one check that asks whether a true statement says anything.** Anchoring is a floor: name one
+thing that is in this module. A sentence that names exactly that one thing and nothing else describes the
+module in isolation — *"main handles the duties assigned to this module"* — and every other check here passes
+it, because it is true, it cites a line that resolves, and it names `main`. A reading relates a module to what
+it works with, so it names more than itself.
+
+The threshold was measured rather than chosen, on one repository described twice. A real analysis of six
+modules named two or more identifiers in 70% of its statements, with **one** module — a single-function leaf —
+where nothing named more than one. A deliberately flat one, phrased so no two sentences were near-duplicates,
+named exactly one in **every** statement of every module and produced no finding of any kind. So a lone module
+is advisory, because that leaf is an honest answer, and past half the set it is an error. Nothing is rejected
+either way: the fix is to go back and say more, not to discard a sentence that is not wrong.
 
 ## `architecture-analysis.json` — architecture_version 1
 

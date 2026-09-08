@@ -192,6 +192,12 @@ something that is in the module it describes** — a sentence true of every modu
 none of them. And `unknown` is a real answer: where the repository never says why, say that instead of
 inventing a reason.
 
+**Say what the module works with, not only what it is called.** Naming one thing in the file is the floor the
+anchoring rule enforces, and a sentence that stops there — *"main handles the duties assigned to this
+module"* — is true, cites a resolving line, passes every check, and tells a reader nothing. A reading relates
+the module to its collaborators, so it names them: what it builds, what it hands over, what it raises. `A016`
+measures this, and a whole analysis written that way fails the run.
+
 **Answer all four of `responsibility`, `state`, `interface` and `failure` for every module.** They are the four
 headings a module page renders, so a kind you skip is a heading a reader meets empty — and the gate in step 8
 counts them: two of four is a module read, four of four is one answered, and a run of one-line modules is

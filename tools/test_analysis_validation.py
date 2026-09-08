@@ -151,6 +151,40 @@ def main():
               codes(report, "error") == [] and "A014" in codes(report, "advisory"),
               codes(report))
 
+        # Flat but not repetitive: every sentence names the one identifier anchoring
+        # demands and nothing else, and no two are near-duplicates. Before A016 this
+        # produced no finding at all -- true, cited, anchored, and about nothing.
+        rows = rows_of(VALID)
+        lonely = [["main is responsible for the work this module performs.",
+                   "Nothing lasting is retained by main between invocations.",
+                   "Callers interact with this module by way of main.",
+                   "How main behaves when something goes wrong is unspecified.",
+                   "main is where the duties of this file are discharged."],
+                  ["save fulfils the purpose this particular file exists for.",
+                   "Whatever save tracks internally is not detailed further.",
+                   "Access to this module happens through save.",
+                   "Conditions that would stop save are not written down.",
+                   "save carries out the job allocated to this component."]]
+        for row, texts in zip(rows, lonely):
+            for statement, text in zip(row["statements"], texts):
+                statement["text"] = text
+        code, report = run(write(tmp, "lonely.jsonl", rows))
+        check("a module described without naming anything but itself is reported",
+              "A016" in codes(report), codes(report))
+        check("and a whole analysis of them fails the run",
+              code == 1 and any(f["code"] == "A016" and f["severity"] == "error"
+                                for f in report["findings"]),
+              repr([f for f in report["findings"] if f["code"] == "A016"]))
+        check("the statements still count as analysis, since none of them is wrong",
+              report["analysed"] == 2, repr(report["modules"]))
+
+        # The real fixture relates each module to what it works with, so it stays clean.
+        code, report = run(VALID)
+        check("an analysis that names what each module works with is not flagged",
+              code == 0 and not [f for f in report["findings"]
+                                 if f["code"] == "A016" and f["severity"] == "error"],
+              repr(codes(report)))
+
         # Freshness. The analysis and the index have to be talking about the same scan
         # and the same file version; either mismatch invalidates the reading, not the
         # source.

@@ -40,6 +40,13 @@ def select(index, top):
     `entry_point` or both, and `ranked` is the fan-in ordering the cutoff was taken from.
     """
     fan_in = index.get("fan_in") or {}
+    # Not tests. A test file is evidence that the code works, not a part of the system a
+    # reader is being introduced to: documenting it spends the budget describing scaffolding
+    # and puts `test_parser.py` in a module reference beside the parser. The scanner already
+    # marks them, the gate's fallback budget already skips them, and the selection did not --
+    # so a repository with a large suite spent most of its units on it. A reader who wants
+    # the tests is told how to run them, on the page the operations analysis fills.
+    #
     # Only files that define something. A module with no symbol has nothing to anchor a
     # statement to -- `validate_analysis` requires a statement to name something that is
     # in the file it describes, and `assemble` requires a fragment citing a derived
@@ -49,7 +56,7 @@ def select(index, top):
     # fallback budget has always filtered on this; the selection did not, and the two
     # disagreeing is what put empty package markers in `units.txt`.
     known = sorted(record["path"] for record in index.get("files", ())
-                   if record.get("symbols"))
+                   if record.get("symbols") and not record.get("is_test"))
     # Rank every scanned file, not every key of `fan_in`: the scanner builds that map by
     # counting incoming edges, so a module nothing imports is absent from it rather than
     # present with 0. Ranking only its keys would drop those modules from the cutoff

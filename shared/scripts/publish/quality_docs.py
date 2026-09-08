@@ -166,6 +166,7 @@ def analyse(index, analysis_path):
     for row in rows:
         verdicts.update(checker.check_row(row, seen))
     checker.check_repetition(rows, verdicts)
+    checker.check_relatedness(rows)
 
     evidence_failures = {finding["statement"] for finding in checker.findings
                          if finding["code"] in EVIDENCE_CODES and finding["statement"]}
