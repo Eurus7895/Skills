@@ -58,6 +58,16 @@ REQUIRED_PROCEDURE = ("id", "kind", "name", "status", "steps")
 REQUIRED_STEP = ("text", "status")
 REQUIRED_REQUIREMENT = ("id", "name", "status")
 
+# Every key each of those may carry. A key outside its set is reported, because the
+# alternative is what it was: a `requirements` list written inside a procedure, where
+# requirements are a top-level field, sat there through a clean validation and rendered
+# nowhere. Silence about a key means the author recorded something the document will
+# never show, and they have no way to find that out except by reading the pages and
+# noticing an absence.
+KNOWN_PROCEDURE = set(REQUIRED_PROCEDURE) | {"evidence", "note"}
+KNOWN_STEP = set(REQUIRED_STEP) | {"evidence", "command"}
+KNOWN_REQUIREMENT = set(REQUIRED_REQUIREMENT) | {"evidence", "value"}
+
 
 def fail(message, code=2):
     sys.stderr.write("FAIL  %s\n" % message)
@@ -208,6 +218,7 @@ class Checker(object):
                          % procedure["status"], subject)
         if procedure.get("evidence") is not None:
             self.check_evidence(subject, procedure.get("evidence"))
+        self.check_unknown_keys(subject, procedure, KNOWN_PROCEDURE, "procedure")
 
         steps = procedure["steps"]
         if not isinstance(steps, list) or not steps:
@@ -233,6 +244,21 @@ class Checker(object):
                                            required=required)
             if step.get("command"):
                 self.check_quote(step_subject, step["command"], resolved)
+            self.check_unknown_keys(step_subject, step, KNOWN_STEP, "step")
+
+    def check_unknown_keys(self, subject, obj, known, label):
+        """Keys this schema does not define, which therefore render nowhere.
+
+        Advisory, not an error: an unknown key is never wrong about the code, and a
+        document is not worse for carrying one. It is the author who is worse off, having
+        written something no page will show.
+        """
+        unknown = sorted(set(obj) - known)
+        if unknown:
+            self.finding("O014", "%s carries %s, which this schema does not define, so "
+                         "nothing renders %s" % (label, ", ".join(unknown),
+                                                 "it" if len(unknown) == 1 else "them"),
+                         subject, severity="advisory")
 
     def check_requirement(self, requirement, ids):
         subject = requirement.get("id") if isinstance(requirement, dict) \
@@ -240,6 +266,7 @@ class Checker(object):
         if not isinstance(requirement, dict):
             self.finding("O002", "a requirement is not an object", subject)
             return
+        self.check_unknown_keys(subject, requirement, KNOWN_REQUIREMENT, "requirement")
         missing = [f for f in REQUIRED_REQUIREMENT if f not in requirement]
         if missing:
             self.finding("O002", "missing %s" % ", ".join(missing), subject)

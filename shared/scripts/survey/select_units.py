@@ -40,7 +40,16 @@ def select(index, top):
     `entry_point` or both, and `ranked` is the fan-in ordering the cutoff was taken from.
     """
     fan_in = index.get("fan_in") or {}
-    known = sorted(record["path"] for record in index.get("files", ()))
+    # Only files that define something. A module with no symbol has nothing to anchor a
+    # statement to -- `validate_analysis` requires a statement to name something that is
+    # in the file it describes, and `assemble` requires a fragment citing a derived
+    # claim, of which an empty `__init__.py` has none. Selecting one puts a unit in the
+    # budget that no amount of work can satisfy: the assembler fails the run for a unit
+    # with no row, and the coverage it drags down cannot be recovered. The gate's own
+    # fallback budget has always filtered on this; the selection did not, and the two
+    # disagreeing is what put empty package markers in `units.txt`.
+    known = sorted(record["path"] for record in index.get("files", ())
+                   if record.get("symbols"))
     # Rank every scanned file, not every key of `fan_in`: the scanner builds that map by
     # counting incoming edges, so a module nothing imports is absent from it rather than
     # present with 0. Ranking only its keys would drop those modules from the cutoff
@@ -52,9 +61,11 @@ def select(index, top):
     reasons = {}
     for path, _count in ranked[:top]:
         reasons.setdefault(path, []).append("fan_in")
+    # `known` is already restricted to files that define something, so an entry point
+    # that defines nothing is skipped here too rather than added back.
     for entry in index.get("entry_points", ()):
         path = entry.get("path") if isinstance(entry, dict) else entry
-        if path in known:
+        if path in set(known):
             reasons.setdefault(path, []).append("entry_point")
     return sorted(reasons), reasons, ranked
 
@@ -74,6 +85,24 @@ def warnings_for(index, ranked, selected):
                      "candidates for a way in, not a list of them."
                      % (len(entries), files))
     return notes
+
+
+def budget_note(selected, top):
+    """Said when the selection is much larger than the cutoff that was asked for.
+
+    Every entry point is added whatever the cutoff, which is right on a repository with
+    two or three ways in and wrong on one where every file carries a `__main__` guard --
+    a tree of standalone scripts, which is a shape this skill meets often. There `--top 8`
+    selects sixty, and the number that decides the cost of the run is not the one that was
+    typed. The proportion of entry points to files does not catch it: just under half of
+    them can still be six times the cutoff.
+    """
+    if top and len(selected) > top * 2:
+        return ("--top %d was asked for and %d unit(s) were selected: every entry point "
+                "is added whatever the cutoff, and this repository has many. That is "
+                "%.1fx the budget, so decide it deliberately -- raise --top and mean it, "
+                "or name the units by hand." % (top, len(selected), len(selected) / float(top)))
+    return None
 
 
 def main():
@@ -113,6 +142,9 @@ def main():
           % (len(paths), args.out, args.top))
     for note in warnings_for(index, ranked, paths):
         print("WARN  %s" % note)
+    overrun = budget_note(paths, args.top)
+    if overrun:
+        print("WARN  %s" % overrun)
     return 0
 
 

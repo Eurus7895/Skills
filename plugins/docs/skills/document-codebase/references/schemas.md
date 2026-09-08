@@ -409,7 +409,9 @@ pytest` runs, does the same job, and is not what this repository does. Findings:
 evidence the index does not hold, `O005` duplicate id, `O006` a quoted command or value that is not there,
 `O007` evidence that does not resolve, `O008` the evidence file changed since the scan so the quote cannot be
 checked, `O010` a procedure with no step, `O011` missing evidence, `O012` an unknown kind or status, `O013`
-`procedures` and `absent` disagreeing.
+`procedures` and `absent` disagreeing, `O014` a key this schema does not define.
+
+**`O014` is advisory, and is the one finding here about the author rather than the document.** A key outside the schema is never wrong about the code, so nothing is rejected for it; but nothing renders it either, and without the finding the only way to discover that is to read the pages and notice an absence. It was written for the case that produced it: a `requirements` list inside a procedure, where requirements are a top-level field, validating cleanly and appearing nowhere.
 
 `O008` is not `O006`. A file that moved on since the scan may now say anything, so matching against today's
 text would prove nothing about the run that wrote the claim. It is an **error**, not advice: a command

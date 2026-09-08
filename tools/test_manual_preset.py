@@ -127,8 +127,16 @@ def build_tests(tmp):
         "--root", root, "--out-dir", tmp)
     claims_path = os.path.join(tmp, "claims.verified.jsonl")
     fragments_path = os.path.join(tmp, "fragments.verified.jsonl")
-    if not os.path.isfile(fragments_path):
-        open(fragments_path, "w", encoding="utf-8").close()
+    # One verified fragment, so the module reference renders its table rather than the
+    # "nothing survived" absence. The page a manual's reader spends longest on was being
+    # exercised only in its empty form, and the intro block above the table -- the one
+    # that reached a reader as escaped markdown -- never rendered here at all.
+    with open(fragments_path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "fragment_id": "fragment:%s" % entry, "source": entry,
+            "role": "Reads the argument list and hands it to the transform.",
+            "claim_ids": ["claim:a"], "status": "verified",
+            "index_hash": digest}, sort_keys=True) + "\n")
 
     analysis_path = os.path.join(tmp, "module-analysis.jsonl")
     with open(analysis_path, "w", encoding="utf-8") as fh:
@@ -213,6 +221,17 @@ def build_tests(tmp):
            "getting_started/quick_start"}.issubset(set(authored)), repr(authored))
     check("and none of them was written",
           not (set(authored) & set(pages)), repr(sorted(set(authored) & set(pages))))
+
+    # A prose block is plain text and the renderer escapes what it is handed, correctly.
+    # So a builder that writes markdown into one does not get emphasis -- it gets a
+    # backslash in front of every backtick, on the page, where a reader meets it. This
+    # was in the module reference for a while: "\\`verified\\` means every claim...".
+    marked = [(page["id"], block["id"])
+              for page in doc["pages"]
+              for block in page.get("blocks", ())
+              if block.get("type") == "prose" and "`" in (block.get("text") or "")]
+    check("no prose block carries markup the renderer will escape",
+          not marked, repr(marked))
 
     def text_of(page_id):
         return " ".join(

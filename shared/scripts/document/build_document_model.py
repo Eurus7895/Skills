@@ -607,9 +607,13 @@ def modules_page(index, fragments, claims_by_id, analysis, kinds):
         blocks = [
             prose("block:modules-intro",
                   "One row per module whose description survived verification. "
-                  "`verified` means every claim behind the role was checked against the "
-                  "graph or the source; `inferred` means the role rests on a reading of "
-                  "the code that no pass could confirm."),
+                  # No markup in a prose block: the renderer escapes what it is given,
+                  # correctly, so a backtick meant as markdown reaches the reader as a
+                  # backslash and a backtick. The words are in the Basis column beside
+                  # this sentence, which is what makes them legible without it.
+                  "A basis of verified means every claim behind the role was checked "
+                  "against the graph or the source; inferred means the role rests on a "
+                  "reading of the code that no pass could confirm."),
             table("block:modules", ("Path", "Imported by", "Basis", "Role"), rows, refs),
         ]
     else:

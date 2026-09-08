@@ -72,6 +72,36 @@ def units_tests(tmp):
     check("--top 0 keeps only the entry points",
           code == 0 and kept == ["src/pipeline/entry.py"], str(kept))
 
+    # A file that defines nothing cannot be described. `validate_analysis` wants a
+    # statement naming something in the module, and `assemble` wants a fragment citing a
+    # derived claim; an empty `__init__.py` offers neither. Selecting one puts a unit in
+    # the budget that no work can satisfy -- the assembler then fails the run for a unit
+    # with no row, which is how a package marker stopped a document being built at all.
+    run("scan_repo.py", "--root", root, "--out", index_path, "--detail")
+    with open(index_path, encoding="utf-8") as fh:
+        scanned = json.load(fh)
+    # Not "the file is empty": a package marker usually carries a docstring and still
+    # defines nothing, which is the condition that matters here.
+    check("the fixture holds a module that defines nothing",
+          any(not r.get("symbols") for r in scanned["files"]),
+          str([r["path"] for r in scanned["files"]]))
+    run("select_units.py", "--index", index_path, "--out", out)
+    kept = [l.strip() for l in open(out, encoding="utf-8") if l.strip()]
+    check("a module that defines nothing is not selected",
+          not [p for p in kept if p.endswith("__init__.py")], str(kept))
+
+    # Every entry point is added whatever the cutoff, which is right with two or three
+    # ways in and wrong in a tree of standalone scripts. There the number that decides
+    # the cost of the run is not the one that was typed, and it has to say so.
+    code, text = run("select_units.py", "--index", index_path, "--out", out, "--top", "1")
+    kept = [l.strip() for l in open(out, encoding="utf-8") if l.strip()]
+    over = len(kept) > 2
+    check("a selection far over the cutoff says so",
+          ("WARN" in text and "--top 1" in text) if over else True, text)
+    check("and a selection within it stays quiet",
+          "was asked for and" not in run("select_units.py", "--index", index_path,
+                                         "--out", out, "--top", "25")[1], text)
+
     # Same index, same selection -- including the order, which units.txt is a contract for.
     run("select_units.py", "--index", index_path, "--out", out)
     first = open(out, encoding="utf-8").read()

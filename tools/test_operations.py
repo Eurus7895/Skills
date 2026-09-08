@@ -247,6 +247,24 @@ def main():
         check("claiming operations and absence at once is O013",
               "O013" in codes(report), repr(codes(report)))
 
+        # A key the schema does not define renders nowhere, and saying nothing about it
+        # leaves the author to discover that by reading the pages. Requirements are a
+        # top-level field; one written inside a procedure validated cleanly and vanished.
+        misplaced = json.loads(json.dumps(honest))
+        misplaced["procedures"][0]["requirements"] = [
+            {"id": "req:x", "name": "PATH_VAR", "status": "observed"}]
+        code, report = validate(misplaced, "misplaced.json")
+        check("a key this schema does not define is reported",
+              "O014" in codes(report), repr(codes(report)))
+        check("and only as advice, since it says nothing false about the code",
+              code == 0 and all(f["severity"] == "advisory"
+                                for f in report["findings"] if f["code"] == "O014"),
+              repr([f for f in report["findings"] if f["code"] == "O014"]))
+        check("and it names the key, so the author can move it",
+              any("requirements" in f["message"]
+                  for f in report["findings"] if f["code"] == "O014"),
+              repr(report["findings"]))
+
         stale = json.loads(json.dumps(honest))
         stale["index_hash"] = "sha256:" + "0" * 64
         code, report = validate(stale, "staleindex.json")
