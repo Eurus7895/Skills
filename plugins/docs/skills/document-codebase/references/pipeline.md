@@ -27,9 +27,13 @@ prints what to put in front of the person, what to ask them, and the command tha
 
 | | Opened by | Blocks | Asks |
 | --- | --- | --- | --- |
-| `P1` | `survey` | `analyze` | is this the right scope to spend the budget on |
-| `P2` | `analyze` | `check` | do these roles match what the repository is |
-| `P3` | `check` | `document` | is this the architecture, and are the boundaries right |
+| `P1` | `survey` | `analyze` and everything after it | is this the right scope to spend the budget on |
+| `P2` | `analyze` | `check` and everything after it | do these roles match what the repository is |
+| `P3` | `check` | `document` and everything after it | is this the architecture, and are the boundaries right |
+
+**An open checkpoint holds every later component, not only the next one.** A build directory that already
+holds an earlier run's artifacts is why: blocking `analyze` alone would leave `document` and `publish` free to
+run over what is on disk and produce a finished report with the scope decision still outstanding.
 
 `P4`, the prose queue, needs nothing added: an undecided block already holds the run at `review_required`.
 
@@ -38,9 +42,14 @@ silently. Everything else here refuses — `analyze` will not overwrite hand-wri
 accept a unit with no row, the gate will not call a thin run `passed` — so a checkpoint that merely asked was
 the one a reader could skip without ever seeing an error.
 
-`decide --checkpoint <id> --note "<text>"` records one. The note is required, because a decision the closing
-report cannot carry is not a decision anybody can check later; running unattended is a legitimate answer as
-long as it is written down. Decisions are bound to the `index_hash` they were made against, so a rescan
+`decide --checkpoint <id> --note "<text>"` records one, and **only for a checkpoint that is open**. Answering a
+question nobody has been asked yet is not an answer: deciding `P2` straight after `survey` would leave a
+standing approval that `analyze` then finds valid and leaves alone, and `check` would run with the module roles
+unreviewed. The note is required, because a decision the closing report cannot carry is not a decision anybody
+can check later; running unattended is a legitimate answer as long as it is written down. `--dry-run` prints
+what would be recorded and records nothing — an approval is the one thing a dry run must not leave behind.
+
+Decisions are bound to the `index_hash` they were made against, so a rescan
 reopens them — the scope approved against the old tree says nothing about the new one. Deleting a checkpoint
 file bypasses it, in the same way deleting `claims.jsonl` bypasses the claims: the mechanism is against
 forgetting, not against intent.

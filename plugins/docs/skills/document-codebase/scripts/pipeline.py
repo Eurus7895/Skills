@@ -448,9 +448,21 @@ def blocking_checkpoint(build, component, digest):
     before it, so its absence means that component never succeeded -- and then the honest
     error is the one this component's own first stage gives about its missing input, not
     a question about a decision nobody was ever asked to make.
+
+    **An open checkpoint blocks every component after it, not only the next one.** A
+    build directory that already holds artifacts from an earlier run is the case: with
+    `P1` open again, blocking only `analyze` still leaves `document` and `publish` free to
+    run over what is already on disk and produce a finished report with the scope decision
+    outstanding. The rule is that nothing downstream of an unanswered question runs, so
+    the first open checkpoint at or before this component in the order is the one that
+    holds it.
     """
+    try:
+        position = ORDER.index(component)
+    except ValueError:
+        return None
     for checkpoint in CHECKPOINTS:
-        if checkpoint["blocks"] != component:
+        if ORDER.index(checkpoint["blocks"]) > position:
             continue
         if not os.path.isfile(checkpoint_path(build, checkpoint["id"])):
             continue
@@ -507,6 +519,21 @@ def main():
             return fail("--note is required: a decision with no record of what was "
                         "decided is not one the closing report can carry")
         path = checkpoint_path(args.build, args.checkpoint)
+        # Only a checkpoint that is actually open may be decided. Without this a caller
+        # can answer a question nobody has been asked yet -- decide `P2` straight after
+        # `survey`, and when `analyze` later finishes it finds a decision carrying the
+        # current `index_hash`, leaves it alone, and `check` runs with the module roles
+        # unreviewed. Pre-approval defeats the whole mechanism, and it is the shape a
+        # script written for the old behaviour naturally takes.
+        if not os.path.isfile(path):
+            return fail("%s has not been opened yet, so there is nothing to decide: %s "
+                        "opens it, and a decision recorded before the question exists "
+                        "is not one anybody answered."
+                        % (args.checkpoint, known[args.checkpoint]["opened_by"]), 1)
+        if args.dry_run:
+            print("would record %s: %s" % (args.checkpoint, args.note.strip()))
+            print("would write %s" % path)
+            return 0
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"checkpoint": args.checkpoint, "state": "decided",

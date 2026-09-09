@@ -328,6 +328,41 @@ def main():
         check("six modules answered in full gives per_module and passes",
               code == 0 and read_report["analysis_mode"] == "per_module"
               and read_report["status"] == "passed", output)
+        # A016 at error level says the analysis was written from the file names. The
+        # gate reported `passed` beside its own error, because every other error the
+        # checker raises arrives as a rejected verdict and this one deliberately does
+        # not -- an isolated module's sentences are individually true.
+        lonely_path = os.path.join(build, "lonely.jsonl")
+        lonely_rows = []
+        for path, role, text_ in READINGS:
+            record = next(r for r in index["files"] if r["path"] == path)
+            # A real symbol from the file, so this clears the anchoring floor and stops
+            # there. Naming nothing at all would be A014's case, which is advisory by a
+            # decision A016 must not escalate around.
+            name = record["symbols"][0]["name"]
+            lonely_rows.append({
+                "analysis_version": 1, "path": path,
+                "source_hash": record["source_hash"], "index_hash": index["index_hash"],
+                "role": role,
+                "statements": [{
+                    "id": "%s-lonely" % name, "kind": "responsibility",
+                    "status": "observed",
+                    "text": "%s is where the work of this file is carried out." % name,
+                    "evidence": [{"path": path, "line_start": 1,
+                                  "line_end": record["loc"]}]}]})
+        write_rows(lonely_path, lonely_rows)
+        gate_out = os.path.join(build, "lonely-report.json")
+        code, output = run("quality_docs.py", "--index", index_path,
+                           "--analysis", lonely_path, "--out", gate_out)
+        with open(gate_out, encoding="utf-8") as fh:
+            lonely_report = json.load(fh)
+        check("the gate fails when the analysis is written from the file names",
+              lonely_report["status"] == "failed" and code == 1,
+              repr(lonely_report["status"]))
+        check("and says so in a reason, not only in a finding",
+              any("without naming more than one thing" in r
+                  for r in lonely_report["reasons"]), repr(lonely_report["reasons"]))
+
         check("and the depth figure agrees with the mode",
               read_report["modules"]["depth"]["full"] == 6
               and read_report["modules"]["full_coverage"] == 1.0,

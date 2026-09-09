@@ -539,6 +539,19 @@ def main():
         status = FAILED
         reasons.append("%d statement(s) were rejected outright"
                        % statements["rejected"])
+
+    # Every other error the analysis checker raises arrives here as a rejected verdict, so
+    # the count above carries it. `A016` is the exception by design -- an isolated module
+    # is described in sentences that are individually true, and rejecting them would throw
+    # away work that is not wrong. Without this the gate read `passed` on an analysis its
+    # own findings list called an error, which is the contradiction the check exists to
+    # prevent.
+    isolated = [f for f in findings
+                if f.get("code") == "A016" and f.get("severity") == "error"]
+    if isolated:
+        status = FAILED
+        for finding in isolated:
+            reasons.append(finding["message"])
     if mode == DERIVED_ONLY:
         # The rule this file exists for. A derived-only document is not broken, so it is
         # not `failed`; it is a document with no reading in it, so it is never `passed`.

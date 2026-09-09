@@ -295,6 +295,26 @@ def build_tests(tmp):
     index_rst = read(os.path.join(out_dir, "index.rst"))
     check("every generated page is in the toctree",
           all(pid in index_rst for pid in pages), index_rst[:400])
+    check("and an authored page nobody wrote is not, since it would point at nothing",
+          "appendix/changelog" not in index_rst, index_rst)
+
+    # The other half. Listing a page as authored gives it an identity; it earns a place
+    # in navigation by existing. Without this the author's own changelog sat in the
+    # output directory in no toctree, which Sphinx reports and a reader never finds.
+    os.makedirs(os.path.join(out_dir, "appendix"), exist_ok=True)
+    with open(os.path.join(out_dir, "appendix", "changelog.rst"), "w",
+              encoding="utf-8") as fh:
+        fh.write("Changelog\n=========\n\n- 0.1.0 first release\n")
+    os.remove(os.path.join(out_dir, "index.rst"))
+    code, out, err = run("render_docs.py", "--doc", doc_path, "--out", out_dir,
+                         "--diagrams", diagrams, "--check")
+    index_rst = read(os.path.join(out_dir, "index.rst"))
+    check("an authored page the author wrote is carried into the toctree",
+          "appendix/changelog" in index_rst, index_rst)
+    check("and the build check is satisfied by it", code == 0, (out + err)[-300:])
+    check("and it keeps the preset's order",
+          index_rst.index("appendix/changelog") < index_rst.index("appendix/limitations"),
+          index_rst)
 
     # With no operations analysis the procedure pages must still say something rather
     # than emit a heading over nothing.

@@ -108,6 +108,29 @@ def units_tests(tmp):
     check("a test module is not selected for documentation",
           not [p for p in kept if "test" in p], str(kept))
 
+    # Dropping test files from the selection but not their edges fixes half of it: the
+    # scanner's fan_in still counts them, so a helper imported by twenty tests and one
+    # module outranks the entry point and takes the budget with it.
+    helper = os.path.join(root, "src", "pipeline", "helper.py")
+    with open(helper, "w", encoding="utf-8") as fh:
+        fh.write("def helper():\n    return 1\n")
+    for number in range(6):
+        with open(os.path.join(root, "tests", "test_h%d.py" % number), "w",
+                  encoding="utf-8") as fh:
+            fh.write("from src.pipeline.helper import helper\n\n\n"
+                     "def test_h%d():\n    assert helper()\n" % number)
+    run("scan_repo.py", "--root", root, "--out", index_path, "--detail")
+    with open(index_path, encoding="utf-8") as fh:
+        scanned = json.load(fh)
+    check("the scanner's own fan_in counts the test imports",
+          (scanned.get("fan_in") or {}).get("src/pipeline/helper.py", 0) >= 6,
+          repr(scanned.get("fan_in")))
+    code, text = run("select_units.py", "--index", index_path, "--out", out, "--top", "1")
+    ranked = [line.split()[-1] for line in text.splitlines()
+              if line[:1].isdigit() and "fan_in" in line]
+    check("but a module only tests import does not win the fan-in budget",
+          "src/pipeline/helper.py" not in ranked, text)
+
     # Every entry point is added whatever the cutoff, which is right with two or three
     # ways in and wrong in a tree of standalone scripts. There the number that decides
     # the cost of the run is not the one that was typed, and it has to say so.
@@ -212,6 +235,41 @@ def driver_tests(tmp, root):
     code, text = run("pipeline.py", "decide", "--checkpoint", "P1", "--build", build)
     check("and a decision with no note is refused, since the report would carry nothing",
           code == 2, text)
+
+    # A decision recorded before the question is asked is not one anybody answered, and
+    # it is the shape a script written against the unguarded version takes: decide P2
+    # straight after survey, and analyze then leaves the standing decision alone because
+    # it carries the current index_hash, so check runs with the roles unreviewed.
+    code, text = run("pipeline.py", "decide", "--checkpoint", "P2", "--build", build,
+                     "--note", "pre-approved before analyze ever ran")
+    check("a checkpoint that was never opened cannot be decided", code == 1, text)
+    check("and the refusal names the component that opens it", "analyze opens it" in text,
+          text)
+
+    # --dry-run says it runs nothing. Recording an approval is the one thing it must not
+    # do quietly, since that alone unblocks the next component.
+    reopened = os.path.join(build, "checkpoints", "P1.json")
+    with open(reopened, encoding="utf-8") as fh:
+        kept = json.load(fh)
+    with open(reopened, "w", encoding="utf-8") as fh:
+        json.dump(dict(kept, state="pending"), fh)
+    code, text = run("pipeline.py", "decide", "--checkpoint", "P1", "--build", build,
+                     "--note", "preview only", "--dry-run")
+    with open(reopened, encoding="utf-8") as fh:
+        after = json.load(fh)
+    check("--dry-run records no decision", code == 0 and after["state"] == "pending",
+          repr(after))
+
+    # An open checkpoint blocks everything downstream, not only the next component. A
+    # build directory holding an earlier run's artifacts is where it matters: blocking
+    # only analyze would leave document and publish free to produce a finished report
+    # while the scope decision is still outstanding.
+    for later in ("check", "document", "publish"):
+        code, text = run("pipeline.py", later, "--root", root, "--build", build)
+        check("%s is held by the open scope checkpoint too" % later,
+              code == 1 and "held at checkpoint P1" in text, text[-200:])
+    with open(reopened, "w", encoding="utf-8") as fh:
+        json.dump(kept, fh)
 
     # analyze puts a packet on disk per unit, so the reading that follows can be fanned
     # out without every task re-running the query.

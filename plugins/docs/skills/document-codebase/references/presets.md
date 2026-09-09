@@ -120,8 +120,12 @@ satisfy the coverage check while putting "why is this boundary here" in a list o
 
 **An authored page still needs a row.** The seven appendix pages above generate nothing, and they are listed
 anyway: a page with no row is one the renderer neither writes nor names, so an authored `changelog.rst` sitting
-in the output directory is simply lost the next time a document is generated over it. Listing it costs an entry
-in the preset and keeps the page in the toctree as the author's.
+in the output directory is lost the next time a document is generated over it.
+
+**The row gives it an identity; the file on disk earns it a place in the toctree.** The renderer lists an
+authored page when it finds one rendered beside the generated pages, in the preset's order, and leaves it out
+when there is nothing there — a toctree entry pointing at a page that does not exist fails a Sphinx build, and
+a page that exists in no toctree is one Sphinx warns about and no reader reaches.
 
 Two pages a reader might expect are deliberately not here. There is no root overview page beyond
 `getting_started/introduction` — `index.rst` is the renderer's, and a second front page competes with it. And

@@ -33,13 +33,41 @@ def fail(message, code=2):
     return code
 
 
+def production_fan_in(index):
+    """How many non-test modules import each module.
+
+    The scanner's own `fan_in` counts every incoming edge, tests included, which is the
+    right factual measure and the wrong ranking. A well-tested helper is imported by
+    twenty test files and by one module, and on that count it outranks the entry point --
+    so the budget goes to whatever the suite exercises most rather than to what the
+    system is built on. Dropping test files from the selection without dropping their
+    edges fixes half of it and leaves the half that decides the order.
+
+    Falls back to the scanner's map when an index carries no edges, so an older or
+    edge-less index ranks as it always did rather than flatly at zero.
+    """
+    edges = index.get("edges")
+    if not edges:
+        return index.get("fan_in") or {}
+    tests = {record["path"] for record in index.get("files", ())
+             if record.get("is_test")}
+    counted = {}
+    for edge in edges:
+        if edge.get("from") in tests:
+            continue
+        target = edge.get("to")
+        if target:
+            counted[target] = counted.get(target, 0) + 1
+    return counted
+
+
 def select(index, top):
     """The paths to describe in full, and why each one is in the list.
 
     Returns `(paths, reasons, ranked)` -- `reasons` maps a path to `fan_in`,
     `entry_point` or both, and `ranked` is the fan-in ordering the cutoff was taken from.
     """
-    fan_in = index.get("fan_in") or {}
+    fan_in = production_fan_in(index)
     # Not tests. A test file is evidence that the code works, not a part of the system a
     # reader is being introduced to: documenting it spends the budget describing scaffolding
     # and puts `test_parser.py` in a module reference beside the parser. The scanner already
@@ -142,7 +170,9 @@ def main():
     with open(args.out, "w", encoding="utf-8") as fh:
         fh.write("\n".join(paths) + "\n")
 
-    fan_in = index.get("fan_in") or {}
+    # The same count the ranking used, or the column would explain a different order
+    # than the one on the page.
+    fan_in = production_fan_in(index)
     for path in paths:
         print("%-4d %-12s %s" % (fan_in.get(path, 0), "+".join(reasons[path]), path))
     print("wrote %d unit(s) to %s -- top %d by fan-in plus every entry point"
