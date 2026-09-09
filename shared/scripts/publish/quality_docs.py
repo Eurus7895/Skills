@@ -166,6 +166,7 @@ def analyse(index, analysis_path):
     for row in rows:
         verdicts.update(checker.check_row(row, seen))
     checker.check_repetition(rows, verdicts)
+    checker.check_relatedness(rows)
 
     evidence_failures = {finding["statement"] for finding in checker.findings
                          if finding["code"] in EVIDENCE_CODES and finding["statement"]}
@@ -222,6 +223,33 @@ def depth_of(kinds_by_path, in_budget):
         "full": len(in_budget) - len(thin),
         "thin": thin[:20],
     }
+
+
+def decisions_of(directory):
+    """What was decided at each checkpoint, and what is still open.
+
+    The report is where a run is accounted for afterwards, and "who agreed this scope" is
+    part of that account. A run made unattended is a legitimate answer and shows up here
+    as one -- which is the point of requiring the note.
+    """
+    decided, pending = [], []
+    if not directory or not os.path.isdir(directory):
+        return {"decided": decided, "pending": pending}
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(directory, name), encoding="utf-8") as fh:
+                record = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        entry = {"checkpoint": record.get("checkpoint"), "ask": record.get("ask")}
+        if record.get("state") == "decided":
+            entry["note"] = record.get("note")
+            decided.append(entry)
+        else:
+            pending.append(entry)
+    return {"decided": decided, "pending": pending}
 
 
 def mode_of(coverage, full_ratio, statements):
@@ -419,6 +447,8 @@ def main():
     parser.add_argument("--units", help="units.txt: the modules this run paid to read")
     parser.add_argument("--claims", help="claims.verified.jsonl")
     parser.add_argument("--doc", help="doc.json")
+    parser.add_argument("--checkpoints", help="the checkpoints directory, so the report "
+                                              "carries who decided the run's judgements")
     parser.add_argument("--architecture", help="architecture-analysis.json, so Detector B "
                                                "can ask whether it is a synthesis")
     parser.add_argument("--flows", help="flow-analysis.json, for the flow denominator")
@@ -498,6 +528,9 @@ def main():
             "depth": depth,
         },
         "statements": statements,
+        # Never a pass or a failure on its own: an open checkpoint means a component that
+        # would have refused was not reached, so it is reported and left to the reader.
+        "checkpoints": decisions_of(args.checkpoints),
         "findings": findings,
     }
 
@@ -506,6 +539,19 @@ def main():
         status = FAILED
         reasons.append("%d statement(s) were rejected outright"
                        % statements["rejected"])
+
+    # Every other error the analysis checker raises arrives here as a rejected verdict, so
+    # the count above carries it. `A016` is the exception by design -- an isolated module
+    # is described in sentences that are individually true, and rejecting them would throw
+    # away work that is not wrong. Without this the gate read `passed` on an analysis its
+    # own findings list called an error, which is the contradiction the check exists to
+    # prevent.
+    isolated = [f for f in findings
+                if f.get("code") == "A016" and f.get("severity") == "error"]
+    if isolated:
+        status = FAILED
+        for finding in isolated:
+            reasons.append(finding["message"])
     if mode == DERIVED_ONLY:
         # The rule this file exists for. A derived-only document is not broken, so it is
         # not `failed`; it is a document with no reading in it, so it is never `passed`.

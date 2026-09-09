@@ -224,7 +224,24 @@ def render_page(page, titles, emitter):
     return "\n".join(parts).rstrip() + "\n"
 
 
-def render_index(doc, pages, emitter):
+def authored_on_disk(doc, out, emitter):
+    """Authored pages the author has actually written, so the toctree can carry them.
+
+    A preset lists a page it cannot generate so the page has an identity: the report can
+    say it was not written, and the skill knows to fill it. But an authored page that
+    exists on disk and is in no toctree is unreachable -- Sphinx warns that the document
+    is included nowhere, and a reader never finds it. Listing one that does *not* exist
+    would be the opposite error, a toctree entry pointing at nothing, which Sphinx treats
+    as a build failure. So the file on disk decides.
+    """
+    found = []
+    for page in doc.get("authored_pages", ()):
+        if os.path.isfile(os.path.join(out, page["id"] + emitter.extension)):
+            found.append(page)
+    return found
+
+
+def render_index(doc, pages, emitter, authored=()):
     revision = doc.get("source_revision")
     parts = [emitter.heading("Documentation"),
              emitter.prose(
@@ -232,9 +249,12 @@ def render_index(doc, pages, emitter):
                  % (doc["preset"], revision or "an untracked tree",
                     " (working tree had uncommitted changes)"
                     if doc.get("source_dirty") else "")),
-             # Every page, in the model's order. This is the check a renderer can
-             # actually make: a page that exists but is not listed here is unreachable.
-             emitter.toctree([page["id"] for page in pages])]
+             # Every page, in the preset's order -- generated and authored together.
+             # This is the check a renderer can actually make: a page that exists but is
+             # not listed here is unreachable.
+             emitter.toctree([page["id"] for page in
+                              sorted(list(pages) + list(authored),
+                                     key=lambda p: p.get("order", 0))])]
     return "\n".join(parts)
 
 
@@ -302,7 +322,8 @@ def main():
     except ValueError as exc:
         sys.stderr.write("FAIL  %s\n" % exc)
         return 2
-    rendered[index_name] = render_index(doc, pages, emitter)
+    carried = authored_on_disk(doc, args.out, emitter)
+    rendered[index_name] = render_index(doc, pages, emitter, carried)
 
     # A figure pointing at a file that is not there renders as a broken image and
     # fails a Sphinx build with a message about the page, not about the picture. Check

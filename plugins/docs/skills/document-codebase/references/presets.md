@@ -100,7 +100,7 @@ author even on a run that has all four. Here they are generated.
 | `development/local_setup`, `code_quality`, `extending` | — | **authored** |
 | `appendix/limitations` | coverage counts, unresolved claims, scanner diagnostics | generated |
 | `appendix/traceability` | the scan identity, the citation convention, the artefacts | generated |
-| `appendix/supported_elements`, `glossary`, `troubleshooting` | — | **authored** |
+| `appendix/supported_elements`, `glossary`, `faq`, `troubleshooting`, `references`, `compliance`, `changelog` | — | **authored** |
 
 **The procedure kinds are partitioned across pages, never repeated.** `install`/`build` go to installation,
 `test` to testing, `run` to the command-line page, `deploy`/`release`/`observe` to CI and release, `configure`
@@ -117,6 +117,15 @@ kind says nothing at all.
 **Rationale gets its own page**, as in `outside-in`, rather than being folded into the architecture overview.
 The content has its own builder and its own required-topic home; filing it under the module reference would
 satisfy the coverage check while putting "why is this boundary here" in a list of files.
+
+**An authored page still needs a row.** The seven appendix pages above generate nothing, and they are listed
+anyway: a page with no row is one the renderer neither writes nor names, so an authored `changelog.rst` sitting
+in the output directory is lost the next time a document is generated over it.
+
+**The row gives it an identity; the file on disk earns it a place in the toctree.** The renderer lists an
+authored page when it finds one rendered beside the generated pages, in the preset's order, and leaves it out
+when there is nothing there — a toctree entry pointing at a page that does not exist fails a Sphinx build, and
+a page that exists in no toctree is one Sphinx warns about and no reader reaches.
 
 Two pages a reader might expect are deliberately not here. There is no root overview page beyond
 `getting_started/introduction` — `index.rst` is the renderer's, and a second front page competes with it. And
