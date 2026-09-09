@@ -72,65 +72,16 @@ build and say the analysis was not supplied — a visibly thinner document, neve
 
 ## `manual`
 
-The five-area tree a delivered manual usually has — `getting_started/`, `architecture/`, `usage/`,
-`development/`, `appendix/` — filled from everything steps 2 to 4 produced. Use it when the deliverable is a
-product manual rather than an architecture report, and when the run has the architecture, flow and operations
-analyses to fill it with.
+Follow the 25-section [question template](documentation-template.md), with the documentation-wide review
+in the appendix. Read [manual.md](manual.md) for the answer schema, generation steps, review and migration.
+Unlike the graph-driven presets, manual requires `manual-analysis.json`: every template question gets an
+explicit, evidence-backed answer or a recorded unknown. Previously authored pages are now filled from the
+same answer artifact. Unknowns render visibly but keep the manual incomplete.
 
-**It differs from `handbook` in what it can generate, not in shape.** `handbook` predates those three
-analyses, so it leaves the component map, the processing flow, the procedures and the coverage page to an
-author even on a run that has all four. Here they are generated.
+Only `architecture/class_diagram` and `architecture/data_flow` require diagrams. Other pages require
+substantive explanations, not diagrams or file inventories. System Overview includes boundaries and design
+decisions; the template separates packaging/release from CI/CD. The question headings remain through review.
 
-| Page | Filled from | |
-| --- | --- | --- |
-| `getting_started/introduction` | what was scanned, its languages, the ways in | generated |
-| `getting_started/installation` | declared requirements, and the install and build procedures | generated |
-| `getting_started/quick_start` | — | **authored** |
-| `architecture/overview` | the components, their layers, and what crosses between them | generated |
-| `architecture/processing_flow` | the traced chains, or the stated reason there are none | generated |
-| `architecture/boundaries` | import edges that cross a directory, each with its proof line | generated |
-| `architecture/design_decisions` | why each boundary is there, and the ones nobody recorded | generated |
-| `architecture/module_reference` | one row per module whose description survived verification | generated |
-| `architecture/class_diagrams` | the class graph and its rendered views | generated |
-| `usage/configuration` | the `configure` procedures | generated |
-| `usage/command_line` | the `run` procedures, with their commands quoted | generated |
-| `usage/python_api`, `semantics`, `output_and_side_effects`, `errors_and_recovery` | — | **authored** |
-| `development/testing` | the `test` procedures, with their commands quoted | generated |
-| `development/ci_cd_and_release` | the `deploy`, `release` and `observe` procedures | generated |
-| `development/local_setup`, `code_quality`, `extending` | — | **authored** |
-| `appendix/limitations` | coverage counts, unresolved claims, scanner diagnostics | generated |
-| `appendix/traceability` | the scan identity, the citation convention, the artefacts | generated |
-| `appendix/supported_elements`, `glossary`, `faq`, `troubleshooting`, `references`, `compliance`, `changelog` | — | **authored** |
-
-**The procedure kinds are partitioned across pages, never repeated.** `install`/`build` go to installation,
-`test` to testing, `run` to the command-line page, `deploy`/`release`/`observe` to CI and release, `configure`
-to configuration. A command shown on two pages reads as two different commands, so no kind has two homes —
-which is why this preset does not reuse the `getting-started` and `operations` builders that pack four kinds
-onto one page each.
-
-**Every kind has a home, and `tools/test_operations_homes.py` proves it.** The partition is declared in
-`PROCEDURE_HOMES` rather than written into each builder, because when it was inline this preset covered seven
-kinds of eight: a `run` procedure quoted out of a README rendered nowhere, and the page a reader opens to find
-out how to start the thing was an authored stub. An empty page says the analysis recorded nothing; a dropped
-kind says nothing at all.
-
-**Rationale gets its own page**, as in `outside-in`, rather than being folded into the architecture overview.
-The content has its own builder and its own required-topic home; filing it under the module reference would
-satisfy the coverage check while putting "why is this boundary here" in a list of files.
-
-**An authored page still needs a row.** The seven appendix pages above generate nothing, and they are listed
-anyway: a page with no row is one the renderer neither writes nor names, so an authored `changelog.rst` sitting
-in the output directory is lost the next time a document is generated over it.
-
-**The row gives it an identity; the file on disk earns it a place in the toctree.** The renderer lists an
-authored page when it finds one rendered beside the generated pages, in the preset's order, and leaves it out
-when there is nothing there — a toctree entry pointing at a page that does not exist fails a Sphinx build, and
-a page that exists in no toctree is one Sphinx warns about and no reader reaches.
-
-Two pages a reader might expect are deliberately not here. There is no root overview page beyond
-`getting_started/introduction` — `index.rst` is the renderer's, and a second front page competes with it. And
-there is no separate components page: `architecture/overview` is that page, because the blueprint this tree
-follows asks the overview to be a component map rather than a list of imports.
 
 ## `handbook`
 
@@ -162,6 +113,10 @@ cannot check against evidence, you leave.
 `index.rst` is the author's too. The renderer writes one only when the output directory has none; where an
 index already exists it is kept and the run says so, because that file lists pages this run knows nothing
 about. `--replace-index` overrides that, and then the toctree is the generated one.
+
+Authored pages enter the generated toctree only when their files exist, in preset order. Missing authored
+pages stay out of navigation so the toctree does not point at nonexistent documents. Existing authored
+content is preserved by the renderer.
 
 Page ids in this preset contain `/`, and a page id is its path under the output directory.
 

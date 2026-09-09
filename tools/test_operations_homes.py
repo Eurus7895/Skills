@@ -72,10 +72,9 @@ for home in sorted(model.PROCEDURE_HOMES):
     check(home in model.BUILDERS,
           "PROCEDURE_HOMES names %r, which is not a builder" % home)
 
-# The specific regression: `manual` must render `run` somewhere.
-manual_builders = [row[3] for row in model.PRESETS["manual"] if row[3]]
-check(any("run" in model.PROCEDURE_HOMES.get(b, ()) for b in manual_builders),
-      "the manual preset renders no page for the `run` procedure kind")
+# Manual renders explicit template answers rather than procedure builders.
+check(any(row[0] == "usage/invoking" for row in model.PRESETS["manual"]),
+      "the manual preset has no invocation page")
 
 if failures:
     for line in failures:

@@ -18,6 +18,16 @@ Get the structure from a parser, not from the model. Describe each module with i
 dependencies in hand. Turn every description into claims that carry a citation, check each one against the
 graph and the source, and write only what survives.
 
+## Manual output contract
+
+For a manual, read [references/manual.md](references/manual.md) and the complete
+[question template](references/documentation-template.md) before choosing scope. Use `--preset manual`.
+Answer every template question in `.docs-build/manual-analysis.json`; the document builder writes those
+answers into the matching RST pages. File inventories, generic framing and absence notices do not answer
+questions. Keep unknowns explicit with the evidence to check next; do not report them as completed content.
+Only `architecture/class_diagram.rst` and `architecture/data_flow.rst` require diagrams, with explanations.
+Review actual rendered answers for correctness and usefulness; script checks alone do not establish either.
+
 ## When to use this skill
 
 - The user wants an **architecture overview**: layers, data flow, entry points, what depends on what.
@@ -312,11 +322,10 @@ connects to what, or set its own scope. See [`references/diagram-policy.md`](ref
 
 The preset is chosen from what the build directory holds: `outside-in` once any of the three analyses exists,
 `onboarding` otherwise, and `--preset` overrides. `outside-in` opens on what the repository is rather than on
-its dependency graph. **`--preset manual`** lays the same material out as a delivered manual —
-`getting_started/`, `architecture/`, `usage/`, `development/`, `appendix/` — generating what those analyses
-can fill and naming the rest as the author's; use it when the deliverable is a product manual rather than an
-architecture report. `handbook` fits an existing tree and **updates** its authored pages rather than
-generating over them. All of them are in [`references/presets.md`](references/presets.md).
+its dependency graph. **`--preset manual`** requires `.docs-build/manual-analysis.json` and renders all
+question answers into the template's five areas. Read [the manual guide](references/manual.md) before
+building it. `handbook` preserves its existing authored-page workflow. All presets are described in
+[`references/presets.md`](references/presets.md).
 
 ### 6. Publish
 

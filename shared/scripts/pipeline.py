@@ -272,6 +272,9 @@ def document(args):
              "--analysis", os.path.join(build, "module-analysis.jsonl"),
              "--preset", preset, "--diagrams", diagrams,
              "--out", os.path.join(build, "doc.json")]
+    if preset == "manual":
+        model.extend(["--manual-analysis", os.path.join(build, "manual-analysis.json"),
+                      "--root", args.root])
     for flag, path in (("--architecture", architecture), ("--flows", flows),
                        ("--operations", operations)):
         if os.path.exists(path):

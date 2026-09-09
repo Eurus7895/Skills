@@ -605,6 +605,25 @@ def main():
         if error:
             return fail(error)
         report["pages"] = page_report(doc)
+        if doc.get("preset") == "manual":
+            from manual import validate_document
+            problems = validate_document(doc)
+            answers = [b for p in doc.get("pages", []) for b in p.get("blocks", [])
+                       if b.get("manual_question")]
+            unresolved = [b["manual_question"] for b in answers
+                          if b.get("answer_status") == "unknown"]
+            missing_diagrams = [pid for pid in ("architecture/class_diagram", "architecture/data_flow")
+                                if not any(b.get("type") == "plantuml"
+                                           for p in doc.get("pages", []) if p.get("id") == pid
+                                           for b in p.get("blocks", []))]
+            report["manual"] = {"total": len(answers), "unresolved": unresolved,
+                                "missing_diagrams": missing_diagrams, "problems": problems}
+            if problems:
+                status = FAILED
+                reasons.extend(problems)
+            elif unresolved or missing_diagrams:
+                status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
+                reasons.append("manual has unanswered questions or missing required diagrams")
         if report["pages"]["missing"]:
             status = FAILED
             reasons.append("the %s preset requires pages that were not generated: %s"

@@ -250,6 +250,12 @@ class Checker(object):
 
         cited = list(block.get("analysis_refs", ()) or ()) \
             + list(block.get("claim_refs", ()) or ())
+        if block.get("manual_question"):
+            # Citation existence does not prove that an answer addresses its question.
+            # Queue the actual rendered answer for semantic review, including N/A decisions.
+            if block.get("answer_status") != "unknown":
+                self.queue.append({"page": page_id, "block": subject})
+            return
         if not cited:
             # Generator framing, not a rewrite. Named so a model pass can look, never
             # failed: there is no source to have overstated.

@@ -104,3 +104,10 @@ misconfigure and is written to normally.
   the claims are wrong, the other means the invocation was.
 - Every script here is authored in `shared/scripts/` and materialized into this plugin. Edit the source and
   run `python3 tools/materialize.py`; never edit the generated copies.
+
+## Question-driven manual
+
+Use `--preset manual` to follow the 25-section documentation template. Write evidence-backed answers in
+`manual-analysis.json`; all pages render those answers, including usage, development and appendix content.
+Only the class-diagram and data-flow pages require diagrams. Unknown answers keep the manual incomplete.
+See [the manual guide](skills/document-codebase/references/manual.md).

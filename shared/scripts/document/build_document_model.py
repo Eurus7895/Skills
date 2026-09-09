@@ -51,6 +51,8 @@ import os
 import re
 import sys
 
+import manual
+
 FORMAT_VERSION = 2
 GENERATOR_VERSION = "0.2.0-dev"
 SUPPORTED_SCHEMA = {2, 3}
@@ -205,55 +207,10 @@ PRESETS = {
         # itself exactly where it is weakest.
         ("limitations", "Coverage and limitations", True, "limitations"),
     ],
-    # A handbook laid out the way a delivered manual usually is. Most of it is not
-    # derivable from a dependency graph -- an installation guide, a changelog, a
-    # glossary are things a person knows -- so this pipeline fills the four pages that
-    # are, lists the rest, and writes none of them. Those stay the author's, and the
-    # skill updates them against verified claims one at a time.
-    # The five-area tree a delivered manual usually has, filled from everything C5-C7
-    # produced. It differs from `handbook` in what it can generate rather than in shape:
-    # handbook predates the architecture, flow and operations analyses, so it leaves the
-    # component map, the processing flow, the procedures and the coverage page to an
-    # author. Here those are generated, and what remains authored is what genuinely
-    # cannot be read off a dependency graph -- an API guide, a configuration schema, a
-    # glossary, a troubleshooting table.
-    "manual": [
-        ("getting_started/introduction", "Introduction", True, "product-overview"),
-        ("getting_started/installation", "Installation", True, "installation"),
-        ("getting_started/quick_start", "Quick start", False, None),
-        ("architecture/overview", "Architecture overview", True, "components"),
-        ("architecture/processing_flow", "Processing flow", True, "flows"),
-        ("architecture/boundaries", "Boundaries and what crosses them", True,
-         "architecture"),
-        ("architecture/design_decisions", "Design decisions", True, "rationale"),
-        ("architecture/module_reference", "Module reference", True, "modules"),
-        ("architecture/class_diagrams", "Class diagrams", True, "class-views"),
-        ("usage/python_api", "Python API", False, None),
-        ("usage/command_line", "Command line", True, "running"),
-        ("usage/configuration", "Configuration", True, "configuration"),
-        ("usage/semantics", "Semantics", False, None),
-        ("usage/output_and_side_effects", "Output and side effects", False, None),
-        ("usage/errors_and_recovery", "Errors and recovery", False, None),
-        ("development/local_setup", "Local setup", False, None),
-        ("development/testing", "Testing", True, "testing"),
-        ("development/code_quality", "Code quality", False, None),
-        ("development/extending", "Extending it", False, None),
-        ("development/ci_cd_and_release", "CI, CD and release", True, "release"),
-        ("appendix/supported_elements", "Supported elements", False, None),
-        ("appendix/glossary", "Glossary", False, None),
-        ("appendix/faq", "Frequently asked questions", False, None),
-        ("appendix/troubleshooting", "Troubleshooting", False, None),
-        # A delivered manual carries these and a graph cannot write any of them: what the
-        # repository was measured against, what it cites, and what changed between
-        # releases. They are here so a tree that already has them has somewhere to land --
-        # without a row, an authored page is one the renderer neither writes nor names,
-        # and it is simply lost when a document is regenerated over its directory.
-        ("appendix/references", "References", False, None),
-        ("appendix/compliance", "Compliance", False, None),
-        ("appendix/changelog", "Changelog", False, None),
-        ("appendix/limitations", "Limitations", True, "limitations"),
-        ("appendix/traceability", "Traceability", True, "traceability"),
-    ],
+    # Manual renders the user's question template from explicit answers. The other
+    # presets continue to use graph/analysis builders and authored-page preservation.
+    "manual": [(page["id"], page["title"], True, "manual")
+               for page in manual.QUESTIONS[1:] + manual.QUESTIONS[:1]],
     "handbook": [
         ("getting_started/introduction", "Introduction", True, None),
         ("getting_started/installation_integrators", "Installation", True, None),
@@ -1325,6 +1282,12 @@ def section_coverage(preset, analysis, fragments):
 
 
 def build(index, fragments, claims, preset, diagrams=None, analysis=None, extra=None):
+    if preset == "manual":
+        extra = extra or {}
+        doc = manual.build(index, extra.get("manual"), extra.get("diagram_directory"),
+                           extra.get("root", "."))
+        doc.update(format_version=FORMAT_VERSION, generator_version=GENERATOR_VERSION)
+        return doc
     by_id = {c.get("id"): c for c in claims}
     analysis = analysis if analysis is not None else Analysis()
     # Optional material a page may use if it exists: the traced flows today, the
@@ -1378,6 +1341,8 @@ def build(index, fragments, claims, preset, diagrams=None, analysis=None, extra=
 
 def validate(doc):
     """Structural problems that would produce a broken or dishonest page."""
+    if doc.get("preset") == "manual":
+        return manual.validate_document(doc)
     problems = []
     by_id = {c.get("id"): c for c in doc["claims"]}
     statements_by_id = {s.get("id"): s for s in doc.get("statements", ())}
@@ -1525,6 +1490,8 @@ def main():
     parser.add_argument("--operations", metavar="PATH",
                         help="operations-analysis.json; the getting-started and "
                              "operations pages are built from it")
+    parser.add_argument("--manual-analysis", help="question answers for the manual preset")
+    parser.add_argument("--root", default=".", help="repository root for manual evidence")
     parser.add_argument("--preset", default="onboarding", choices=sorted(PRESETS))
     parser.add_argument("--diagrams", metavar="DIR",
                         help="rendered diagram directory; pages reference what is there "
@@ -1608,14 +1575,31 @@ def main():
             return 2
         extra[key] = loaded
 
+    if args.preset == "manual":
+        if not args.manual_analysis:
+            sys.stderr.write("FAIL manual requires --manual-analysis; answer the template first\n")
+            return 2
+        try:
+            with open(args.manual_analysis, encoding="utf-8") as fh:
+                extra["manual"] = json.load(fh)
+        except (OSError, ValueError) as exc:
+            sys.stderr.write("FAIL cannot read manual analysis: %s\n" % exc)
+            return 2
+        extra["root"] = args.root
+        extra["diagram_directory"] = args.diagrams
+
     diagrams = find_diagrams(args.diagrams,
                              [page_id for page_id, _, _, _ in PRESETS[args.preset]])
-    if args.diagrams and not diagrams:
+    if args.diagrams and not diagrams and args.preset != "manual":
         # Asked for, not found: say so rather than producing a document that quietly
         # has no picture in it.
         sys.stderr.write("WARN  %s holds no generated PlantUML diagram; the pages will "
                          "have no diagram\n" % args.diagrams)
-    doc = build(index, fragments, claims, args.preset, diagrams, analysis, extra)
+    try:
+        doc = build(index, fragments, claims, args.preset, diagrams, analysis, extra)
+    except (ValueError, OSError) as exc:
+        sys.stderr.write("FAIL %s\n" % exc)
+        return 2
     problems = validate(doc)
     if problems:
         for problem in problems:
@@ -1633,7 +1617,7 @@ def main():
           % (args.out, len(doc["pages"]),
              sum(len(p["blocks"]) for p in doc["pages"]), len(doc["claims"]),
              len(doc["statements"])))
-    if not args.analysis:
+    if not args.analysis and args.preset != "manual":
         print("no --analysis: the pages carry what the graph proves and nothing that was "
               "read, which is why they read like an inventory")
     return 0
