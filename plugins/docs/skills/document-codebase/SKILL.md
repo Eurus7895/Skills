@@ -275,8 +275,9 @@ attempts** on anything unresolved, leaving it `candidate` for the limitations pa
 
 ### 4. Say what the repository is, how it runs, and how it is operated
 
-Three files, all yours to write, all read by the `outside-in` preset and by nothing else. Every schema and
-finding code is in [`references/schemas.md`](references/schemas.md).
+Three files, all yours to write, read by the `outside-in` preset and by `manual` — which prefills the eight
+questions they settle, and lets an answer cite them. Every schema and finding code is in
+[`references/schemas.md`](references/schemas.md).
 
 **`architecture-analysis.json`** — components, the layers they sit in, what crosses between them, and which
 outside systems the repository talks to. **The easy way to produce this file is to read the directory listing
