@@ -123,15 +123,12 @@ PRESET_COVERS = {
 # reader would find the system's shape filed under a list of files. Naming the allowed
 # homes is what makes "every mandatory topic has a page" mean a page a reader would look
 # on.
+# `manual` is not here any more, and its absence is the honest record rather than an
+# oversight. The entry named `components`, `rationale` and `modules` as the homes of the
+# six topics; none of those builders is in the manual preset now that it renders template
+# answers, and `validate()` returns before reaching this table for that preset. Config
+# that cannot fire is worse than no config: the next reader takes it for a guarantee.
 REQUIRED_TOPICS = {
-    "manual": {
-        "interaction": ("components",),
-        "rationale": ("rationale",),
-        "responsibility": ("modules",),
-        "state": ("modules",),
-        "interface": ("modules",),
-        "failure": ("modules",),
-    },
     "outside-in": {
         "interaction": ("components",),
         "rationale": ("rationale",),
@@ -1284,8 +1281,12 @@ def section_coverage(preset, analysis, fragments):
 def build(index, fragments, claims, preset, diagrams=None, analysis=None, extra=None):
     if preset == "manual":
         extra = extra or {}
+        # The claims and the analysis go in so a `confirmed` answer can be made to name
+        # one: without them every answer would be as good as every other, which is the
+        # standard the rest of this pipeline exists to avoid.
         doc = manual.build(index, extra.get("manual"), extra.get("diagram_directory"),
-                           extra.get("root", "."))
+                           extra.get("root", "."), claims,
+                           analysis if analysis is not None else Analysis())
         doc.update(format_version=FORMAT_VERSION, generator_version=GENERATOR_VERSION)
         return doc
     by_id = {c.get("id"): c for c in claims}

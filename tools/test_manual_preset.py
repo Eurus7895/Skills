@@ -24,11 +24,19 @@ class ManualTests(unittest.TestCase):
         (self.root / 'README.md').write_text('The example normalizes input.\nRun normalize to write cleaned output.\n')
         self.index = {'schema_version': 3, 'index_hash': 'scan', 'files': [], 'coverage': {}}
         self.answers = manual.scaffold(self.index)
+        # What a `confirmed` answer is allowed to stand on: one verified claim and one
+        # observed statement. The unverified pair beside them is what the rule refuses.
+        self.claims = [{'id': 'claim:verified', 'status': 'verified'},
+                       {'id': 'claim:candidate', 'status': 'candidate'}]
+        self.analysis = model.Analysis([
+            {'path': 'README.md', 'statements': [
+                {'id': 'stmt:observed', 'kind': 'responsibility', 'status': 'observed'},
+                {'id': 'stmt:guessed', 'kind': 'responsibility', 'status': 'inferred'}]}])
 
     def build(self):
-        return model.build(self.index, [], [], 'manual', extra={
-            'manual': self.answers, 'root': str(self.root),
-            'diagram_directory': str(self.root / 'diagrams')})
+        return model.build(self.index, [], self.claims, 'manual', analysis=self.analysis,
+                           extra={'manual': self.answers, 'root': str(self.root),
+                                  'diagram_directory': str(self.root / 'diagrams')})
 
     def test_template_questions_are_preserved(self):
         source = Path(__file__).resolve().parents[1] / 'plugins/docs/skills/document-codebase/references/documentation-template.md'
@@ -41,9 +49,13 @@ class ManualTests(unittest.TestCase):
     def test_answers_reach_rst_and_review(self):
         answer = self.answers['answers']['1.1.1']
         answer.update(status='confirmed', text='This tool normalizes input so consumers receive cleaned output.',
-                      evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}])
+                      evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}],
+                      claim_ids=['claim:verified'], statement_ids=['stmt:observed'])
         doc = self.build()
         self.assertEqual(model.validate(doc), [])
+        # The cited rows travel with the document, so the reference resolves in it.
+        self.assertEqual([c['id'] for c in doc['claims']], ['claim:verified'])
+        self.assertEqual([s['id'] for s in doc['statements']], ['stmt:observed'])
         self.assertEqual(len(doc['pages']), 26)
         self.assertFalse(doc['authored_pages'])
         titles = {p['id']: p['title'] for p in doc['pages']}
@@ -68,6 +80,35 @@ class ManualTests(unittest.TestCase):
             evidence=[{'path':'README.md','line_start':1,'line_end':99}])
         with self.assertRaises(ValueError): self.build()
         self.answers['answers']['1.1.1']['evidence'] = [{'path':'../outside','line_start':1,'line_end':1}]
+        with self.assertRaises(ValueError): self.build()
+
+    def test_confirmed_must_borrow_standing_from_a_check(self):
+        """Location is not support: `confirmed` names something that could have failed."""
+        answer = self.answers['answers']['1.1.1']
+        answer.update(status='confirmed', text='A factual answer.',
+                      evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}])
+        # Evidence that resolves, and nothing that was ever checked.
+        with self.assertRaises(ValueError): self.build()
+        # The same answer as a reading is fine, and says so on the page.
+        answer['status'] = 'inferred'
+        doc = self.build()
+        block = next(b for p in doc['pages'] for b in p['blocks']
+                     if b.get('manual_question') == '1.1.1')
+        self.assertTrue(block['text'].startswith('Inferred: '))
+
+    def test_unverified_ids_are_refused_not_downgraded(self):
+        """A claim that did not verify is an unchecked citation, not a weaker one."""
+        answer = self.answers['answers']['1.1.1']
+        answer.update(status='confirmed', text='A factual answer.',
+                      evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}],
+                      claim_ids=['claim:candidate'])
+        with self.assertRaises(ValueError): self.build()
+        # `inferred` is the model's own reading; a statement recorded as one cannot
+        # stand in for a check either.
+        answer.update(claim_ids=[], statement_ids=['stmt:guessed'])
+        with self.assertRaises(ValueError): self.build()
+        # An id nothing in either file holds.
+        answer['statement_ids'] = ['stmt:invented']
         with self.assertRaises(ValueError): self.build()
 
     def test_only_two_diagram_pages(self):

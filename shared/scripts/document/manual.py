@@ -1,7 +1,22 @@
 """Question-driven manual model. Stdlib only; no network or package installation.
 
 Run with --init PATH --index PATH to write an explicit unknown-answer draft.
-The builder checks completeness and citation locations, not semantic correctness.
+
+The builder checks three things and not a fourth. It checks that every template
+question was answered, that each citation points at a line range that exists, and --
+for a `confirmed` answer -- that the answer names something the rest of the pipeline
+already proved. It does not check that the cited lines say what the answer says; that
+is what the prose review queue is for.
+
+**A resolving citation is not a supporting one.** `src/api.py:34-51` can exist, be in
+range, and have nothing to do with the sentence beside it, so location alone is a
+weaker standard than every other claim in the same document is held to. `confirmed` is
+the status that asserts the repository settles the question, so it is the one that has
+to borrow its standing from a check that could have failed: a `verified` claim out of
+verify_doc.py, or a `declared`/`observed` statement out of module-analysis.jsonl.
+`inferred` carries the model's reading and says so, so evidence locations are the right
+bar for it -- requiring a verified claim there would only push honest readings down to
+`unknown`.
 """
 import argparse
 import json
@@ -12,6 +27,12 @@ QUESTIONS = json.loads(Path(__file__).with_name("manual_questions.json").read_te
 DIAGRAMS = {"architecture/class_diagram": "diagram-manifest.json",
             "architecture/data_flow": "flow-diagram-manifest.json"}
 
+# What a `confirmed` answer may borrow its standing from. These are the statuses the
+# rest of the skill already lets into prose: hard rule 5 admits `verified` claims, and
+# the two statement statuses that are not the model's own reading.
+CONFIRMING_CLAIM_STATUS = ("verified",)
+CONFIRMING_STATEMENT_STATUS = ("declared", "observed")
+
 
 def scaffold(index):
     return {"manual_version": 1, "index_hash": index.get("index_hash"),
@@ -20,7 +41,23 @@ def scaffold(index):
                         for page in QUESTIONS for q in page["questions"]}}
 
 
-def build(index, content, diagrams, root):
+def confirmable(claims, analysis):
+    """The claim and statement ids a `confirmed` answer is allowed to stand on.
+
+    Built from the same two files the rest of the run is checked against, so an id that
+    passes here passed verify_doc.py or validate_analysis.py first. An id absent from
+    both is not a weaker citation, it is an unchecked one.
+    """
+    claim_ids = {c.get("id") for c in claims or ()
+                 if c.get("status") in CONFIRMING_CLAIM_STATUS}
+    statement_ids = set()
+    for statement_id, statement in getattr(analysis, "by_id", {}).items():
+        if statement.get("status") in CONFIRMING_STATEMENT_STATUS:
+            statement_ids.add(statement_id)
+    return claim_ids - {None}, statement_ids - {None}
+
+
+def build(index, content, diagrams, root, claims=(), analysis=None):
     if not isinstance(content, dict) or content.get("manual_version") != 1:
         raise ValueError("manual requires --manual-analysis with manual_version 1")
     if not index.get("index_hash") or content.get("index_hash") != index["index_hash"]:
@@ -29,6 +66,8 @@ def build(index, content, diagrams, root):
     expected = {q["id"] for p in QUESTIONS for q in p["questions"]}
     if not isinstance(answers, dict) or set(answers) != expected:
         raise ValueError("manual answers must contain exactly every template question ID")
+    known_claims, known_statements = confirmable(claims, analysis)
+    cited_claims, cited_statements = set(), set()
     pages, unresolved, missing_diagrams = [], [], []
     root = Path(root).resolve()
     for order, spec in enumerate(QUESTIONS, 1):
@@ -63,6 +102,26 @@ def build(index, content, diagrams, root):
                 if end > len(target.read_text(encoding="utf-8").splitlines()):
                     raise ValueError("%s: evidence line range exceeds file" % qid)
                 citations.append("%s:%d-%d" % (path, start, end))
+            claim_refs = answer.get("claim_ids", [])
+            analysis_refs = answer.get("statement_ids", [])
+            for label, refs in (("claim_ids", claim_refs),
+                                ("statement_ids", analysis_refs)):
+                if not isinstance(refs, list) or any(not isinstance(r, str) for r in refs):
+                    raise ValueError("%s: %s must be a list of ids" % (qid, label))
+            unknown_refs = ([r for r in claim_refs if r not in known_claims]
+                            + [r for r in analysis_refs if r not in known_statements])
+            if unknown_refs:
+                # Naming an id nothing verified is the failure this rule exists for: it
+                # reads as provenance and carries none.
+                raise ValueError(
+                    "%s: cites %s, which no verified claim or recorded statement holds"
+                    % (qid, ", ".join(sorted(unknown_refs)[:3])))
+            if status == "confirmed" and not (claim_refs or analysis_refs):
+                raise ValueError(
+                    "%s: `confirmed` must name a verified claim_id or a statement_id; "
+                    "an answer the pipeline never checked is `inferred`" % qid)
+            cited_claims.update(claim_refs)
+            cited_statements.update(analysis_refs)
             if status == "unknown":
                 if not str(answer.get("next_check", "")).strip():
                     raise ValueError("%s: unknown requires a concrete next_check" % qid)
@@ -81,7 +140,8 @@ def build(index, content, diagrams, root):
                 {"id": "question:" + qid, "type": "subheading", "text": question["text"]},
                 {"id": "answer:" + qid, "type": "prose", "text": text,
                  "manual_question": qid, "answer_status": status,
-                 "evidence": evidence, "claim_refs": [], "analysis_refs": []}])
+                 "evidence": evidence, "claim_refs": claim_refs,
+                 "analysis_refs": analysis_refs}])
         if spec["id"] in DIAGRAMS:
             directory = Path(diagrams) if diagrams else None
             manifest = directory / DIAGRAMS[spec["id"]] if directory else None
@@ -112,12 +172,21 @@ def build(index, content, diagrams, root):
     pages = pages[1:] + pages[:1]
     for order, page in enumerate(pages, 1):
         page["order"] = order
-    return {"preset": "manual", "pages": pages, "authored_pages": [], "claims": [],
-            "statements": [], "coverage": index.get("coverage", {}),
+    # Carry the cited rows, not every row: a reference has to resolve inside the
+    # document it is written in, and shipping the whole claim set would put material on
+    # the page that no answer stands on.
+    by_claim = {c.get("id"): c for c in claims or ()}
+    by_statement = getattr(analysis, "by_id", {})
+    return {"preset": "manual", "pages": pages, "authored_pages": [],
+            "claims": [by_claim[i] for i in sorted(cited_claims) if i in by_claim],
+            "statements": [by_statement[i] for i in sorted(cited_statements)
+                           if i in by_statement],
+            "coverage": index.get("coverage", {}),
             "source_revision": (index.get("source") or {}).get("revision"),
             "source_dirty": (index.get("source") or {}).get("dirty"),
             "manual_coverage": {"total": len(expected), "unresolved": unresolved,
-                                "missing_diagrams": missing_diagrams}}
+                                "missing_diagrams": missing_diagrams,
+                                "confirmed_with_proof": len(cited_claims) + len(cited_statements)}}
 
 
 def validate_document(doc):
