@@ -37,11 +37,162 @@ CONFIRMING_CLAIM_STATUS = ("verified",)
 CONFIRMING_STATEMENT_STATUS = ("declared", "observed")
 
 
-def scaffold(index):
+# Which template question each of the three analyses actually answers. Deliberately
+# short: a mapping is justified only where the analysis holds the answer, not where it
+# holds something adjacent. `usage/configuration` asks for a configuration schema and the
+# operations analysis has procedures for configuring, which is a different question, so
+# it is not here -- a prefilled answer that is true and says nothing is the failure the
+# `A014` rule exists to catch, and it would arrive pre-approved.
+#
+# Each row is (question id, source key, section, what to call it in the sentence).
+PREFILL = (
+    ("1.2.1", "operations", "requirements", None),
+    ("1.2.3", "operations", ("install", "build"), "installing and building"),
+    ("2.1.1", "architecture", "components", None),
+    ("2.1.3", "architecture", "relationships", None),
+    ("2.2.1", "flows", "flows", None),
+    ("3.1.1", "operations", ("run",), "running"),
+    ("4.2.3", "operations", ("test",), "testing"),
+    ("4.5.4", "operations", ("deploy", "release"), "deploying and releasing"),
+)
+
+
+def cite(rows):
+    """Evidence entries from an analysis, in the shape build() checks.
+
+    The three analyses record `line_start` and often no `line_end`; a citation with one
+    line is the honest reading of that, not a range guessed outwards from it.
+
+    A procedure and a flow hold their evidence on their steps rather than on themselves,
+    so walking only the row would silently produce an unciteable answer -- and `prefill`
+    drops an answer with no evidence, so the symptom is a procedure that quietly fails
+    to prefill rather than one that prefills wrongly.
+    """
+    out = []
+    seen = set()
+    for row in rows:
+        items = list(row.get("evidence", ()) or ())
+        for step in row.get("steps", ()) or ():
+            items.extend(step.get("evidence", ()) or ())
+        for item in items:
+            start = item.get("line_start")
+            if not isinstance(item.get("path"), str) or not isinstance(start, int):
+                continue
+            entry = (item["path"], start, item.get("line_end") or start)
+            if entry in seen:
+                continue
+            seen.add(entry)
+            out.append({"path": entry[0], "line_start": entry[1], "line_end": entry[2]})
+    return out
+
+
+def procedures_of(operations, kinds):
+    return [p for p in (operations or {}).get("procedures", ()) or ()
+            if p.get("kind") in kinds]
+
+
+def answer_from(source, section, label, data):
+    """One prefilled answer, or None where the analysis recorded nothing.
+
+    The text quotes the analysis rather than paraphrasing it, so a command reaches the
+    page exactly as `validate_operations.py` matched it. Paraphrasing here would undo the
+    one check in that schema a parser can settle.
+    """
+    if source == "operations" and section == "requirements":
+        rows = [r for r in (data or {}).get("requirements", ()) or () if r.get("name")]
+        if not rows:
+            return None
+        named = ", ".join("%s %s" % (r["name"], r.get("value", "").strip() or "(unversioned)")
+                          for r in rows)
+        return ("The repository declares these prerequisites: %s." % named, rows)
+    if source == "operations":
+        rows = procedures_of(data, section)
+        if not rows:
+            return None
+        parts = []
+        for procedure in rows:
+            commands = [s["command"] for s in procedure.get("steps", ()) or ()
+                        if s.get("command")]
+            sentence = procedure.get("name") or procedure.get("id")
+            if commands:
+                sentence += ": " + ", ".join("`%s`" % c for c in commands)
+            parts.append(sentence)
+        return ("The repository records these procedures for %s. %s."
+                % (label, "; ".join(parts)), rows)
+    if source == "architecture" and section == "components":
+        rows = [c for c in (data or {}).get("components", ()) or () if c.get("name")]
+        if not rows:
+            return None
+        named = "; ".join("%s (%s)" % (c["name"], ", ".join(c.get("modules", ()) or ())
+                                       or "no module recorded") for c in rows)
+        return ("The architecture analysis groups the scanned modules into these "
+                "components: %s." % named, rows)
+    if source == "architecture" and section == "relationships":
+        rows = [r for r in (data or {}).get("relationships", ()) or ()
+                if r.get("from") and r.get("to")]
+        if not rows:
+            return None
+        by_id = {c.get("id"): c.get("name", c.get("id"))
+                 for c in (data or {}).get("components", ()) or ()}
+        named = "; ".join("%s %s %s" % (by_id.get(r["from"], r["from"]),
+                                        (r.get("kind") or "relates to").replace("_", " "),
+                                        by_id.get(r["to"], r["to"])) for r in rows)
+        # A relationship's id is the pair, not a row id, so the answer stands on the
+        # components it joins -- those are what validate_architecture checked.
+        endpoints = [c for c in (data or {}).get("components", ()) or ()
+                     if c.get("id") in {r["from"] for r in rows} | {r["to"] for r in rows}]
+        return ("The components cross these boundaries: %s." % named, rows + endpoints)
+    if source == "flows":
+        rows = [f for f in (data or {}).get("flows", ()) or () if f.get("steps")]
+        if not rows:
+            return None
+        parts = []
+        for flow in rows:
+            hops = " -> ".join([flow["steps"][0].get("from", "?")]
+                               + [s.get("to", "?") for s in flow["steps"]])
+            parts.append("%s: %s" % (flow.get("name") or flow.get("id"), hops))
+        return ("Each step below is a call verified at its call site. %s."
+                % "; ".join(parts), rows)
+    return None
+
+
+def prefill(answers, extra):
+    """Answer what the three analyses already settled, and leave the rest unknown.
+
+    The point is not to save typing. These answers carry the checks their analyses
+    passed -- a command matched character for character, a step read at its call site --
+    and an answer written freehand over the same material carries none of that. Every
+    other question stays `unknown` with its own text as the next check, because a
+    prefilled guess arrives looking like a decided one.
+    """
+    filled = []
+    for qid, source, section, label in PREFILL:
+        data = (extra or {}).get(source)
+        if not data or qid not in answers:
+            continue
+        produced = answer_from(source, section, label, data)
+        if not produced:
+            continue
+        text, rows = produced
+        evidence = cite(rows)
+        ids = [r["id"] for r in rows if r.get("id")]
+        if not evidence or not ids:
+            # Without both it could only be written as `inferred`, and a reading the
+            # model did not make is not one it should be handed pre-written.
+            continue
+        answers[qid] = {"status": "confirmed", "text": text, "evidence": evidence,
+                        "verified_ids": sorted(set(ids))}
+        filled.append(qid)
+    return filled
+
+
+def scaffold(index, extra=None):
+    answers = {q["id"]: {"status": "unknown", "text": "Unknown — evidence required",
+                         "next_check": q["text"], "evidence": []}
+               for page in QUESTIONS for q in page["questions"]}
+    prefilled = prefill(answers, extra)
     return {"manual_version": 1, "index_hash": index.get("index_hash"),
-            "answers": {q["id"]: {"status": "unknown", "text": "Unknown — evidence required",
-                                     "next_check": q["text"], "evidence": []}
-                        for page in QUESTIONS for q in page["questions"]}}
+            "prefilled": prefilled, "answers": answers}
 
 
 def confirmable(claims, analysis, extra=None):
@@ -69,6 +220,7 @@ def confirmable(claims, analysis, extra=None):
     # verified at its call site (F006), a component's shape and evidence passed B002-B012.
     # That is the same bar the two above clear, reached by a different validator.
     for key, section, label in (("operations", "procedures", "procedure"),
+                                ("operations", "requirements", "requirement"),
                                 ("flows", "flows", "flow"),
                                 ("architecture", "components", "component")):
         for row in (extra.get(key) or {}).get(section, ()) or ():
@@ -245,9 +397,28 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--init", required=True)
     parser.add_argument("--index", required=True)
+    parser.add_argument("--architecture", help="architecture-analysis.json")
+    parser.add_argument("--flows", help="flow-analysis.json")
+    parser.add_argument("--operations", help="operations-analysis.json")
     args = parser.parse_args()
     index = json.loads(Path(args.index).read_text())
+    extra = {}
+    for key, path in (("architecture", args.architecture), ("flows", args.flows),
+                      ("operations", args.operations)):
+        if not path:
+            continue
+        loaded = json.loads(Path(path).read_text())
+        stated = loaded.get("index_hash")
+        if stated != index.get("index_hash"):
+            # A file from an earlier run names real modules and prefills cleanly. The
+            # identity is the only thing that tells it from today's.
+            raise SystemExit("FAIL %s was written against %s, the index is %s"
+                             % (path, stated, index.get("index_hash")))
+        extra[key] = loaded
+    draft = scaffold(index, extra)
     # Exclusive creation protects an analysis the agent already wrote.
     with open(args.init, "x", encoding="utf-8") as handle:
-        json.dump(scaffold(index), handle, indent=2, ensure_ascii=False)
+        json.dump(draft, handle, indent=2, ensure_ascii=False)
         handle.write("\n")
+    print("wrote %s: %d question(s), %d prefilled from the analyses"
+          % (args.init, len(draft["answers"]), len(draft["prefilled"])))

@@ -93,6 +93,44 @@ This is also what puts the three analyses back to work in this preset. Without i
 manual run and rendered nowhere: the commands `validate_operations.py` quoted are spent, and the traced
 flows behind the data-flow diagram vouch for no sentence.
 
+## Prefill — the eight questions the analyses already answered
+
+Pass the analyses to the initializer and it answers the questions they settle, leaving the rest `unknown`:
+
+```bash
+python3 scripts/document/manual.py --init .docs-build/manual-analysis.json \
+  --index .docs-build/structure.json \
+  --architecture .docs-build/architecture-analysis.json \
+  --flows .docs-build/flow-analysis.json \
+  --operations .docs-build/operations-analysis.json
+```
+
+| Question | Filled from |
+| --- | --- |
+| `1.2.1` prerequisites | the declared `requirements` |
+| `1.2.3` how to install | the `install` and `build` procedures, with their commands |
+| `2.1.1` the major components | the components and the modules each holds |
+| `2.1.3` how components interact | the relationships, named by their endpoints |
+| `2.2.1` inputs, transformations and outputs in order | the traced flows, step by step |
+| `3.1.1` the primary entry point | the `run` procedures |
+| `4.2.3` which commands run the suite | the `test` procedures |
+| `4.5.4` which commands build a release | the `deploy` and `release` procedures |
+
+**The point is not saving typing.** A prefilled answer quotes its analysis rather than paraphrasing it, so a
+command arrives on the page exactly as `O006` matched it and a flow arrives as the steps `F006` verified.
+The same sentence written freehand over the same material carries none of that.
+
+The list is short on purpose. A mapping earns its place only where the analysis holds *the answer*, not
+something adjacent: `usage/configuration` asks for a configuration schema and the operations analysis has
+procedures for configuring, which is a different question, so it is not prefilled. A prefilled answer that
+is true and says nothing is the failure `A014` exists to catch, and it would arrive already marked
+`confirmed`.
+
+Nothing else is guessed. Every other question keeps its `unknown` status and its own text as the
+`next_check`, and a kind the analysis never recorded leaves its question open rather than growing an empty
+heading. Prefilled answers are ordinary answers: correct them, and they go through the prose review queue
+like the rest.
+
 ## Diagrams
 
 Only `architecture/class_diagram.rst` and `architecture/data_flow.rst` require diagrams. Other pages answer

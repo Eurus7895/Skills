@@ -143,6 +143,37 @@ class ManualTests(unittest.TestCase):
         self.assertEqual(doc['claims'], [])
         self.assertEqual(doc['statements'], [])
 
+    def test_prefill_answers_what_the_analyses_settled(self):
+        """The commands reach the page exactly as validate_operations matched them."""
+        operations = {'index_hash': 'scan', 'procedures': [
+            {'id': 'op:test', 'kind': 'test', 'name': 'Running the tests', 'steps': [
+                {'text': 'CI runs the suite.', 'command': 'python3 -m pytest',
+                 'evidence': [{'path': 'README.md', 'line_start': 2}]}]}],
+            'requirements': [{'id': 'req:python', 'name': 'Python', 'value': '>=3.9',
+                              'evidence': [{'path': 'README.md', 'line_start': 1}]}]}
+        draft = manual.scaffold(self.index, {'operations': operations})
+        self.assertEqual(draft['prefilled'], ['1.2.1', '4.2.3'])
+        commands = draft['answers']['4.2.3']
+        self.assertEqual(commands['status'], 'confirmed')
+        self.assertIn('`python3 -m pytest`', commands['text'])
+        self.assertEqual(commands['verified_ids'], ['op:test'])
+        # A citation with no line_end is one line, not a range guessed outwards.
+        self.assertEqual(commands['evidence'], [{'path': 'README.md', 'line_start': 2,
+                                                 'line_end': 2}])
+        self.assertIn('Python >=3.9', draft['answers']['1.2.1']['text'])
+        # Everything the analyses do not settle stays unknown rather than guessed.
+        self.assertEqual(draft['answers']['1.1.1']['status'], 'unknown')
+        # And the draft builds: a prefilled answer passes the rule it was written for.
+        self.answers = draft
+        self.extra = {'operations': operations}
+        self.assertEqual(model.validate(self.build()), [])
+
+    def test_prefill_skips_a_kind_the_analysis_never_recorded(self):
+        """An absent procedure leaves the question open, it does not invent a heading."""
+        draft = manual.scaffold(self.index, {'operations': {'procedures': [], 'requirements': []}})
+        self.assertEqual(draft['prefilled'], [])
+        self.assertEqual(draft['answers']['3.1.1']['status'], 'unknown')
+
     def test_only_two_diagram_pages(self):
         d = self.root / 'diagrams'; d.mkdir()
         for name in ('class', 'flow'): (d / (name+'.puml')).write_text('@startuml\n@enduml\n')
