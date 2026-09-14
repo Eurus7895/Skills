@@ -255,8 +255,15 @@ class Checker(object):
             # Queue the actual rendered answer for semantic review, including N/A decisions.
             if block.get("answer_status") != "unknown":
                 self.queue.append({"page": page_id, "block": subject})
-            return
-        if not cited:
+            if not cited:
+                # Nothing to compare a verb against, and the queue already has it.
+                return
+            # Queueing is *additional* to the deterministic checks, never instead of
+            # them. A manual answer citing an `imports` claim may no more say "depends
+            # on" than any other block, and a reviewer marking the queued block `ok`
+            # would otherwise let that overstatement through a check that would have
+            # caught it on sight.
+        elif not cited:
             # Generator framing, not a rewrite. Named so a model pass can look, never
             # failed: there is no source to have overstated.
             self.finding("P005", "carries no citation, so nothing here can be compared "
@@ -281,8 +288,12 @@ class Checker(object):
         # What survives goes to the model pass: a reading, or a strong verb that the
         # sources happen to license. Both are places where only a person can tell a
         # restatement from an upgrade.
-        if inferred or max([r for r, _ in used] or [0]) >= 5:
-            self.queue.append({"page": page_id, "block": subject})
+        # A manual answer was queued above, unconditionally: queueing again here on a
+        # strong verb would put the same block in front of the reviewer twice and
+        # double-count it in the undecided tally that holds the run.
+        entry = {"page": page_id, "block": subject}
+        if (inferred or max([r for r, _ in used] or [0]) >= 5) and entry not in self.queue:
+            self.queue.append(entry)
 
     def check(self, doc):
         for page in doc.get("pages", ()):

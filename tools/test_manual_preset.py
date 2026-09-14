@@ -124,9 +124,13 @@ class ManualTests(unittest.TestCase):
         in `manual` and the commands it quoted are spent.
         """
         self.extra = {
-            'operations': {'procedures': [{'id': 'op:test', 'kind': 'test'}]},
-            'flows': {'flows': [{'id': 'flow:record'}]},
-            'architecture': {'components': [{'id': 'component:edge'}]}}
+            'operations': {'procedures': [
+                {'id': 'op:test', 'kind': 'test', 'status': 'declared',
+                 'steps': [{'text': 'CI runs it.', 'command': 'python3 -m pytest'}]}]},
+            'flows': {'flows': [{'id': 'flow:record', 'status': 'observed',
+                                 'steps': [{'id': 'step:1'}]}]},
+            'architecture': {'components': [{'id': 'component:edge', 'status': 'observed',
+                                             'modules': ['src/api.py']}]}}
         for question, ref in (('2.2.1', 'op:test'), ('2.1.1', 'flow:record'),
                               ('2.1.2', 'component:edge')):
             self.answers['answers'][question].update(
@@ -143,13 +147,43 @@ class ManualTests(unittest.TestCase):
         self.assertEqual(doc['claims'], [])
         self.assertEqual(doc['statements'], [])
 
+    def test_a_row_that_only_validated_cannot_confirm(self):
+        """Validation is not confirmation: the schema passing says nothing was checked.
+
+        `validate_operations.py` accepts an `inferred` procedure, and a step whose status
+        is `unknown` need carry no command at all — so such a row cleared its schema with
+        nothing mechanically matched against the source.
+        """
+        answer = self.answers['answers']['2.2.1']
+        answer.update(status='confirmed', text='An answer resting on an analysis.',
+                      evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
+                      verified_ids=['op:loose'])
+        for procedure in (
+                {'id': 'op:loose', 'kind': 'run', 'status': 'inferred',       # reading
+                 'steps': [{'text': 'x', 'command': 'python3 -m pytest'}]},
+                {'id': 'op:loose', 'kind': 'run', 'status': 'declared',       # no command
+                 'steps': [{'text': 'Deployment is mostly prose.'}]}):
+            self.extra = {'operations': {'procedures': [procedure]}}
+            with self.assertRaises(ValueError):
+                self.build()
+        # Declared, and carrying the command O006 matched: this one qualifies.
+        self.extra = {'operations': {'procedures': [
+            {'id': 'op:loose', 'kind': 'run', 'status': 'declared',
+             'steps': [{'text': 'x', 'command': 'python3 -m pytest'}]}]}}
+        self.assertEqual(model.validate(self.build()), [])
+
     def test_prefill_answers_what_the_analyses_settled(self):
         """The commands reach the page exactly as validate_operations matched them."""
+        # `status` is required by the operations schema, and is what decides whether a
+        # row may confirm: these are `declared`, as a validated analysis records them.
         operations = {'index_hash': 'scan', 'procedures': [
-            {'id': 'op:test', 'kind': 'test', 'name': 'Running the tests', 'steps': [
-                {'text': 'CI runs the suite.', 'command': 'python3 -m pytest',
+            {'id': 'op:test', 'kind': 'test', 'name': 'Running the tests',
+             'status': 'declared', 'steps': [
+                {'text': 'CI runs the suite.', 'status': 'declared',
+                 'command': 'python3 -m pytest',
                  'evidence': [{'path': 'README.md', 'line_start': 2}]}]}],
             'requirements': [{'id': 'req:python', 'name': 'Python', 'value': '>=3.9',
+                              'status': 'declared',
                               'evidence': [{'path': 'README.md', 'line_start': 1}]}]}
         draft = manual.scaffold(self.index, {'operations': operations})
         self.assertEqual(draft['prefilled'], ['1.2.1', '4.2.3'])

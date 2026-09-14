@@ -1,15 +1,15 @@
 ---
 name: document-codebase
-description: Generate architecture documentation for a repository of any size by parsing its structure with a
-  scanner first — symbols, imports, classes, dependency graph, fan-in ranking — then describing each module
-  with its real neighbours supplied, and checking every claim against the graph and the source before it is
-  written. Produces a multi-page RST or MyST document under docs/ with file:line citations.
-  Use for "document this repo", "write architecture docs",
-  "explain how this codebase fits together", "what calls what", "onboard someone to this project", "map the
-  dependencies", or when an unfamiliar repository needs a written overview. The scanner reads Python,
-  JavaScript, TypeScript, Go, Rust, Java, Ruby, C and C++; a repository written entirely in another language —
-  C#, PHP, Kotlin, Swift, shell — yields no graph and this skill cannot document it. Do not use to explain a
-  single file, to generate API reference from docstrings, or on anything that is not source code.
+description: Write a repository's architecture documentation, or its product manual, with every claim checked
+  against a parsed dependency graph and the source before it ships. Use for "document this repo", "write
+  architecture docs", "explain how this codebase fits together", "what calls what", "onboard someone to this
+  project", "map the dependencies" — and, with --preset manual, for "write a user manual", "write the product
+  documentation", "a manual for this tool", "document how to install and run this", which answers a question
+  template covering getting started, installation, usage, configuration, development and troubleshooting.
+  Produces a multi-page RST or MyST document under docs/ with file:line citations. The scanner reads Python,
+  JavaScript, TypeScript, Go, Rust, Java, Ruby, C and C++; a repository written entirely in another language
+  yields no graph and this skill cannot document it. Do not use to explain a single file, to generate API
+  reference from docstrings, or on anything that is not source code.
 ---
 
 # Document a codebase from its dependency graph

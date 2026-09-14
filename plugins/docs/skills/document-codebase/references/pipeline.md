@@ -105,7 +105,7 @@ the prose check and the gate. A run without them is a visibly thinner document, 
 | `--top` | `survey` | `25` | the fan-in cutoff for `units.txt` |
 | `--policy` | `survey` | `optional` | `disabled` drops the Ruff stage entirely |
 | `--force` | `analyze` | off | re-derive `claims.jsonl` over hand-written claims |
-| `--preset` | `document` | `auto` | `auto` picks `outside-in` when an architecture analysis exists, else `onboarding` |
+| `--preset` | `document` | `auto` | `auto` picks `outside-in` when **any** of the architecture, flow or operations analyses exists, else `onboarding` |
 | `--detail` | `document` | `public` | class-diagram detail level |
 | `--format` | `publish` | `rst` | `rst` or `myst` |
 | `--review` | `publish` | — | your `prose-review.jsonl` verdicts |

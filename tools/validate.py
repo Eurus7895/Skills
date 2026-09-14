@@ -216,6 +216,20 @@ def local_links(text):
     return links
 
 
+def strip_emphasis(title):
+    """Markdown emphasis removed the way a renderer removes it, and no further.
+
+    An anchor is slugified from the *rendered* heading, so `_em_` contributes `em` while
+    `foo_bar` contributes `foo_bar` -- the underscore is only syntax between word
+    boundaries. Stripping every underscore made `## foo_bar` resolve as `#foobar`:
+    the real `#foo_bar` link failed the check and the broken one passed it.
+    """
+    title = re.sub(r"`([^`]*)`", r"\1", title)
+    title = re.sub(r"\*\*(.+?)\*\*", r"\1", title)
+    title = re.sub(r"\*(.+?)\*", r"\1", title)
+    return re.sub(r"(?<!\w)_(?=\S)(.+?)(?<=\S)_(?!\w)", r"\1", title)
+
+
 def heading_anchors(text):
     """The anchors a markdown renderer derives from this file's own headings.
 
@@ -229,7 +243,7 @@ def heading_anchors(text):
         match = re.match(r"^#{1,6}\s+(.*?)\s*$", line)
         if not match:
             continue
-        title = re.sub(r"`|\*\*|\*|_", "", match.group(1))
+        title = strip_emphasis(match.group(1))
         slug = re.sub(r"[^\w\s-]", "", title.lower()).strip().replace(" ", "-")
         if slug:
             anchors.add(slug)

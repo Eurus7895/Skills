@@ -163,6 +163,10 @@ def prefill(answers, extra):
     prefilled guess arrives looking like a decided one.
     """
     filled = []
+    # The same gate `build` applies, so prefill cannot write a `confirmed` answer that
+    # the builder would then refuse. A row that does not qualify is left for the model
+    # to answer itself rather than silently downgraded to `inferred`.
+    qualifies = confirmable((), None, extra)
     for qid, source, section, label in PREFILL:
         data = (extra or {}).get(source)
         if not data or qid not in answers:
@@ -172,7 +176,7 @@ def prefill(answers, extra):
             continue
         text, rows = produced
         evidence = cite(rows)
-        ids = [r["id"] for r in rows if r.get("id")]
+        ids = [r["id"] for r in rows if r.get("id") in qualifies]
         if not evidence or not ids:
             # Without both it could only be written as `inferred`, and a reading the
             # model did not make is not one it should be handed pre-written.
@@ -184,7 +188,10 @@ def prefill(answers, extra):
 
 
 def scaffold(index, extra=None):
-    answers = {q["id"]: {"status": "unknown", "text": "Unknown — evidence required",
+    # The marker belongs to the renderer, which prepends it to every `unknown` answer.
+    # Carrying it here too rendered all 199 as "Unknown — evidence required. Unknown —
+    # evidence required Check next: ...".
+    answers = {q["id"]: {"status": "unknown", "text": "Not read yet.",
                          "next_check": q["text"], "evidence": []}
                for page in QUESTIONS for q in page["questions"]}
     prefilled = prefill(answers, extra)
@@ -212,18 +219,54 @@ def confirmable(claims, analysis, extra=None):
         if statement.get("status") in CONFIRMING_STATEMENT_STATUS and statement_id:
             origins[statement_id] = "statement"
     extra = extra or {}
-    # Each of these was validated by the script that owns its file -- a procedure's
-    # command was matched character for character (O006), a flow's every step is a call
-    # verified at its call site (F006), a component's shape and evidence passed B002-B012.
-    # That is the same bar the two above clear, reached by a different validator.
-    for key, section, label in (("operations", "procedures", "procedure"),
-                                ("operations", "requirements", "requirement"),
-                                ("flows", "flows", "flow"),
-                                ("architecture", "components", "component")):
+    # Each of these was validated by the script that owns its file -- but validation is
+    # not confirmation, and taking every row that validated was the bug this guard fixes.
+    # `validate_operations.py` accepts an `inferred` procedure, and exempts a step whose
+    # status is `unknown` from carrying a command at all; such a row passed its schema
+    # and had nothing mechanically checked about what it says. Letting it confirm an
+    # answer would collapse the confirmed/inferred boundary from the other end.
+    #
+    # So a row qualifies on two counts: a status that is not the model's own reading, and
+    # the piece of itself that a validator actually matched against the source.
+    for key, section, label, checked in (
+            ("operations", "procedures", "procedure", has_quoted_command),
+            ("operations", "requirements", "requirement", has_quoted_value),
+            ("flows", "flows", "flow", has_verified_step),
+            ("architecture", "components", "component", holds_a_module)):
         for row in (extra.get(key) or {}).get(section, ()) or ():
-            if isinstance(row, dict) and row.get("id"):
-                origins[row["id"]] = label
+            if not isinstance(row, dict) or not row.get("id"):
+                continue
+            if row.get("status") not in CONFIRMING_STATEMENT_STATUS:
+                continue
+            if not checked(row):
+                continue
+            origins[row["id"]] = label
     return origins
+
+
+def has_quoted_command(procedure):
+    """A step carrying a command, which `O006` matched character for character."""
+    return any(step.get("command") for step in procedure.get("steps", ()) or ()
+               if isinstance(step, dict))
+
+
+def has_quoted_value(requirement):
+    """`O006` matches a requirement's `value` the same way it matches a command."""
+    return bool(str(requirement.get("value", "")).strip())
+
+
+def has_verified_step(flow):
+    """`F006` proved every step is a `calls` claim verified between its own two ends."""
+    return bool(flow.get("steps"))
+
+
+def holds_a_module(component):
+    """`B003` and `B004` checked these names against the index, and for overlap.
+
+    The weakest of the four, and named so: a component is a grouping decision, and the
+    only mechanical thing about it is that the modules exist and belong to it alone.
+    """
+    return bool(component.get("modules"))
 
 
 def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
