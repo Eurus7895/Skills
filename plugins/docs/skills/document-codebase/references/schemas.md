@@ -337,7 +337,7 @@ is how a loop stops converging.
 | `rejected` — the graph has no such edge | Drop the claim. There is nothing to retry |
 | `rejected` — the cited line calls something else | Read the line again; either cite correctly or drop it |
 | `V014` `unsupported` — the call target is computed at run time | Nothing. Do not retry; it belongs in the limitations |
-| `V005` stale evidence | Rerun from step 1. The tree changed under you |
+| `V005` stale evidence | Rerun from `survey`. The tree changed under you |
 | `V020` the same finding twice | Stop. Report it unresolved; the loop is not converging |
 | Anything unresolved after two attempts | Leave it `candidate` and let it appear in the limitations |
 

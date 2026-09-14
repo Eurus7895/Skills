@@ -89,7 +89,8 @@ fine, `1` a policy was not met, `2` bad input or a missing dependency, `3` inter
 
 The component still ends non-zero in both cases. Tolerating a code is not forgiving it.
 
-**A stage whose input was never written is skipped, with the reason printed.** The three analyses of step 4
+**A stage whose input was never written is skipped, with the reason printed.** The three analyses in
+[`three-analyses.md`](three-analyses.md)
 are optional by design: `document` skips the validator for each file that is absent and passes
 `--architecture`, `--flows` and `--operations` only for the ones that exist, and `publish` does the same for
 the prose check and the gate. A run without them is a visibly thinner document, never a silently thinner one.
