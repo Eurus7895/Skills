@@ -11,11 +11,22 @@ review is an additional appendix page. Preserve every question heading through r
 2. Run the existing survey, analyze and check components. Read source, configuration, tests and repository
    documentation to answer questions the structural index cannot answer. Keep module, architecture, flow
    and operations analyses as supporting evidence; a list of files is not a manual answer.
-3. Initialize the answer artifact once (exclusive creation refuses to replace existing answers):
+3. Initialize the answer artifact once (exclusive creation refuses to replace existing answers).
+   **Write the architecture, flow and operations analyses first and pass them here**: the initializer
+   answers the eight questions they settle, and the answers carry the checks those analyses passed.
+   Initializing before they exist is not wrong, but exclusive creation means you cannot pick the prefill
+   up afterwards without deleting the draft.
 
    ```bash
-   python3 scripts/document/manual.py --index .docs-build/structure.json --init .docs-build/manual-analysis.json
+   python3 scripts/document/manual.py --init .docs-build/manual-analysis.json \
+     --index .docs-build/structure.json \
+     --architecture .docs-build/architecture-analysis.json \
+     --flows .docs-build/flow-analysis.json \
+     --operations .docs-build/operations-analysis.json
    ```
+
+   Each analysis is optional and is refused if it was written against a different scan. The command
+   reports how many questions it prefilled.
 
 4. Replace each unknown draft with a project-specific explanation. A question about a component needs its
    responsibility, collaborators and mechanism; a question about a phase needs its inputs, processing,
