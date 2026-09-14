@@ -185,6 +185,8 @@ def check_skill(plugin, skill_dir, skill_md):
         fail(where, "is %d lines, over the %d-line budget -- move detail to references/"
              % (lines, SKILL_LINE_BUDGET))
 
+    check_anchors(where, text)
+
     plugin_root = os.path.join(PLUGINS, plugin)
     for link in local_links(text):
         target = os.path.normpath(os.path.join(skill_dir, link))
@@ -212,6 +214,41 @@ def local_links(text):
         if target and not target.startswith(("http://", "https://", "mailto:", "#")):
             links.append(target)
     return links
+
+
+def heading_anchors(text):
+    """The anchors a markdown renderer derives from this file's own headings.
+
+    GitHub's rule: lowercase, drop everything that is not a word character, a space or a
+    hyphen, then spaces to hyphens. Matching it here rather than guessing is the whole
+    point -- a table of contents whose anchors are written by hand is one heading rename
+    away from being wrong, and `local_links` skips anchors, so nothing else would say so.
+    """
+    anchors = set()
+    for line in re.sub(r"```.*?```", "", text, flags=re.S).split("\n"):
+        match = re.match(r"^#{1,6}\s+(.*?)\s*$", line)
+        if not match:
+            continue
+        title = re.sub(r"`|\*\*|\*|_", "", match.group(1))
+        slug = re.sub(r"[^\w\s-]", "", title.lower()).strip().replace(" ", "-")
+        if slug:
+            anchors.add(slug)
+    return anchors
+
+
+def in_file_anchors(text):
+    """Link targets of the form `](#thing)` -- a table of contents, or a cross-reference."""
+    without_code = re.sub(r"```.*?```", "", text, flags=re.S)
+    return sorted({t.strip()[1:] for t in re.findall(r"\]\(([^)]+)\)", without_code)
+                   if t.strip().startswith("#") and len(t.strip()) > 1})
+
+
+def check_anchors(where, text):
+    anchors = heading_anchors(text)
+    for target in in_file_anchors(text):
+        if target not in anchors:
+            fail(where, "links to anchor %r, which no heading in the file produces"
+                 % ("#" + target))
 
 
 BUNDLED_DIRS = ("references", "scripts", "assets")

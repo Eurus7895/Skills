@@ -18,6 +18,30 @@ Get the structure from a parser, not from the model. Describe each module with i
 dependencies in hand. Turn every description into claims that carry a citation, check each one against the
 graph and the source, and write only what survives.
 
+## What is in this file
+
+The run is **five components**. The eight steps below are those five plus the work that falls between them,
+so the left column is the one to read when you want to know what to type: two steps share `publish`, one has
+no command because the files are yours to write, and the last is reading what `publish` already printed.
+
+| Component | Section | Settles |
+| --- | --- | --- |
+| — | [When to use](#when-to-use-this-skill) · [when not to](#when-not-to-use-this-skill) | whether this is the right skill at all |
+| — | [Hard rules](#hard-rules) | the nine that hold whatever else you do |
+| — | [Where the intermediate files go](#where-the-intermediate-files-go) | `.docs-build/`, and what may be deleted |
+| — | [Where the run pauses](#where-the-run-pauses-for-the-user) | P1–P4, and which three the driver enforces |
+| `survey` | [1. Survey](#1-survey) | `pipeline.py survey --root . --top 25` |
+| `analyze` | [2. Analyze](#2-analyze-one-scope-at-a-time-from-a-context-packet) | `pipeline.py analyze` |
+| `check` | [3. Check](#3-check) | `pipeline.py check` |
+| — | [4. The three analyses](#4-say-what-the-repository-is-how-it-runs-and-how-it-is-operated) | architecture, flow and operations — no command; you write them |
+| `document` | [5. Document](#5-document) | `pipeline.py document --docs docs` |
+| `publish` | [6. Publish](#6-publish) | `pipeline.py publish --docs docs` |
+| `publish` | [7. Decide the queued prose](#7-decide-the-prose-the-checker-queued-then-rerun) | the same command again, with `--review` |
+| — | [8. Read the report](#8-read-the-report-against-your-own-run) | `analysis_mode`, Detector B, and the closing report |
+| — | [Manual output contract](#manual-output-contract) | `--preset manual` only |
+| — | [Bundled resources](#bundled-resources) | which reference to load, and when |
+| — | [Side effects](#side-effects) · [conventions](#conventions) | what this writes, and how it reports |
+
 ## Manual output contract
 
 For a manual, read [references/manual.md](references/manual.md) and the complete
