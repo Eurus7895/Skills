@@ -44,23 +44,40 @@ def scaffold(index):
                         for page in QUESTIONS for q in page["questions"]}}
 
 
-def confirmable(claims, analysis):
-    """The claim and statement ids a `confirmed` answer is allowed to stand on.
+def confirmable(claims, analysis, extra=None):
+    """Every id a `confirmed` answer may stand on, mapped to what vouched for it.
 
-    Built from the same two files the rest of the run is checked against, so an id that
-    passes here passed verify_doc.py or validate_analysis.py first. An id absent from
-    both is not a weaker citation, it is an unchecked one.
+    One list on the answer rather than one per source. The question an answer has to
+    settle is "did anything that could have failed pass for this", and the five files
+    that can say yes -- the claims, the module analysis, and the three C5-C7 analyses --
+    answer it the same way. Keeping the origin is what lets the traceability page say
+    which check stands behind a sentence; keeping five parallel fields would only make
+    the answer schema harder to fill without making any of them stronger.
+
+    An id absent from all of them is not a weaker citation, it is an unchecked one.
     """
-    claim_ids = {c.get("id") for c in claims or ()
-                 if c.get("status") in CONFIRMING_CLAIM_STATUS}
-    statement_ids = set()
+    origins = {}
+    for claim in claims or ():
+        if claim.get("status") in CONFIRMING_CLAIM_STATUS and claim.get("id"):
+            origins[claim["id"]] = "claim"
     for statement_id, statement in getattr(analysis, "by_id", {}).items():
-        if statement.get("status") in CONFIRMING_STATEMENT_STATUS:
-            statement_ids.add(statement_id)
-    return claim_ids - {None}, statement_ids - {None}
+        if statement.get("status") in CONFIRMING_STATEMENT_STATUS and statement_id:
+            origins[statement_id] = "statement"
+    extra = extra or {}
+    # Each of these was validated by the script that owns its file -- a procedure's
+    # command was matched character for character (O006), a flow's every step is a call
+    # verified at its call site (F006), a component's shape and evidence passed B002-B012.
+    # That is the same bar the two above clear, reached by a different validator.
+    for key, section, label in (("operations", "procedures", "procedure"),
+                                ("flows", "flows", "flow"),
+                                ("architecture", "components", "component")):
+        for row in (extra.get(key) or {}).get(section, ()) or ():
+            if isinstance(row, dict) and row.get("id"):
+                origins[row["id"]] = label
+    return origins
 
 
-def build(index, content, diagrams, root, claims=(), analysis=None):
+def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
     if not isinstance(content, dict) or content.get("manual_version") != 1:
         raise ValueError("manual requires --manual-analysis with manual_version 1")
     if not index.get("index_hash") or content.get("index_hash") != index["index_hash"]:
@@ -69,8 +86,8 @@ def build(index, content, diagrams, root, claims=(), analysis=None):
     expected = {q["id"] for p in QUESTIONS for q in p["questions"]}
     if not isinstance(answers, dict) or set(answers) != expected:
         raise ValueError("manual answers must contain exactly every template question ID")
-    known_claims, known_statements = confirmable(claims, analysis)
-    cited_claims, cited_statements = set(), set()
+    origins = confirmable(claims, analysis, extra)
+    cited = set()
     pages, unresolved, missing_diagrams = [], [], []
     root = Path(root).resolve()
     for order, spec in enumerate(QUESTIONS, 1):
@@ -105,26 +122,25 @@ def build(index, content, diagrams, root, claims=(), analysis=None):
                 if end > len(target.read_text(encoding="utf-8").splitlines()):
                     raise ValueError("%s: evidence line range exceeds file" % qid)
                 citations.append("%s:%d-%d" % (path, start, end))
-            claim_refs = answer.get("claim_ids", [])
-            analysis_refs = answer.get("statement_ids", [])
-            for label, refs in (("claim_ids", claim_refs),
-                                ("statement_ids", analysis_refs)):
-                if not isinstance(refs, list) or any(not isinstance(r, str) for r in refs):
-                    raise ValueError("%s: %s must be a list of ids" % (qid, label))
-            unknown_refs = ([r for r in claim_refs if r not in known_claims]
-                            + [r for r in analysis_refs if r not in known_statements])
+            verified_ids = answer.get("verified_ids", [])
+            if not isinstance(verified_ids, list) \
+                    or any(not isinstance(r, str) for r in verified_ids):
+                raise ValueError("%s: verified_ids must be a list of ids" % qid)
+            unknown_refs = [r for r in verified_ids if r not in origins]
             if unknown_refs:
                 # Naming an id nothing verified is the failure this rule exists for: it
                 # reads as provenance and carries none.
                 raise ValueError(
-                    "%s: cites %s, which no verified claim or recorded statement holds"
+                    "%s: cites %s, which nothing in this run verified"
                     % (qid, ", ".join(sorted(unknown_refs)[:3])))
-            if status == "confirmed" and not (claim_refs or analysis_refs):
+            if status == "confirmed" and not verified_ids:
                 raise ValueError(
-                    "%s: `confirmed` must name a verified claim_id or a statement_id; "
-                    "an answer the pipeline never checked is `inferred`" % qid)
-            cited_claims.update(claim_refs)
-            cited_statements.update(analysis_refs)
+                    "%s: `confirmed` must name a verified_id -- a verified claim, a "
+                    "recorded statement, or a validated procedure, flow or component. "
+                    "An answer the pipeline never checked is `inferred`" % qid)
+            cited.update(verified_ids)
+            claim_refs = [r for r in verified_ids if origins[r] == "claim"]
+            analysis_refs = [r for r in verified_ids if origins[r] == "statement"]
             if status == "unknown":
                 if not str(answer.get("next_check", "")).strip():
                     raise ValueError("%s: unknown requires a concrete next_check" % qid)
@@ -144,7 +160,9 @@ def build(index, content, diagrams, root, claims=(), analysis=None):
                 {"id": "answer:" + qid, "type": "prose", "text": text,
                  "manual_question": qid, "answer_status": status,
                  "evidence": evidence, "claim_refs": claim_refs,
-                 "analysis_refs": analysis_refs}])
+                 "analysis_refs": analysis_refs,
+                 "verified_by": [{"id": r, "source": origins[r]}
+                                 for r in sorted(verified_ids)]}])
         if spec["id"] in DIAGRAMS:
             directory = Path(diagrams) if diagrams else None
             manifest = directory / DIAGRAMS[spec["id"]] if directory else None
@@ -180,16 +198,19 @@ def build(index, content, diagrams, root, claims=(), analysis=None):
     # the page that no answer stands on.
     by_claim = {c.get("id"): c for c in claims or ()}
     by_statement = getattr(analysis, "by_id", {})
+    by_source = {}
+    for ref in cited:
+        by_source.setdefault(origins[ref], []).append(ref)
     return {"preset": "manual", "pages": pages, "authored_pages": [],
-            "claims": [by_claim[i] for i in sorted(cited_claims) if i in by_claim],
-            "statements": [by_statement[i] for i in sorted(cited_statements)
-                           if i in by_statement],
+            "claims": [by_claim[i] for i in sorted(cited) if i in by_claim],
+            "statements": [by_statement[i] for i in sorted(cited) if i in by_statement],
             "coverage": index.get("coverage", {}),
             "source_revision": (index.get("source") or {}).get("revision"),
             "source_dirty": (index.get("source") or {}).get("dirty"),
             "manual_coverage": {"total": len(expected), "unresolved": unresolved,
                                 "missing_diagrams": missing_diagrams,
-                                "confirmed_with_proof": len(cited_claims) + len(cited_statements)}}
+                                "verified_ids_cited": {k: sorted(v)
+                                                       for k, v in sorted(by_source.items())}}}
 
 
 def validate_document(doc):

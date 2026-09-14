@@ -24,7 +24,8 @@ review is an additional appendix page. Preserve every question heading through r
    processing behavior in Data Flow and Detailed Processing Phases. Do not invent authors' motivations.
 5. Run `python3 scripts/pipeline.py document --preset manual`, then publish. The model builder requires
    `manual-analysis.json` and renders its answers instead of the old inventory/absence builders. It checks
-   complete question IDs, scan identity and repository-relative evidence line ranges. It does not prove
+   complete question IDs, scan identity, repository-relative evidence line ranges, and that every
+   `confirmed` answer names a `verified_ids` entry some validator already passed. It does not prove
    that a sentence is true or sufficient. Every substantive manual answer enters the prose review queue.
 6. Review the rendered RST against each question: does it actually explain the project? Correct weak answers
    in `manual-analysis.json` and rebuild; do not patch generated RST because the next build replaces it.
@@ -45,7 +46,8 @@ review is an additional appendix page. Preserve every question heading through r
     "1.1.1": {
       "status": "confirmed",
       "text": "Explain the actual product and the problem it solves, using the cited evidence.",
-      "evidence": [{"path": "README.md", "line_start": 1, "line_end": 12}]
+      "evidence": [{"path": "README.md", "line_start": 1, "line_end": 12}],
+      "verified_ids": ["claim:imports:src/api.py:src/service.py", "op:test"]
     }
   }
 }
@@ -54,7 +56,7 @@ review is an additional appendix page. Preserve every question heading through r
 The excerpt shows one answer; a valid artifact contains every question. Use plain text in `text`, with
 paragraph breaks where helpful; the renderer owns RST/MyST syntax. Do not paste escaped RST directives.
 
-- `confirmed`: repository-supported answer with evidence.
+- `confirmed`: repository-supported answer with evidence **and at least one `verified_ids` entry**.
 - `inferred`: supported interpretation with evidence, visibly labelled Inferred. Explain its basis and limits.
 - `unknown`: write `Unknown — evidence required` and a concrete `next_check` naming what to inspect or whom
   to ask. Keep the question; do not silently omit it or call the manual finished.
@@ -64,6 +66,32 @@ paragraph breaks where helpful; the renderer owns RST/MyST syntax. Do not paste 
 Evidence locations must exist within `--root` and have valid line ranges. For external evidence, record the
 reference in a repository document and cite that location; do not make inaccessible sources look verified.
 The documentation-wide review records revision, audiences, sources, uncertainty and lifecycle coverage.
+
+## `verified_ids` — what separates `confirmed` from `inferred`
+
+**A citation that resolves is not a citation that supports.** `src/api.py:34-51` can exist, be in range, and
+have nothing to do with the sentence beside it; nothing downstream catches that, because the prose review
+queue is looking for verb inflation rather than fabricated support. So the status that asserts *the
+repository settles this* has to borrow its standing from a check that could have failed, and name it.
+
+`verified_ids` accepts an id from any of five files, each already validated by the script that owns it:
+
+| Id | Comes from | What passed |
+| --- | --- | --- |
+| `claim:…` | `claims.verified.jsonl` | `verify_doc.py` read it against the graph, or at its call site. Must be `verified` — a `candidate` is an unchecked citation, not a weaker one |
+| a statement id | `module-analysis.jsonl` | `validate_analysis.py`, and the status is `declared` or `observed`. An `inferred` statement is the model's own reading and cannot confirm another one |
+| `op:…` | `operations-analysis.json` | `validate_operations.py` matched the command or value character for character (`O006`) |
+| `flow:…` | `flow-analysis.json` | `validate_flows.py` proved every step is a call verified at its call site (`F006`) |
+| `component:…` | `architecture-analysis.json` | `validate_architecture.py` checked the shape and the evidence (`B002`–`B012`) |
+
+An id none of them holds is refused outright — the build stops rather than downgrading the answer, because
+an id that reads as provenance and carries none is worse than no id. An answer you cannot back this way is
+`inferred`, which is a real answer and says so on the page; the bar is not raised for `inferred`, or honest
+readings would be pushed down to `unknown`.
+
+This is also what puts the three analyses back to work in this preset. Without it they are written on every
+manual run and rendered nowhere: the commands `validate_operations.py` quoted are spent, and the traced
+flows behind the data-flow diagram vouch for no sentence.
 
 ## Diagrams
 

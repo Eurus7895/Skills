@@ -1289,7 +1289,7 @@ def build(index, fragments, claims, preset, diagrams=None, analysis=None, extra=
         # standard the rest of this pipeline exists to avoid.
         doc = manual.build(index, extra.get("manual"), extra.get("diagram_directory"),
                            extra.get("root", "."), claims,
-                           analysis if analysis is not None else Analysis())
+                           analysis if analysis is not None else Analysis(), extra)
         doc.update(format_version=FORMAT_VERSION, generator_version=GENERATOR_VERSION)
         return doc
     by_id = {c.get("id"): c for c in claims}

@@ -33,10 +33,13 @@ class ManualTests(unittest.TestCase):
                 {'id': 'stmt:observed', 'kind': 'responsibility', 'status': 'observed'},
                 {'id': 'stmt:guessed', 'kind': 'responsibility', 'status': 'inferred'}]}])
 
+        self.extra = {}
+
     def build(self):
+        extra = dict(self.extra, manual=self.answers, root=str(self.root),
+                     diagram_directory=str(self.root / 'diagrams'))
         return model.build(self.index, [], self.claims, 'manual', analysis=self.analysis,
-                           extra={'manual': self.answers, 'root': str(self.root),
-                                  'diagram_directory': str(self.root / 'diagrams')})
+                           extra=extra)
 
     def test_template_questions_are_preserved(self):
         source = Path(__file__).resolve().parents[1] / 'plugins/docs/skills/document-codebase/references/documentation-template.md'
@@ -50,7 +53,7 @@ class ManualTests(unittest.TestCase):
         answer = self.answers['answers']['1.1.1']
         answer.update(status='confirmed', text='This tool normalizes input so consumers receive cleaned output.',
                       evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}],
-                      claim_ids=['claim:verified'], statement_ids=['stmt:observed'])
+                      verified_ids=['claim:verified', 'stmt:observed'])
         doc = self.build()
         self.assertEqual(model.validate(doc), [])
         # The cited rows travel with the document, so the reference resolves in it.
@@ -101,15 +104,44 @@ class ManualTests(unittest.TestCase):
         answer = self.answers['answers']['1.1.1']
         answer.update(status='confirmed', text='A factual answer.',
                       evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}],
-                      claim_ids=['claim:candidate'])
+                      verified_ids=['claim:candidate'])
         with self.assertRaises(ValueError): self.build()
         # `inferred` is the model's own reading; a statement recorded as one cannot
         # stand in for a check either.
-        answer.update(claim_ids=[], statement_ids=['stmt:guessed'])
+        answer.update(verified_ids=['stmt:guessed'])
         with self.assertRaises(ValueError): self.build()
         # An id nothing in either file holds.
-        answer['statement_ids'] = ['stmt:invented']
+        answer['verified_ids'] = ['stmt:invented']
         with self.assertRaises(ValueError): self.build()
+
+    def test_the_three_analyses_can_confirm_an_answer(self):
+        """A validated procedure, flow or component is a check that could have failed.
+
+        It is the same bar a verified claim clears, reached by a different validator --
+        validate_operations matched the command character for character, validate_flows
+        proved every step is a call read at its call site, validate_architecture checked
+        the shape and the evidence. Without this the operations analysis renders nowhere
+        in `manual` and the commands it quoted are spent.
+        """
+        self.extra = {
+            'operations': {'procedures': [{'id': 'op:test', 'kind': 'test'}]},
+            'flows': {'flows': [{'id': 'flow:record'}]},
+            'architecture': {'components': [{'id': 'component:edge'}]}}
+        for question, ref in (('2.2.1', 'op:test'), ('2.1.1', 'flow:record'),
+                              ('2.1.2', 'component:edge')):
+            self.answers['answers'][question].update(
+                status='confirmed', text='An answer resting on a validated analysis.',
+                evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
+                verified_ids=[ref])
+        doc = self.build()
+        self.assertEqual(model.validate(doc), [])
+        cited = doc['manual_coverage']['verified_ids_cited']
+        self.assertEqual(cited, {'component': ['component:edge'],
+                                 'flow': ['flow:record'], 'procedure': ['op:test']})
+        # These resolve against their own analyses, not against the claim set, so
+        # neither list grows.
+        self.assertEqual(doc['claims'], [])
+        self.assertEqual(doc['statements'], [])
 
     def test_only_two_diagram_pages(self):
         d = self.root / 'diagrams'; d.mkdir()
