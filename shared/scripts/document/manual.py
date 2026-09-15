@@ -60,7 +60,11 @@ PREFILL = (
     ("2.1.1", "architecture", "components", None),
     ("2.1.3", "architecture", "relationships", None),
     ("2.2.1", "flows", "flows", None),
+    ("1.2.6", "config", "env", "environment variables"),
     ("3.1.1", "operations", ("run",), "running"),
+    ("3.1.2", "config", "option", "command-line options"),
+    ("3.2.1", "config", "all", "settings"),
+    ("3.2.2", "config", "defaults", "defaults"),
     ("4.2.3", "operations", ("test",), "testing"),
     ("4.5.4", "operations", ("deploy", "release"), "deploying and releasing"),
 )
@@ -128,6 +132,27 @@ def answer_from(source, section, label, data):
             parts.append(sentence)
         return ("The repository records these procedures for %s. %s."
                 % (label, "; ".join(parts)), rows)
+    if source == "config":
+        rows = (data or {}).get("settings", ()) or []
+        if section in ("env", "option"):
+            rows = [r for r in rows if r.get("kind") == section]
+        elif section == "defaults":
+            rows = [r for r in rows if "default" in r or r.get("required")]
+        if not rows:
+            return None
+        if section == "defaults":
+            # Two of the five things this question asks. Saying which two is the point:
+            # a prefill that implied it had covered type, valid values and constraints
+            # would read as answered and be wrong about three of them.
+            named = ", ".join(
+                "%s (%s)" % (r["name"], "required" if r.get("required")
+                             else "default %r" % r["default"])
+                for r in rows)
+            return ("The repository sets these defaults and required flags: %s. Their "
+                    "types, legal values and constraints are not recorded mechanically "
+                    "and are not covered here." % named, rows)
+        named = ", ".join(sorted(r["name"] for r in rows))
+        return ("The repository reads these %s: %s." % (label, named), rows)
     if source == "architecture" and section == "components":
         rows = [c for c in (data or {}).get("components", ()) or () if c.get("name")]
         if not rows:
@@ -254,7 +279,8 @@ def confirmable(claims, analysis, extra=None):
             ("operations", "procedures", "procedure", has_quoted_command),
             ("operations", "requirements", "requirement", has_quoted_value),
             ("flows", "flows", "flow", has_verified_step),
-            ("architecture", "components", "component", holds_a_module)):
+            ("architecture", "components", "component", holds_a_module),
+            ("config", "settings", "setting", is_cited)):
         for row in (extra.get(key) or {}).get(section, ()) or ():
             if not isinstance(row, dict) or not row.get("id"):
                 continue
@@ -280,6 +306,17 @@ def has_quoted_value(requirement):
 def has_verified_step(flow):
     """`F006` proved every step is a `calls` claim verified between its own two ends."""
     return bool(flow.get("steps"))
+
+
+def is_cited(setting):
+    """`C006` matched the setting's name against the lines it cites.
+
+    That is the whole bar, and it is the same one a quoted command clears: the name is
+    the part of a configuration row a parser can settle. What the setting *means* is not
+    checked by anything, and an answer that goes beyond the name and its default is a
+    reading -- `inferred` -- however solid the row behind it.
+    """
+    return bool(setting.get("evidence"))
 
 
 def holds_a_module(component):
@@ -590,11 +627,12 @@ if __name__ == "__main__":
     parser.add_argument("--architecture", help="architecture-analysis.json")
     parser.add_argument("--flows", help="flow-analysis.json")
     parser.add_argument("--operations", help="operations-analysis.json")
+    parser.add_argument("--config", help="config-analysis.json")
     args = parser.parse_args()
     index = json.loads(Path(args.index).read_text())
     extra = {}
     for key, path in (("architecture", args.architecture), ("flows", args.flows),
-                      ("operations", args.operations)):
+                      ("operations", args.operations), ("config", args.config)):
         if not path:
             continue
         loaded = json.loads(Path(path).read_text())

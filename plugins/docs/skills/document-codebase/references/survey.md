@@ -39,5 +39,23 @@ is unnecessary** — re-export, side effects, registration and dynamic discovery
 Report the count in the limitations with that caveat, and never propose removing an import as part of
 documenting. `--policy disabled` if the user does not want an external tool invoked.
 
+## The settings this repository reads
+
+`survey` also extracts every setting the code reads — `os.environ[...]`, `os.environ.get`, `os.getenv`, and
+`argparse` options — into `.docs-build/config-analysis.json`, then validates it.
+
+**This is the one artefact a context packet cannot be.** A packet answers "what is this module for" by
+handing over one file and its neighbours. "What configuration does this project take?" is not a question
+about a module: the answer is spread across every file that reads one, so no amount of per-module context
+assembles it, and without this the only way to answer it is to read the whole tree and hope.
+
+It lists settings; **it does not know what they mean.** The name, where it is read, and a literal default if
+there is one — that is the whole claim. What a setting does, what values are legal, what happens when it is
+absent: those stay the model's to answer, and this file is what it answers them *from*.
+
+`validate_config.py` then matches each name against the lines it cites (`C006`), which is the `O006` rule
+applied here and the reason a `config:` id may stand behind a `confirmed` answer. A row that fails it is
+refused rather than downgraded. A repository that reads no settings produces an empty list and says so.
+
 **Pause here — P1.** The scope is the one decision that cannot be corrected later without paying for the
 analysis twice. Show the units, the cutoff and the warnings, and ask before spending the budget.

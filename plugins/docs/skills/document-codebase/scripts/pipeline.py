@@ -197,6 +197,16 @@ def survey(args):
     stages.append(Stage("survey", "select_units.py",
                         ["--index", index, "--top", args.top,
                          "--out", os.path.join(args.build, "units.txt")]))
+    # Settings are cross-cutting: the answer to "what does this project take" is spread
+    # across every file that reads one, which is the shape a per-module packet cannot
+    # deliver. Extracting them here, once, is what lets a configuration answer cite
+    # something a check passed instead of something the model went looking for.
+    config = os.path.join(args.build, "config-analysis.json")
+    stages.append(Stage("survey", "extract_config.py",
+                        ["--index", index, "--root", args.root, "--out", config]))
+    stages.append(Stage("survey", "validate_config.py",
+                        [config, "--index", index, "--root", args.root,
+                         "--out", os.path.join(args.build, "config-report.json")]))
     return stages
 
 
@@ -268,6 +278,7 @@ def document(args):
     architecture = os.path.join(build, "architecture-analysis.json")
     flows = os.path.join(build, "flow-analysis.json")
     operations = os.path.join(build, "operations-analysis.json")
+    config = os.path.join(build, "config-analysis.json")
     report = os.path.join(build, "flow-report.json")
     graph = os.path.join(build, "class-graph.json")
     preset = preset_for(args, architecture, operations, flows)
@@ -288,7 +299,7 @@ def document(args):
             argv = [sys.executable, os.path.join(HERE, "document", "manual.py"),
                     "--init", answers, "--index", index]
             for flag, path in (("--architecture", architecture), ("--flows", flows),
-                               ("--operations", operations)):
+                               ("--operations", operations), ("--config", config)):
                 if os.path.exists(path):
                     argv.extend([flag, path])
             code = subprocess.call(argv)
@@ -310,7 +321,7 @@ def document(args):
         model.extend(["--manual-analysis", os.path.join(build, "manual-analysis.json"),
                       "--root", args.root])
     for flag, path in (("--architecture", architecture), ("--flows", flows),
-                       ("--operations", operations)):
+                       ("--operations", operations), ("--config", config)):
         if os.path.exists(path):
             model.extend([flag, path])
 
@@ -354,6 +365,7 @@ def publish(args):
     architecture = os.path.join(build, "architecture-analysis.json")
     flows = os.path.join(build, "flow-analysis.json")
     operations = os.path.join(build, "operations-analysis.json")
+    config = os.path.join(build, "config-analysis.json")
     report = os.path.join(build, "flow-report.json")
 
     render = ["--doc", doc, "--out", docs, "--diagrams", diagrams,

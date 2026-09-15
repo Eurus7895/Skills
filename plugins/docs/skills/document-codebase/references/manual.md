@@ -19,20 +19,23 @@ as many answers as it takes.
    and operations analyses as supporting evidence; a list of files is not a manual answer.
 3. Initialize the answer artifact once (exclusive creation refuses to replace existing answers).
    **Write the architecture, flow and operations analyses first and pass them here**: the initializer
-   answers the eight questions they settle, and the answers carry the checks those analyses passed.
+   answers the twelve questions they settle, and the answers carry the checks those analyses passed.
    Initializing before they exist is not wrong, but exclusive creation means you cannot pick the prefill
-   up afterwards without deleting the draft.
+   up afterwards without deleting the draft. `config-analysis.json` needs no writing — `survey` extracts
+   and validates it.
 
    ```bash
    python3 scripts/document/manual.py --init .docs-build/manual-analysis.json \
      --index .docs-build/structure.json \
      --architecture .docs-build/architecture-analysis.json \
      --flows .docs-build/flow-analysis.json \
-     --operations .docs-build/operations-analysis.json
+     --operations .docs-build/operations-analysis.json \
+     --config .docs-build/config-analysis.json
    ```
 
-   Each analysis is optional and is refused if it was written against a different scan. The command
-   reports how many questions it prefilled.
+   Each input is optional and is refused if it was written against a different scan. The command
+   reports how many questions it prefilled. `pipeline.py document` does all of this for you on a first
+   run, passing whichever of the four exist.
 
 4. Replace each unknown draft with a project-specific explanation. A question about a component needs its
    responsibility, collaborators and mechanism; a question about a phase needs its inputs, processing,
@@ -156,6 +159,7 @@ repository settles this* has to borrow its standing from a check that could have
 | `op:…` | `operations-analysis.json` | `validate_operations.py` matched the command or value character for character (`O006`) |
 | `flow:…` | `flow-analysis.json` | `validate_flows.py` proved every step is a call verified at its call site (`F006`) |
 | `component:…` | `architecture-analysis.json` | `validate_architecture.py` checked the shape and the evidence (`B002`–`B012`) |
+| `config:…` | `config-analysis.json` | `validate_config.py` matched the setting's name against the lines it cites (`C006`) |
 
 An id none of them holds is refused outright — the build stops rather than downgrading the answer, because
 an id that reads as provenance and carries none is worse than no id. An answer you cannot back this way is
@@ -188,6 +192,10 @@ python3 scripts/document/manual.py --init .docs-build/manual-analysis.json \
 | `3.1.1` the primary entry point | the `run` procedures |
 | `4.2.3` which commands run the suite | the `test` procedures |
 | `4.5.4` which commands build a release | the `deploy` and `release` procedures |
+| `1.2.6` which environment variables are required | the extracted `env` settings |
+| `3.1.2` which arguments and options are required | the extracted `option` settings |
+| `3.2.1` the configuration schema's fields | every extracted setting |
+| `3.2.2` defaults and required status | the extracted defaults and `required` flags |
 
 **The point is not saving typing.** A prefilled answer quotes its analysis rather than paraphrasing it, so a
 command arrives on the page exactly as `O006` matched it and a flow arrives as the steps `F006` verified.

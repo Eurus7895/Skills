@@ -16,6 +16,8 @@ scripts/survey/scan_repo.py                -> skills/document-codebase/scripts/s
 scripts/survey/validate_index.py           -> skills/document-codebase/scripts/survey/validate_index.py
 scripts/survey/annotate_import_usage.py    -> skills/document-codebase/scripts/survey/annotate_import_usage.py
 scripts/survey/select_units.py             -> skills/document-codebase/scripts/survey/select_units.py
+scripts/survey/extract_config.py           -> skills/document-codebase/scripts/survey/extract_config.py
+scripts/survey/validate_config.py          -> skills/document-codebase/scripts/survey/validate_config.py
 
 scripts/analyze/query_graph.py             -> skills/document-codebase/scripts/analyze/query_graph.py
 scripts/analyze/derive_claims.py           -> skills/document-codebase/scripts/analyze/derive_claims.py

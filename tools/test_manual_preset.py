@@ -244,6 +244,34 @@ class ManualTests(unittest.TestCase):
              'steps': [{'text': 'x', 'command': 'python3 -m pytest'}]}]}}
         self.assertEqual(model.validate(self.build()), [])
 
+    def test_an_extracted_setting_can_confirm_an_answer(self):
+        """`C006` matched the name against its lines, so the row may stand behind prose.
+
+        This is the whole point of extracting settings: a configuration question is
+        cross-cutting, so a module packet cannot serve it, and without an extracted row
+        the answer could only ever be `inferred` — the model's reading of a search it
+        did itself.
+        """
+        self.extra = {'config': {'settings': [
+            {'id': 'config:env:API_TOKEN', 'kind': 'env', 'name': 'API_TOKEN',
+             'status': 'observed',
+             'evidence': [{'path': 'README.md', 'line_start': 1, 'line_end': 1}]},
+            {'id': 'config:env:LOOSE', 'kind': 'env', 'name': 'LOOSE',
+             'status': 'observed', 'evidence': []}]}}
+        answer = self.answers['answers']['1.2.6']
+        answer.update(status='confirmed', text='The service reads API_TOKEN.',
+                      evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
+                      verified_ids=['config:env:API_TOKEN'])
+        self.compose('getting_started/installation', 'Environment', '1.2.6')
+        doc = self.build()
+        self.assertEqual(model.validate(doc), [])
+        self.assertEqual(doc['manual_coverage']['verified_ids_cited'],
+                         {'setting': ['config:env:API_TOKEN']})
+        # A row citing nothing had nothing matched against the source, so it cannot
+        # confirm — the same gate every other analysis row goes through.
+        answer['verified_ids'] = ['config:env:LOOSE']
+        with self.assertRaises(ValueError): self.build()
+
     def test_prefill_answers_what_the_analyses_settled(self):
         """The commands reach the page exactly as validate_operations matched them."""
         # `status` is required by the operations schema, and is what decides whether a

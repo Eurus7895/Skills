@@ -1389,6 +1389,10 @@ def main():
     parser.add_argument("--operations", metavar="PATH",
                         help="operations-analysis.json; the getting-started and "
                              "operations pages are built from it")
+    parser.add_argument("--config", metavar="PATH",
+                        help="config-analysis.json; the settings a manual answer may "
+                             "cite and the initializer prefills the configuration "
+                             "questions from")
     parser.add_argument("--manual-analysis", help="question answers for the manual preset")
     parser.add_argument("--root", default=".", help="repository root for manual evidence")
     parser.add_argument("--preset", default="onboarding", choices=sorted(PRESETS))
@@ -1453,7 +1457,7 @@ def main():
 
     extra = {}
     for option, key in ((args.flows, "flows"), (args.architecture, "architecture"),
-                        (args.operations, "operations")):
+                        (args.operations, "operations"), (args.config, "config")):
         if not option:
             continue
         try:
