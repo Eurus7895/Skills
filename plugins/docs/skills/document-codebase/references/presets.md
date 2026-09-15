@@ -72,15 +72,25 @@ build and say the analysis was not supplied — a visibly thinner document, neve
 
 ## `manual`
 
-Follow the 25-section [question template](documentation-template.md), with the documentation-wide review
-in the appendix. Read [manual.md](manual.md) for the answer schema, generation steps, review and migration.
-Unlike the graph-driven presets, manual requires `manual-analysis.json`: every template question gets an
-explicit, evidence-backed answer or a recorded unknown. Previously authored pages are now filled from the
-same answer artifact. Unknowns render visibly but keep the manual incomplete.
+Follow the [question template](documentation-template.md), with the documentation-wide review in the
+appendix. Read [manual.md](manual.md) for the answer schema, generation steps, review and migration.
+Unlike the graph-driven presets, manual requires `manual-analysis.json`: each question the run is asked gets
+an explicit, evidence-backed answer or a recorded unknown, and the pages are then **composed** from those
+answers. The questions are the prompt and never reach the reader.
+
+**Six of the 26 pages are authored, not generated**, and the run is not asked their questions at all:
+`appendix/glossary`, `faq`, `troubleshooting`, `compliance`, `changelog` and `references`. A glossary, an
+FAQ, a changelog and a troubleshooting table are things a person knows — the same reasoning `handbook`
+already applies. Asking the run for them buys 38 more `unknown`s and drags `answer_mode` down for gaps that
+were never the run's to fill, so they are declared with a `None` builder, reported as not generated, and
+left alone on disk. That leaves **161 questions across 20 generated pages**.
+
+**Under half of those answered is `answer_mode: unanswered`, which never passes** — the manual's counterpart
+to `derived_only`. `unknown` is for a question the repository does not answer, not one nobody looked up.
 
 Only `architecture/class_diagram` and `architecture/data_flow` require diagrams. Other pages require
 substantive explanations, not diagrams or file inventories. System Overview includes boundaries and design
-decisions; the template separates packaging/release from CI/CD. The question headings remain through review.
+decisions; the template separates packaging/release from CI/CD.
 
 
 ## `handbook`

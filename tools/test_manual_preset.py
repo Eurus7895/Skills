@@ -70,7 +70,11 @@ class ManualTests(unittest.TestCase):
         self.assertEqual(model.validate(doc), [])
         self.assertEqual([c['id'] for c in doc['claims']], ['claim:verified'])
         self.assertEqual([s['id'] for s in doc['statements']], ['stmt:observed'])
-        self.assertEqual(len(doc['pages']), 26)
+        # 20 generated; the six a repository cannot answer are named, never written.
+        self.assertEqual(len(doc['pages']), len(manual.GENERATED))
+        self.assertEqual([p['id'] for p in doc['authored_pages']],
+                         [p['id'] for p in manual.AUTHORED])
+        self.assertNotIn('appendix/glossary', [p['id'] for p in doc['pages']])
         page = next(p for p in doc['pages'] if p['id'] == 'getting_started/introduction')
         titles = {p['id']: p['title'] for p in doc['pages']}
         rst = render_docs.render_page(page, titles, render_docs.Rst())
@@ -361,7 +365,10 @@ class ManualTests(unittest.TestCase):
         proc = subprocess.run([sys.executable,script('render_docs.py'),'--doc',str(doc),
             '--out',str(self.root/'docs')],capture_output=True,text=True)
         self.assertEqual(proc.returncode,0,proc.stdout+proc.stderr)
-        self.assertEqual(len(list((self.root/'docs').rglob('*.rst'))),27)
+        # Generated pages plus index.rst. An authored page is never written over.
+        self.assertEqual(len(list((self.root/'docs').rglob('*.rst'))),
+                         len(manual.GENERATED) + 1)
+        self.assertFalse((self.root/'docs/appendix/glossary.rst').exists())
         self.assertTrue((self.root/'docs/architecture/class_diagram.rst').exists())
         self.assertTrue((self.root/'docs/architecture/data_flow.rst').exists())
 

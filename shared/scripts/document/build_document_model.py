@@ -206,8 +206,12 @@ PRESETS = {
     ],
     # Manual renders the user's question template from explicit answers. The other
     # presets continue to use graph/analysis builders and authored-page preservation.
+    # Generated pages carry the `manual` builder; the authored ones carry `None`, which
+    # is what makes the renderer leave them alone and the report name them as not
+    # generated. Same shape `handbook` uses for the pages a graph cannot write.
     "manual": [(page["id"], page["title"], True, "manual")
-               for page in manual.QUESTIONS[1:] + manual.QUESTIONS[:1]],
+               for page in manual.GENERATED[1:] + manual.GENERATED[:1]]
+              + [(page["id"], page["title"], True, None) for page in manual.AUTHORED],
     "handbook": [
         ("getting_started/introduction", "Introduction", True, None),
         ("getting_started/installation_integrators", "Installation", True, None),

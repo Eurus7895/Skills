@@ -24,6 +24,18 @@ from pathlib import Path
 
 
 QUESTIONS = json.loads(Path(__file__).with_name("manual_questions.json").read_text())
+
+# Pages whose questions a repository cannot answer: a glossary, an FAQ, a changelog, a
+# troubleshooting table, a compliance statement, a bibliography. `presets.md` already
+# names most of them for `handbook` -- "things a person knows" -- and the same reasoning
+# applies here, only it had not been applied.
+#
+# They are declared, never generated. The alternative is asking the run 38 questions it
+# has no source for, which buys 38 more `unknown`s and drags `answer_mode` down for
+# gaps that were never the run's to fill. A page the report names as authored is honest;
+# a page of unknowns pretending the run tried is not.
+GENERATED = [page for page in QUESTIONS if not page.get("authored")]
+AUTHORED = [page for page in QUESTIONS if page.get("authored")]
 DIAGRAMS = {"architecture/class_diagram": "diagram-manifest.json",
             "architecture/data_flow": "flow-diagram-manifest.json"}
 
@@ -198,7 +210,7 @@ def scaffold(index, extra=None):
     answers = {q["id"]: {"status": "unknown", "text": "TODO — not yet answered.",
                          "next_check": "Look for this in the repository before "
                                        "answering `unknown`.", "evidence": []}
-               for page in QUESTIONS for q in page["questions"]}
+               for page in GENERATED for q in page["questions"]}
     prefilled = prefill(answers, extra)
     # `answers` are notes; `pages` is the document. Seeded empty rather than with a
     # section per question, because a section per question is the questionnaire this
@@ -206,7 +218,7 @@ def scaffold(index, extra=None):
     # would arrive looking like it was already done.
     return {"manual_version": 1, "index_hash": index.get("index_hash"),
             "prefilled": prefilled, "answers": answers,
-            "pages": {page["id"]: {"sections": []} for page in QUESTIONS}}
+            "pages": {page["id"]: {"sections": []} for page in GENERATED}}
 
 
 def confirmable(claims, analysis, extra=None):
@@ -450,20 +462,20 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
     if not index.get("index_hash") or content.get("index_hash") != index["index_hash"]:
         raise ValueError("manual analysis is missing its scan identity or is stale")
     answers = content.get("answers")
-    expected = {q["id"] for p in QUESTIONS for q in p["questions"]}
+    expected = {q["id"] for p in GENERATED for q in p["questions"]}
     if not isinstance(answers, dict) or set(answers) != expected:
         raise ValueError("manual answers must contain exactly every template question ID")
     composed_pages = content.get("pages") or {}
     if not isinstance(composed_pages, dict):
         raise ValueError("manual `pages` must be a map of page id to its sections")
-    unknown_pages = set(composed_pages) - {p["id"] for p in QUESTIONS}
+    unknown_pages = set(composed_pages) - {p["id"] for p in GENERATED}
     if unknown_pages:
         raise ValueError("manual `pages` names %s, which the template does not have"
                          % ", ".join(sorted(unknown_pages)[:3]))
     origins = confirmable(claims, analysis, extra)
     cited, unresolved, uncomposed, missing_diagrams = set(), [], [], []
     pages, root = [], Path(root).resolve()
-    for order, spec in enumerate(QUESTIONS, 1):
+    for order, spec in enumerate(GENERATED, 1):
         notes = {q["id"]: read_answer(q["id"], answers[q["id"]], root, origins)
                  for q in spec["questions"]}
         unresolved.extend(n["id"] for n in notes.values() if n["status"] == "unknown")
@@ -524,7 +536,12 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
     for ref in cited:
         by_source.setdefault(origins[ref], []).append(ref)
     sections_written = sum(1 for p in pages for b in p["blocks"] if b.get("manual_block"))
-    return {"preset": "manual", "pages": pages, "authored_pages": [],
+    return {"preset": "manual", "pages": pages,
+            # Named and never written, the way `handbook` treats the same material. The
+            # report says they were not generated, so a reader can see the gap instead
+            # of meeting a page of unknowns that looks like a failed attempt.
+            "authored_pages": [{"id": page["id"], "title": page["title"]}
+                               for page in AUTHORED],
             "claims": [by_claim[i] for i in sorted(cited) if i in by_claim],
             "statements": [by_statement[i] for i in sorted(cited) if i in by_statement],
             "coverage": index.get("coverage", {}),
@@ -555,7 +572,7 @@ def validate_document(doc):
                 problems.append("manual contains a section without evidence")
             if not block.get("manual_answers"):
                 problems.append("manual contains a section naming no answer")
-    if [p.get("id") for p in pages] != [p["id"] for p in QUESTIONS[1:] + QUESTIONS[:1]]:
+    if [p.get("id") for p in pages] != [p["id"] for p in GENERATED[1:] + GENERATED[:1]]:
         problems.append("manual pages must follow the complete template order")
     # Every page still has to say something, but what it says is now composed rather
     # than one block per question -- so the check is that nothing is blank, not that the
