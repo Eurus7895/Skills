@@ -4,7 +4,8 @@ A preset fixes the skeleton: which pages exist, in what order, and which may not
 about what is true — that comes entirely from the verified claims. Two documents built from the same preset
 against different repositories share a shape and nothing else.
 
-Pass one with `--preset`. `onboarding` is the default.
+Pass one with `--preset`. **`manual` is the default** — the delivered product manual. The four
+graph-driven presets below are one flag away and remain the right answer for an architecture report.
 
 ## `onboarding`
 

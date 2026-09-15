@@ -150,9 +150,16 @@ the invocation does. Which stages each component runs, which two may fail withou
 are optional, and every flag are in [references/pipeline.md](references/pipeline.md). **You do not need to
 read any script**; their output is the interface.
 
-**`--preset manual` is a different deliverable**, answered from a question template rather than built from
-the graph. Read [references/manual.md](references/manual.md) and the
-[question template](references/documentation-template.md) before choosing scope, not after.
+**The default deliverable is a manual**, answered from a question template rather than built from the graph.
+Read [references/manual.md](references/manual.md) and the
+[question template](references/documentation-template.md) before choosing scope, not after — the template
+decides what the run has to find, so reading it afterwards means scoping for the wrong thing.
+
+On a repository's first run `document` writes the answer draft and stops at exit `1`; answer it, compose each
+page's sections from the answers, and run `document` again. **`--preset onboarding`**, `architecture`,
+`outside-in` or `handbook` gives an architecture report instead, built from the graph without a question
+template. Those are the better choice when the deliverable is a report rather than a manual, and they are
+what the verification apparatus covers best.
 
 ## Bundled resources
 
