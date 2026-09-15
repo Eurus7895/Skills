@@ -79,10 +79,21 @@ as many answers as it takes.
 The excerpt shows one answer; a valid artifact contains every question. Use plain text in `text`, with
 paragraph breaks where helpful; the renderer owns RST/MyST syntax. Do not paste escaped RST directives.
 
+**`unknown` is for a question the repository does not answer, not for one nobody looked up.** This is the
+rule the other three hang off, and the one worth stating first, because the incentives run the other way:
+`confirmed` costs evidence and a verified id, `inferred` costs evidence, and `unknown` costs a sentence.
+A run that answers nothing is therefore cheapest, entirely honest question by question, and worthless — so
+the gate refuses it. **Under half the template answered is `answer_mode: unanswered`, which can never pass**,
+the same way `derived_only` can never pass on the analysis side. Before writing `unknown`, look: the README,
+the packaging manifest, the CI workflow, the configuration, the tests, the source. `inferred` is the status
+for what the repository shows without stating, and it is a real answer — reaching for `unknown` instead of
+`inferred` is the failure this rule is about.
+
 - `confirmed`: repository-supported answer with evidence **and at least one `verified_ids` entry**.
 - `inferred`: supported interpretation with evidence, visibly labelled Inferred. Explain its basis and limits.
-- `unknown`: write `Unknown — evidence required` and a concrete `next_check` naming what to inspect or whom
-  to ask. Keep the question; do not silently omit it or call the manual finished.
+- `unknown`: only once you have looked and the repository is silent. Give a concrete `next_check` naming what
+  to inspect or whom to ask — a real next step, not the question restated. Keep the question; do not silently
+  omit it or call the manual finished.
 - `not_applicable`: explain why, and record `reviewer` only after an actual reviewer confirms applicability.
   Never fabricate review. Keep the explanation in the delivered page.
 

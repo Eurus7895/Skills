@@ -61,6 +61,29 @@ PER_MODULE = "per_module"
 PARTIAL = "partial"
 DERIVED_ONLY = "derived_only"
 
+# The manual's three tiers, on the same floor as the module analysis above: under half
+# answered is the manual that was not written, however clean everything else is.
+ANSWERED, ANSWERED_PARTIAL, UNANSWERED = "answered", "partial", "unanswered"
+ANSWERED_FLOOR = 0.5
+FULLY_ANSWERED_FLOOR = 0.9
+
+
+def answer_mode(answered, total):
+    """How much of the template carries an answer, as a tier rather than a percentage.
+
+    A question the repository genuinely cannot answer is `unknown` and counts against
+    this, deliberately: the tier says how much of the manual got written, and a manual
+    of unknowns is not written whatever the reason. The reason belongs in the answer.
+    """
+    if not total:
+        return UNANSWERED
+    ratio = float(answered) / total
+    if ratio >= FULLY_ANSWERED_FLOOR:
+        return ANSWERED
+    if ratio >= ANSWERED_FLOOR:
+        return ANSWERED_PARTIAL
+    return UNANSWERED
+
 PASSED, STATUS_PARTIAL, FAILED = "passed", "partial", "failed"
 
 # A bounded model pass ran out of attempts, tokens or time before it could decide.
@@ -622,18 +645,45 @@ def main():
                                 "sections": coverage.get("sections", 0),
                                 "unresolved": unresolved, "uncomposed": uncomposed,
                                 "missing_diagrams": missing_diagrams, "problems": problems}
+            # `answer_mode` is to the manual what `analysis_mode` is to the module
+            # analysis, and it exists for the same reason. Every other check here passes
+            # on a manual whose 199 answers all say `unknown`: the schema is satisfied,
+            # each answer is honest, and nothing is overstated. The run that produced one
+            # reported `partial` and exited 0, so the only signal the model got was
+            # success -- which is why leaving every question unanswered read as the
+            # careful choice rather than the failure it is.
+            total = coverage.get("total") or 0
+            answered = total - len(unresolved)
+            mode = answer_mode(answered, total)
+            report["manual"]["answered"] = answered
+            report["manual"]["answer_mode"] = mode
+
+            # Reported independently, never as an `elif` chain: when this was one, a
+            # composition problem hid the unanswered count entirely and a report with 197
+            # unanswered questions never mentioned them.
             if problems:
                 status = FAILED
                 reasons.extend(problems)
-            elif uncomposed:
+            if mode == UNANSWERED:
+                status = FAILED
+                reasons.append("manual answer mode is unanswered: %d of %d question(s) "
+                               "carry an answer; `unknown` is for a question the "
+                               "repository does not answer, not one nobody looked up"
+                               % (answered, total))
+            elif unresolved:
+                status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
+                reasons.append("manual leaves %d of %d question(s) unanswered: %s"
+                               % (len(unresolved), total, ", ".join(unresolved[:5])))
+            if uncomposed:
                 # An answered question that reached no page is content the run paid for
                 # and then dropped. That is a defect, not a gap in the repository.
                 status = FAILED
                 reasons.append("manual answered %d question(s) that no section uses: %s"
                                % (len(uncomposed), ", ".join(uncomposed[:5])))
-            elif unresolved or missing_diagrams:
+            if missing_diagrams:
                 status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
-                reasons.append("manual has unanswered questions or missing required diagrams")
+                reasons.append("manual is missing required diagram(s): %s"
+                               % ", ".join(missing_diagrams))
         if report["pages"]["missing"]:
             status = FAILED
             reasons.append("the %s preset requires pages that were not generated: %s"

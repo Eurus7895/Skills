@@ -194,8 +194,13 @@ def scaffold(index, extra=None):
     # The marker belongs to the renderer, which prepends it to every `unknown` answer.
     # Carrying it here too rendered all 199 as "Unknown — evidence required. Unknown —
     # evidence required Check next: ...".
-    answers = {q["id"]: {"status": "unknown", "text": "Not read yet.",
-                         "next_check": q["text"], "evidence": []}
+    # Every row starts unanswered and says so in the field a reader of the draft scans.
+    # The draft is a to-do list, not a filled form: the previous default paired a
+    # plausible-looking text with a `next_check` that restated the question, so a run
+    # that answered nothing produced 199 rows that each looked deliberate.
+    answers = {q["id"]: {"status": "unknown", "text": "TODO — not yet answered.",
+                         "next_check": "Look for this in the repository before "
+                                       "answering `unknown`.", "evidence": []}
                for page in QUESTIONS for q in page["questions"]}
     prefilled = prefill(answers, extra)
     # `answers` are notes; `pages` is the document. Seeded empty rather than with a

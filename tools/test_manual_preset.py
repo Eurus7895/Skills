@@ -298,6 +298,33 @@ class ManualTests(unittest.TestCase):
         self.assertTrue(data['manual']['unresolved'])
         self.assertEqual(len(data['manual']['missing_diagrams']),2)
         self.assertNotEqual(data['status'],'passed')
+        # A manual of unknowns satisfies every other check: the schema holds, each answer
+        # is honest, nothing is overstated. It used to report `partial` and exit 0, which
+        # told the run that answering nothing had worked.
+        self.assertEqual(data['manual']['answer_mode'], 'unanswered')
+        self.assertEqual(data['status'], 'failed')
+        self.assertEqual(proc.returncode, 1)
+        self.assertTrue(any('answer mode is unanswered' in r for r in data['reasons']))
+
+    def test_the_unanswered_count_is_never_masked(self):
+        """Each manual defect is reported on its own, not first-one-wins.
+
+        These were an `elif` chain, so a composition problem hid the unanswered count
+        and a report with 197 unanswered questions never mentioned them.
+        """
+        answer = self.answers['answers']['1.1.1']
+        answer.update(status='confirmed', text='An answer no section uses.',
+                      evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
+                      verified_ids=['claim:verified'])
+        doc = self.build()
+        ix = self.root/'index.json'; ix.write_text(json.dumps(self.index))
+        out = self.root/'doc.json'; out.write_text(json.dumps(doc))
+        report = self.root/'report.json'
+        subprocess.run([sys.executable, script('quality_docs.py'), '--index',str(ix),
+                        '--doc',str(out),'--out',str(report)],capture_output=True,text=True)
+        reasons = json.loads(report.read_text())['reasons']
+        self.assertTrue(any('answer mode is unanswered' in r for r in reasons), reasons)
+        self.assertTrue(any('no section uses' in r for r in reasons), reasons)
 
     def test_handbook_authored_pages_remain_reachable(self):
         # Preserve the upstream renderer regression after manual stops using authored pages.
