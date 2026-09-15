@@ -608,19 +608,29 @@ def main():
         if doc.get("preset") == "manual":
             from manual import validate_document
             problems = validate_document(doc)
-            answers = [b for p in doc.get("pages", []) for b in p.get("blocks", [])
-                       if b.get("manual_question")]
-            unresolved = [b["manual_question"] for b in answers
-                          if b.get("answer_status") == "unknown"]
+            # The counts come from the builder, which is the only thing that saw the
+            # answers: the pages carry composed sections now, so counting blocks would
+            # count prose rather than the questions the template asked.
+            coverage = doc.get("manual_coverage") or {}
+            unresolved = list(coverage.get("unresolved") or ())
+            uncomposed = list(coverage.get("uncomposed") or ())
             missing_diagrams = [pid for pid in ("architecture/class_diagram", "architecture/data_flow")
                                 if not any(b.get("type") == "plantuml"
                                            for p in doc.get("pages", []) if p.get("id") == pid
                                            for b in p.get("blocks", []))]
-            report["manual"] = {"total": len(answers), "unresolved": unresolved,
+            report["manual"] = {"total": coverage.get("total"),
+                                "sections": coverage.get("sections", 0),
+                                "unresolved": unresolved, "uncomposed": uncomposed,
                                 "missing_diagrams": missing_diagrams, "problems": problems}
             if problems:
                 status = FAILED
                 reasons.extend(problems)
+            elif uncomposed:
+                # An answered question that reached no page is content the run paid for
+                # and then dropped. That is a defect, not a gap in the repository.
+                status = FAILED
+                reasons.append("manual answered %d question(s) that no section uses: %s"
+                               % (len(uncomposed), ", ".join(uncomposed[:5])))
             elif unresolved or missing_diagrams:
                 status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
                 reasons.append("manual has unanswered questions or missing required diagrams")

@@ -253,11 +253,10 @@ class Checker(object):
 
         cited = list(block.get("analysis_refs", ()) or ()) \
             + list(block.get("claim_refs", ()) or ())
-        if block.get("manual_question"):
-            # Citation existence does not prove that an answer addresses its question.
-            # Queue the actual rendered answer for semantic review, including N/A decisions.
-            if block.get("answer_status") != "unknown":
-                self.queue.append({"page": page_id, "block": subject})
+        if block.get("manual_block"):
+            # A composed section is prose a person wrote from its answers, so nothing
+            # mechanical can tell whether it still says what they said. Queue it.
+            self.queue.append({"page": page_id, "block": subject})
             if not cited:
                 # Nothing to compare a verb against, and the queue already has it.
                 return

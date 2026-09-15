@@ -20,7 +20,8 @@ connects to what, or set its own scope. See [`diagram-policy.md`](diagram-policy
 
 The preset is chosen from what the build directory holds: `outside-in` once any of the three analyses exists,
 `onboarding` otherwise, and `--preset` overrides. `outside-in` opens on what the repository is rather than on
-its dependency graph. **`--preset manual`** requires `.docs-build/manual-analysis.json` and renders all
-question answers into the template's five areas. Read [the manual guide](manual.md) before
+its dependency graph. **`--preset manual`** requires `.docs-build/manual-analysis.json` and renders the
+sections you composed from its answers — never the template questions themselves, which are the prompt and
+not the document. Read [the manual guide](manual.md) before
 building it. `handbook` preserves its existing authored-page workflow. All presets are described in
 [`presets.md`](presets.md).

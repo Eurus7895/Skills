@@ -2,7 +2,13 @@
 
 Read [documentation-template.md](documentation-template.md) before selecting scope and before writing
 `.docs-build/manual-analysis.json`. The template's 25 sections are the content contract; the documentation-wide
-review is an additional appendix page. Preserve every question heading through review.
+review is an additional appendix page.
+
+**The questions are the prompt, never the document.** They exist to make the run cover a subject and to say
+what evidence each part rests on. A page that renders them as headings, with an answer under each, is a
+filled-in questionnaire — which is what a reader gets handed instead of a manual. So the answers are notes in
+`.docs-build/`, and the delivered page is *composed* from them: your headings, your prose, one section over
+as many answers as it takes.
 
 ## Workflow
 
@@ -33,15 +39,21 @@ review is an additional appendix page. Preserve every question heading through r
    decisions, outputs and failure behavior. Use source paths for evidence and navigation, not as the answer.
    Include use cases in Introduction, design decisions and boundaries in System Overview, and precise
    processing behavior in Data Flow and Detailed Processing Phases. Do not invent authors' motivations.
-5. Run `python3 scripts/pipeline.py document --preset manual`, then publish. The model builder requires
-   `manual-analysis.json` and renders its answers instead of the old inventory/absence builders. It checks
-   complete question IDs, scan identity, repository-relative evidence line ranges, and that every
-   `confirmed` answer names a `verified_ids` entry some validator already passed. It does not prove
-   that a sentence is true or sufficient. Every substantive manual answer enters the prose review queue.
-6. Review the rendered RST against each question: does it actually explain the project? Correct weak answers
-   in `manual-analysis.json` and rebuild; do not patch generated RST because the next build replaces it.
-   Review verdicts apply to actual answer blocks `answer:<question-id>` using the existing prose-review
-   workflow. Unknown answers and missing mandatory diagrams keep the quality report incomplete.
+   **These are notes.** Write them to be complete and citable, not to be read aloud.
+5. **Compose each page** into `pages` (see below). Read that page's answers together and write the sections a
+   reader needs: a heading that says what the section is about, and prose that reads as documentation. One
+   section may draw on several answers, and should where the answers overlap — three questions about
+   configuration are usually one section, not three.
+6. Run `python3 scripts/pipeline.py document --preset manual`, then publish. The builder checks complete
+   question IDs, scan identity, repository-relative evidence line ranges, that every `confirmed` answer
+   names a `verified_ids` entry some validator already passed, and that every composed section stays inside
+   what its answers cite. It does not prove that a sentence is true or sufficient, so **every composed
+   section enters the prose review queue.**
+7. Review the rendered RST: does it read as a manual, and does each section still say what its answers said?
+   Correct the notes or the composition in `manual-analysis.json` and rebuild; do not patch generated RST
+   because the next build replaces it. Review verdicts apply to section blocks
+   `section:<page-id>:<n>`. Unknown answers and missing mandatory diagrams keep the quality report
+   incomplete; an answered question no section uses **fails** it.
 
 ## Answer contract
 
@@ -77,6 +89,45 @@ paragraph breaks where helpful; the renderer owns RST/MyST syntax. Do not paste 
 Evidence locations must exist within `--root` and have valid line ranges. For external evidence, record the
 reference in a repository document and cite that location; do not make inaccessible sources look verified.
 The documentation-wide review records revision, audiences, sources, uncertainty and lifecycle coverage.
+
+## Composition contract — `pages`
+
+`pages` maps a template page id to the sections a reader will see. **This, not `answers`, is the document.**
+
+```json
+"pages": {
+  "getting_started/installation": {
+    "sections": [
+      {"heading": "Prerequisites",
+       "body": "OrderLog runs on Python 3.9 or newer. No other runtime is declared.",
+       "answers": ["1.2.1", "1.2.5"]}
+    ]
+  }
+}
+```
+
+`heading` and `body` are yours. `answers` names the notes the section was written from, and everything else
+is derived from them — `evidence` and `verified_ids` default to the union of what those answers cite, and the
+status is the weaker of theirs.
+
+Five rules, all checked before `doc.json` is written:
+
+- **A heading is not a question.** A trailing `?` is refused outright. The question asked what to find out;
+  the heading says what the section is about.
+- **A section names at least one answer, and only answers on its own page.** Prose attached to nothing is
+  prose nothing checked.
+- **Only `confirmed` and `inferred` answers can be composed.** An `unknown` is a gap and an
+  `not_applicable` is an exclusion; both are reported on the page, neither is written up as content.
+- **Composition may narrow what an answer rests on, never add to it.** A section may cite fewer locations
+  than its answers do — that is editing. Citing one they do not is provenance nothing checked, and is the
+  failure this whole contract exists to prevent.
+- **One `inferred` answer makes the section `inferred`**, however many confirmed ones sit beside it.
+  Surrounding a reading with facts does not turn it into one.
+
+**Every composable answer must reach some section on its page.** An answer the run paid for and then dropped
+fails the quality gate rather than passing quietly — it is a defect in the composition, not a gap in the
+repository. Gaps are collected into one marked block per page instead of being scattered through the prose:
+what is not documented, what is not applicable, and what is answered but not yet written up.
 
 ## `verified_ids` — what separates `confirmed` from `inferred`
 

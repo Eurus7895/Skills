@@ -41,6 +41,16 @@ class ManualTests(unittest.TestCase):
         return model.build(self.index, [], self.claims, 'manual', analysis=self.analysis,
                            extra=extra)
 
+    def compose(self, page_id, heading, *answers):
+        """Write one section of a page from the answers behind it.
+
+        Answers are notes; a page is what someone composed from them. Every test that
+        wants prose on a page has to go through this, which is the point.
+        """
+        self.answers['pages'].setdefault(page_id, {'sections': []})['sections'].append(
+            {'heading': heading, 'body': 'Composed prose about %s.' % heading.lower(),
+             'answers': list(answers)})
+
     def test_template_questions_are_preserved(self):
         source = Path(__file__).resolve().parents[1] / 'plugins/docs/skills/document-codebase/references/documentation-template.md'
         text = source.read_text()
@@ -49,28 +59,84 @@ class ManualTests(unittest.TestCase):
         expected = [q for _, body in sections for _, q in re.findall(r'^(\d+)\. (.+)$', body, re.M)]
         self.assertEqual(actual, expected)
 
-    def test_answers_reach_rst_and_review(self):
-        answer = self.answers['answers']['1.1.1']
-        answer.update(status='confirmed', text='This tool normalizes input so consumers receive cleaned output.',
-                      evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}],
-                      verified_ids=['claim:verified', 'stmt:observed'])
+    def test_the_page_carries_composed_prose_not_the_questions(self):
+        """The template question is the prompt. It must not reach the reader."""
+        self.answers['answers']['1.1.1'].update(
+            status='confirmed', text='Raw note: normalizes input, writes cleaned output.',
+            evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}],
+            verified_ids=['claim:verified', 'stmt:observed'])
+        self.compose('getting_started/introduction', 'What OrderLog is for', '1.1.1')
         doc = self.build()
         self.assertEqual(model.validate(doc), [])
-        # The cited rows travel with the document, so the reference resolves in it.
         self.assertEqual([c['id'] for c in doc['claims']], ['claim:verified'])
         self.assertEqual([s['id'] for s in doc['statements']], ['stmt:observed'])
         self.assertEqual(len(doc['pages']), 26)
-        self.assertFalse(doc['authored_pages'])
+        page = next(p for p in doc['pages'] if p['id'] == 'getting_started/introduction')
         titles = {p['id']: p['title'] for p in doc['pages']}
-        rst = render_docs.render_page(doc['pages'][0], titles, render_docs.Rst())
-        self.assertIn(answer['text'], rst)
-        self.assertIn('What is the product or system', rst)
+        rst = render_docs.render_page(page, titles, render_docs.Rst())
+        self.assertIn('What OrderLog is for', rst)
+        self.assertIn('Composed prose about', rst)
         self.assertIn('README.md:1-2', rst)
-        self.assertNotIn('source file(s)', rst)
+        # Neither the question nor the raw note reaches the page.
+        self.assertNotIn('What is the product or system', rst)
+        self.assertNotIn('Raw note:', rst)
         checker = check_prose.Checker(doc)
         checker.check(doc)
-        self.assertIn({'page': 'getting_started/introduction', 'block': 'answer:1.1.1'}, checker.queue)
-        self.assertEqual(len(doc['manual_coverage']['unresolved']), len(self.answers['answers']) - 1)
+        self.assertIn({'page': 'getting_started/introduction',
+                       'block': 'section:getting_started/introduction:1'}, checker.queue)
+
+    def test_a_heading_may_not_be_a_question(self):
+        self.answers['answers']['1.1.1'].update(
+            status='inferred', text='A reading.',
+            evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}])
+        self.compose('getting_started/introduction',
+                     'What is the product or system, and what problem does it solve?',
+                     '1.1.1')
+        with self.assertRaises(ValueError): self.build()
+
+    def test_composition_may_narrow_what_an_answer_rests_on_never_add(self):
+        """Prose citing evidence no answer earned carries provenance nothing checked."""
+        self.answers['answers']['1.1.1'].update(
+            status='confirmed', text='A note.',
+            evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
+            verified_ids=['claim:verified'])
+        self.compose('getting_started/introduction', 'Purpose', '1.1.1')
+        section = self.answers['pages']['getting_started/introduction']['sections'][0]
+        section['evidence'] = [{'path': 'README.md', 'line_start': 2, 'line_end': 2}]
+        with self.assertRaises(ValueError): self.build()
+        section['verified_ids'] = ['stmt:observed']
+        section['evidence'] = [{'path': 'README.md', 'line_start': 1, 'line_end': 1}]
+        with self.assertRaises(ValueError): self.build()
+
+    def test_one_inferred_answer_makes_the_section_inferred(self):
+        """Composition cannot launder a reading into a fact by surrounding it."""
+        for qid, status in (('1.1.1', 'confirmed'), ('1.1.2', 'inferred')):
+            self.answers['answers'][qid].update(
+                status=status, text='A note.',
+                evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
+                verified_ids=['claim:verified'] if status == 'confirmed' else [])
+        self.compose('getting_started/introduction', 'Purpose', '1.1.1', '1.1.2')
+        doc = self.build()
+        block = next(b for p in doc['pages'] for b in p['blocks'] if b.get('manual_block'))
+        self.assertEqual(block['answer_status'], 'inferred')
+        self.assertTrue(block['text'].startswith('Inferred: '))
+
+    def test_an_answered_question_no_section_uses_fails_the_gate(self):
+        """Content the run paid for and then dropped is a defect, not a gap."""
+        self.answers['answers']['1.1.1'].update(
+            status='inferred', text='A note nobody composed.',
+            evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}])
+        doc = self.build()
+        self.assertEqual(doc['manual_coverage']['uncomposed'], ['1.1.1'])
+        ix = self.root / 'index.json'; ix.write_text(json.dumps(self.index))
+        out = self.root / 'doc.json'; out.write_text(json.dumps(doc))
+        report = self.root / 'report.json'
+        subprocess.run([sys.executable, script('quality_docs.py'), '--index', str(ix),
+                        '--doc', str(out), '--out', str(report)],
+                       capture_output=True, text=True)
+        data = json.loads(report.read_text())
+        self.assertEqual(data['status'], 'failed')
+        self.assertTrue(any('no section uses' in r for r in data['reasons']))
 
     def test_absent_stale_and_invalid_evidence_refused(self):
         del self.answers['answers']['1.1.1']
@@ -92,11 +158,11 @@ class ManualTests(unittest.TestCase):
                       evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}])
         # Evidence that resolves, and nothing that was ever checked.
         with self.assertRaises(ValueError): self.build()
-        # The same answer as a reading is fine, and says so on the page.
+        # The same answer as a reading is fine, and any section built on it says so.
         answer['status'] = 'inferred'
+        self.compose('getting_started/introduction', 'Purpose', '1.1.1')
         doc = self.build()
-        block = next(b for p in doc['pages'] for b in p['blocks']
-                     if b.get('manual_question') == '1.1.1')
+        block = next(b for p in doc['pages'] for b in p['blocks'] if b.get('manual_block'))
         self.assertTrue(block['text'].startswith('Inferred: '))
 
     def test_unverified_ids_are_refused_not_downgraded(self):
@@ -131,12 +197,14 @@ class ManualTests(unittest.TestCase):
                                  'steps': [{'id': 'step:1'}]}]},
             'architecture': {'components': [{'id': 'component:edge', 'status': 'observed',
                                              'modules': ['src/api.py']}]}}
-        for question, ref in (('2.2.1', 'op:test'), ('2.1.1', 'flow:record'),
-                              ('2.1.2', 'component:edge')):
+        for question, ref, page in (('2.2.1', 'op:test', 'architecture/data_flow'),
+                                    ('2.1.1', 'flow:record', 'architecture/overview'),
+                                    ('2.1.2', 'component:edge', 'architecture/overview')):
             self.answers['answers'][question].update(
                 status='confirmed', text='An answer resting on a validated analysis.',
                 evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
                 verified_ids=[ref])
+            self.compose(page, 'Section for ' + question, question)
         doc = self.build()
         self.assertEqual(model.validate(doc), [])
         cited = doc['manual_coverage']['verified_ids_cited']

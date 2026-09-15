@@ -195,8 +195,13 @@ def scaffold(index, extra=None):
                          "next_check": q["text"], "evidence": []}
                for page in QUESTIONS for q in page["questions"]}
     prefilled = prefill(answers, extra)
+    # `answers` are notes; `pages` is the document. Seeded empty rather than with a
+    # section per question, because a section per question is the questionnaire this
+    # step exists to stop producing -- the composing is the work, and a placeholder
+    # would arrive looking like it was already done.
     return {"manual_version": 1, "index_hash": index.get("index_hash"),
-            "prefilled": prefilled, "answers": answers}
+            "prefilled": prefilled, "answers": answers,
+            "pages": {page["id"]: {"sections": []} for page in QUESTIONS}}
 
 
 def confirmable(claims, analysis, extra=None):
@@ -269,6 +274,171 @@ def holds_a_module(component):
     return bool(component.get("modules"))
 
 
+COMPOSABLE = ("confirmed", "inferred")
+
+
+def read_answer(qid, answer, root, origins):
+    """One answer checked and normalised. Nothing here is prose a reader will see.
+
+    An answer is a *note*: what the repository says about one template question, with
+    what it rests on. The page is composed from these afterwards, so the checks here are
+    about whether the note is sound, never about how it reads.
+    """
+    if not isinstance(answer, dict):
+        raise ValueError("%s: answer must be an object" % qid)
+    status, text = answer.get("status"), answer.get("text")
+    if status not in ("confirmed", "inferred", "unknown", "not_applicable"):
+        raise ValueError("%s: invalid answer status" % qid)
+    if not isinstance(text, str) or not text.strip() or text.strip() == "Answer:":
+        raise ValueError("%s: answer text is required" % qid)
+    evidence = answer.get("evidence", [])
+    if not isinstance(evidence, list):
+        raise ValueError("%s: evidence must be a list" % qid)
+    if status in COMPOSABLE and not evidence:
+        raise ValueError("%s: substantive answers require repository evidence" % qid)
+    for item in evidence:
+        if not isinstance(item, dict):
+            raise ValueError("%s: evidence must be an object" % qid)
+        path, start, end = item.get("path"), item.get("line_start"), item.get("line_end")
+        if not isinstance(path, str) or Path(path).is_absolute():
+            raise ValueError("%s: evidence must use a repository-relative path" % qid)
+        target = (root / path).resolve()
+        if root not in target.parents or not target.is_file():
+            raise ValueError("%s: evidence is missing or outside the repository" % qid)
+        if type(start) is not int or type(end) is not int or not 1 <= start <= end:
+            raise ValueError("%s: invalid evidence line range" % qid)
+        if end > len(target.read_text(encoding="utf-8").splitlines()):
+            raise ValueError("%s: evidence line range exceeds file" % qid)
+    verified_ids = answer.get("verified_ids", [])
+    if not isinstance(verified_ids, list) \
+            or any(not isinstance(r, str) for r in verified_ids):
+        raise ValueError("%s: verified_ids must be a list of ids" % qid)
+    unknown_refs = [r for r in verified_ids if r not in origins]
+    if unknown_refs:
+        # Naming an id nothing verified is the failure this rule exists for: it reads as
+        # provenance and carries none.
+        raise ValueError("%s: cites %s, which nothing in this run verified"
+                         % (qid, ", ".join(sorted(unknown_refs)[:3])))
+    if status == "confirmed" and not verified_ids:
+        raise ValueError(
+            "%s: `confirmed` must name a verified_id -- a verified claim, a recorded "
+            "statement, or a validated procedure, flow or component. An answer the "
+            "pipeline never checked is `inferred`" % qid)
+    if status == "unknown" and not str(answer.get("next_check", "")).strip():
+        raise ValueError("%s: unknown requires a concrete next_check" % qid)
+    if status == "not_applicable" and not str(answer.get("reviewer", "")).strip():
+        raise ValueError("%s: not_applicable requires reviewer confirmation" % qid)
+    return {"id": qid, "status": status, "text": text, "evidence": evidence,
+            "verified_ids": verified_ids, "next_check": answer.get("next_check", ""),
+            "reviewer": answer.get("reviewer", "")}
+
+
+def citation(item):
+    return "%s:%d-%d" % (item["path"], item["line_start"], item["line_end"])
+
+
+def read_section(page_id, order, section, notes, origins):
+    """One composed section, checked against the answers it was written from.
+
+    Composition is where a manual stops being a questionnaire, and it is also where an
+    interpretation could quietly become a fact: prose that cites evidence no answer
+    earned would carry provenance nothing checked. So a section may only name answers on
+    its own page, may only cite what those answers cite, and takes the weaker of their
+    statuses -- one `inferred` answer makes the section inferred, however many confirmed
+    ones sit beside it.
+    """
+    where = "%s section %d" % (page_id, order)
+    if not isinstance(section, dict):
+        raise ValueError("%s: must be an object" % where)
+    heading, body = section.get("heading"), section.get("body")
+    for field, value in (("heading", heading), ("body", body)):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("%s: %s is required" % (where, field))
+    if heading.strip().endswith("?"):
+        # The template question is the prompt, not the heading. A manual whose headings
+        # are questions is the questionnaire this composition step exists to replace.
+        raise ValueError("%s: heading %r is a question; write what the section is about"
+                         % (where, heading.strip()[:60]))
+    named = section.get("answers")
+    if not isinstance(named, list) or not named:
+        raise ValueError("%s: must name the answers it was written from" % where)
+    cited_notes = []
+    for qid in named:
+        if qid not in notes:
+            raise ValueError("%s: names %r, which is not a question on this page"
+                             % (where, qid))
+        note = notes[qid]
+        if note["status"] not in COMPOSABLE:
+            raise ValueError(
+                "%s: names %s, which is %s -- an unanswered or excluded question is "
+                "reported, never composed into prose" % (where, qid, note["status"]))
+        cited_notes.append(note)
+    allowed_evidence = {citation(e) for n in cited_notes for e in n["evidence"]}
+    allowed_ids = {r for n in cited_notes for r in n["verified_ids"]}
+    evidence = section.get("evidence") or [e for n in cited_notes for e in n["evidence"]]
+    if not isinstance(evidence, list):
+        raise ValueError("%s: evidence must be a list" % where)
+    for item in evidence:
+        if not isinstance(item, dict) or citation(item) not in allowed_evidence:
+            raise ValueError(
+                "%s: cites %r, which none of its answers cite -- composition may narrow "
+                "what an answer rests on, never add to it"
+                % (where, isinstance(item, dict) and citation(item) or item))
+    verified_ids = section.get("verified_ids")
+    if verified_ids is None:
+        verified_ids = sorted(allowed_ids)
+    if not isinstance(verified_ids, list) or set(verified_ids) - allowed_ids:
+        raise ValueError("%s: verified_ids must be a subset of what its answers name"
+                         % where)
+    status = "inferred" if any(n["status"] == "inferred" for n in cited_notes) \
+        else "confirmed"
+    if status == "confirmed" and not verified_ids:
+        raise ValueError("%s: confirmed sections keep the verified_id their answers "
+                         "stand on" % where)
+    text = body.strip()
+    if status == "inferred":
+        text = "Inferred: " + text
+    citations = sorted({citation(e) for e in evidence})
+    if citations:
+        text += "\n\nEvidence: " + "; ".join(citations)
+    slug = "%s:%d" % (page_id, order)
+    return [
+        {"id": "heading:" + slug, "type": "subheading", "text": heading.strip()},
+        {"id": "section:" + slug, "type": "prose", "text": text,
+         "manual_block": True, "manual_answers": sorted(n["id"] for n in cited_notes),
+         "answer_status": status, "evidence": evidence,
+         "claim_refs": [r for r in verified_ids if origins.get(r) == "claim"],
+         "analysis_refs": [r for r in verified_ids if origins.get(r) == "statement"],
+         "verified_by": [{"id": r, "source": origins[r]} for r in sorted(verified_ids)]}]
+
+
+def gaps_block(page_id, notes, composed):
+    """What the page could not say, in one place rather than scattered through it.
+
+    A reader is owed the absences, and the run is held back by them -- but an unanswered
+    question is a note about the document, not a section of it. Collecting them under one
+    marked block keeps the prose readable without letting a gap go unreported.
+    """
+    unknown = [n for n in notes.values() if n["status"] == "unknown"]
+    excluded = [n for n in notes.values() if n["status"] == "not_applicable"]
+    uncomposed = [n for n in notes.values()
+                  if n["status"] in COMPOSABLE and n["id"] not in composed]
+    if not (unknown or excluded or uncomposed):
+        return None
+    parts = []
+    if unknown:
+        parts.append("Not documented: %d question(s) the repository does not answer "
+                     "yet (%s)." % (len(unknown), ", ".join(sorted(n["id"] for n in unknown))))
+    if excluded:
+        parts.append("Not applicable here: %s."
+                     % ", ".join(sorted(n["id"] for n in excluded)))
+    if uncomposed:
+        parts.append("Answered but not yet written into this page: %s."
+                     % ", ".join(sorted(n["id"] for n in uncomposed)))
+    return {"id": "gaps:" + page_id, "type": "prose", "text": " ".join(parts),
+            "absence": True}
+
+
 def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
     if not isinstance(content, dict) or content.get("manual_version") != 1:
         raise ValueError("manual requires --manual-analysis with manual_version 1")
@@ -278,83 +448,37 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
     expected = {q["id"] for p in QUESTIONS for q in p["questions"]}
     if not isinstance(answers, dict) or set(answers) != expected:
         raise ValueError("manual answers must contain exactly every template question ID")
+    composed_pages = content.get("pages") or {}
+    if not isinstance(composed_pages, dict):
+        raise ValueError("manual `pages` must be a map of page id to its sections")
+    unknown_pages = set(composed_pages) - {p["id"] for p in QUESTIONS}
+    if unknown_pages:
+        raise ValueError("manual `pages` names %s, which the template does not have"
+                         % ", ".join(sorted(unknown_pages)[:3]))
     origins = confirmable(claims, analysis, extra)
-    cited = set()
-    pages, unresolved, missing_diagrams = [], [], []
-    root = Path(root).resolve()
+    cited, unresolved, uncomposed, missing_diagrams = set(), [], [], []
+    pages, root = [], Path(root).resolve()
     for order, spec in enumerate(QUESTIONS, 1):
-        blocks = []
-        for question in spec["questions"]:
-            qid = question["id"]
-            answer = answers[qid]
-            if not isinstance(answer, dict):
-                raise ValueError("%s: answer must be an object" % qid)
-            status, text = answer.get("status"), answer.get("text")
-            if status not in ("confirmed", "inferred", "unknown", "not_applicable"):
-                raise ValueError("%s: invalid answer status" % qid)
-            if not isinstance(text, str) or not text.strip() or text.strip() == "Answer:":
-                raise ValueError("%s: answer text is required" % qid)
-            evidence = answer.get("evidence", [])
-            if not isinstance(evidence, list):
-                raise ValueError("%s: evidence must be a list" % qid)
-            if status in ("confirmed", "inferred") and not evidence:
-                raise ValueError("%s: substantive answers require repository evidence" % qid)
-            citations = []
-            for item in evidence:
-                if not isinstance(item, dict):
-                    raise ValueError("%s: evidence must be an object" % qid)
-                path, start, end = item.get("path"), item.get("line_start"), item.get("line_end")
-                if not isinstance(path, str) or Path(path).is_absolute():
-                    raise ValueError("%s: evidence must use a repository-relative path" % qid)
-                target = (root / path).resolve()
-                if root not in target.parents or not target.is_file():
-                    raise ValueError("%s: evidence is missing or outside the repository" % qid)
-                if type(start) is not int or type(end) is not int or not 1 <= start <= end:
-                    raise ValueError("%s: invalid evidence line range" % qid)
-                if end > len(target.read_text(encoding="utf-8").splitlines()):
-                    raise ValueError("%s: evidence line range exceeds file" % qid)
-                citations.append("%s:%d-%d" % (path, start, end))
-            verified_ids = answer.get("verified_ids", [])
-            if not isinstance(verified_ids, list) \
-                    or any(not isinstance(r, str) for r in verified_ids):
-                raise ValueError("%s: verified_ids must be a list of ids" % qid)
-            unknown_refs = [r for r in verified_ids if r not in origins]
-            if unknown_refs:
-                # Naming an id nothing verified is the failure this rule exists for: it
-                # reads as provenance and carries none.
-                raise ValueError(
-                    "%s: cites %s, which nothing in this run verified"
-                    % (qid, ", ".join(sorted(unknown_refs)[:3])))
-            if status == "confirmed" and not verified_ids:
-                raise ValueError(
-                    "%s: `confirmed` must name a verified_id -- a verified claim, a "
-                    "recorded statement, or a validated procedure, flow or component. "
-                    "An answer the pipeline never checked is `inferred`" % qid)
-            cited.update(verified_ids)
-            claim_refs = [r for r in verified_ids if origins[r] == "claim"]
-            analysis_refs = [r for r in verified_ids if origins[r] == "statement"]
-            if status == "unknown":
-                if not str(answer.get("next_check", "")).strip():
-                    raise ValueError("%s: unknown requires a concrete next_check" % qid)
-                unresolved.append(qid)
-                text = "Unknown — evidence required. %s Check next: %s" % (
-                    text, answer["next_check"])
-            elif status == "not_applicable":
-                if not str(answer.get("reviewer", "")).strip():
-                    raise ValueError("%s: not_applicable requires reviewer confirmation" % qid)
-                text = "Not applicable: %s (reviewed by %s)" % (text, answer["reviewer"])
-            elif status == "inferred":
-                text = "Inferred: " + text
-            if citations:
-                text += "\n\nEvidence: " + "; ".join(citations)
-            blocks.extend([
-                {"id": "question:" + qid, "type": "subheading", "text": question["text"]},
-                {"id": "answer:" + qid, "type": "prose", "text": text,
-                 "manual_question": qid, "answer_status": status,
-                 "evidence": evidence, "claim_refs": claim_refs,
-                 "analysis_refs": analysis_refs,
-                 "verified_by": [{"id": r, "source": origins[r]}
-                                 for r in sorted(verified_ids)]}])
+        notes = {q["id"]: read_answer(q["id"], answers[q["id"]], root, origins)
+                 for q in spec["questions"]}
+        unresolved.extend(n["id"] for n in notes.values() if n["status"] == "unknown")
+        blocks, composed = [], set()
+        sections = (composed_pages.get(spec["id"]) or {}).get("sections") or []
+        if not isinstance(sections, list):
+            raise ValueError("%s: sections must be a list" % spec["id"])
+        for number, section in enumerate(sections, 1):
+            produced = read_section(spec["id"], number, section, notes, origins)
+            blocks.extend(produced)
+            composed.update(produced[1]["manual_answers"])
+            cited.update(r["id"] for r in produced[1]["verified_by"])
+        uncomposed.extend(n["id"] for n in notes.values()
+                          if n["status"] in COMPOSABLE and n["id"] not in composed)
+        gaps = gaps_block(spec["id"], notes, composed)
+        if gaps:
+            blocks.append(gaps)
+        if not blocks:
+            blocks.append({"id": "empty:" + spec["id"], "type": "prose", "absence": True,
+                           "text": "Nothing is recorded for this page yet."})
         if spec["id"] in DIAGRAMS:
             directory = Path(diagrams) if diagrams else None
             manifest = directory / DIAGRAMS[spec["id"]] if directory else None
@@ -378,6 +502,7 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
             if not found:
                 missing_diagrams.append(spec["id"])
                 blocks.append({"id": "missing:" + spec["id"], "type": "prose",
+                               "absence": True,
                                "text": "Unknown — evidence required. Required diagram is missing."})
         pages.append({"id": spec["id"], "title": spec["title"], "mandatory": True,
                       "order": order, "blocks": blocks, "covers": [], "analysis_ids": []})
@@ -393,6 +518,7 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
     by_source = {}
     for ref in cited:
         by_source.setdefault(origins[ref], []).append(ref)
+    sections_written = sum(1 for p in pages for b in p["blocks"] if b.get("manual_block"))
     return {"preset": "manual", "pages": pages, "authored_pages": [],
             "claims": [by_claim[i] for i in sorted(cited) if i in by_claim],
             "statements": [by_statement[i] for i in sorted(cited) if i in by_statement],
@@ -400,6 +526,7 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
             "source_revision": (index.get("source") or {}).get("revision"),
             "source_dirty": (index.get("source") or {}).get("dirty"),
             "manual_coverage": {"total": len(expected), "unresolved": unresolved,
+                                "uncomposed": uncomposed, "sections": sections_written,
                                 "missing_diagrams": missing_diagrams,
                                 "verified_ids_cited": {k: sorted(v)
                                                        for k, v in sorted(by_source.items())}}}
@@ -413,23 +540,24 @@ def validate_document(doc):
         problems.append("manual contains duplicate block IDs")
     for page in pages:
         for block in page.get("blocks", []):
-            if not block.get("manual_question"):
+            if not block.get("manual_block"):
                 continue
             if not str(block.get("text", "")).strip():
-                problems.append("manual contains an empty answer")
-            status = block.get("answer_status")
-            if status not in ("confirmed", "inferred", "unknown", "not_applicable"):
-                problems.append("manual contains an invalid answer status")
-            if status in ("confirmed", "inferred") and not block.get("evidence"):
-                problems.append("manual contains an answer without evidence")
+                problems.append("manual contains an empty section")
+            if block.get("answer_status") not in COMPOSABLE:
+                problems.append("manual contains a section with an invalid status")
+            if not block.get("evidence"):
+                problems.append("manual contains a section without evidence")
+            if not block.get("manual_answers"):
+                problems.append("manual contains a section naming no answer")
     if [p.get("id") for p in pages] != [p["id"] for p in QUESTIONS[1:] + QUESTIONS[:1]]:
         problems.append("manual pages must follow the complete template order")
-    for spec in QUESTIONS:
-        page = next((p for p in pages if p.get("id") == spec["id"]), {})
-        actual = [b.get("manual_question") for b in page.get("blocks", [])
-                  if b.get("type") == "prose" and b.get("manual_question")]
-        if actual != [q["id"] for q in spec["questions"]]:
-            problems.append("%s is missing template answers" % spec["id"])
+    # Every page still has to say something, but what it says is now composed rather
+    # than one block per question -- so the check is that nothing is blank, not that the
+    # template's questions appear in order on the page.
+    for page in pages:
+        if not page.get("blocks"):
+            problems.append("%s has no content at all" % page.get("id"))
     return problems
 
 
