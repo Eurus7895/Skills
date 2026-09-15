@@ -243,16 +243,20 @@ def check(args):
 
 
 def preset_for(args, *analyses):
-    """`outside-in` renders the components and the operations; nothing else does.
+    """`manual` is the default deliverable; `--preset` picks any other.
 
-    Choosing it when *any* of those analyses exists is not a judgement call -- every other
-    preset drops pages the run has content for, and the three are independently optional,
-    so keying on the architecture file alone would silently drop a run that recorded only
-    how the repository is operated. An explicit `--preset` always wins.
+    The older behaviour inferred the preset from which analyses happened to be on disk --
+    `outside-in` if any existed, `onboarding` otherwise -- so the shape of the delivered
+    document was a side effect of what the run got around to writing. A default is a
+    decision and reads better as one.
+
+    The graph-driven presets are still here and still the right answer for an
+    architecture report; they are one flag away. What they are no longer is the thing you
+    get by not choosing.
     """
     if args.preset != "auto":
         return args.preset
-    return "outside-in" if any(os.path.exists(p) for p in analyses) else "onboarding"
+    return "manual"
 
 
 def document(args):
@@ -267,14 +271,44 @@ def document(args):
     report = os.path.join(build, "flow-report.json")
     graph = os.path.join(build, "class-graph.json")
     preset = preset_for(args, architecture, operations, flows)
-    print("preset: %s%s" % (preset, "" if args.preset != "auto" else " (chosen from what "
-                            "the build directory holds; --preset overrides)"))
+    print("preset: %s%s" % (preset, "" if args.preset != "auto"
+                            else " (the default; --preset overrides)"))
+
+    if preset == "manual":
+        answers = os.path.join(build, "manual-analysis.json")
+        if not os.path.exists(answers) and args.dry_run:
+            # `--dry-run` reports the plan and writes nothing, this draft included.
+            print("would write %s and stop: a manual cannot be built before it is "
+                  "answered" % answers)
+        elif not os.path.exists(answers):
+            # Now that `manual` is what you get by not choosing, reaching `document`
+            # without an answer artifact is the ordinary first run, not a mistake. Write
+            # the draft here rather than failing with a command to go and type -- `--init`
+            # refuses to overwrite, so this can never eat answers that already exist.
+            argv = [sys.executable, os.path.join(HERE, "document", "manual.py"),
+                    "--init", answers, "--index", index]
+            for flag, path in (("--architecture", architecture), ("--flows", flows),
+                               ("--operations", operations)):
+                if os.path.exists(path):
+                    argv.extend([flag, path])
+            code = subprocess.call(argv)
+            if code:
+                return fail("could not write %s" % answers, code)
+            # Exit 1: a verdict, not breakage. The run cannot build a manual nobody has
+            # answered, and saying so is the honest stopping point.
+            return fail("answer %s, compose each page's sections from those answers, "
+                        "then rerun `document`. `unknown` is for a question the "
+                        "repository does not answer, not one nobody looked up." % answers,
+                        1)
 
     model = ["--index", index, "--claims", verified,
              "--fragments", os.path.join(build, "fragments.verified.jsonl"),
              "--analysis", os.path.join(build, "module-analysis.jsonl"),
              "--preset", preset, "--diagrams", diagrams,
              "--out", os.path.join(build, "doc.json")]
+    if preset == "manual":
+        model.extend(["--manual-analysis", os.path.join(build, "manual-analysis.json"),
+                      "--root", args.root])
     for flag, path in (("--architecture", architecture), ("--flows", flows),
                        ("--operations", operations)):
         if os.path.exists(path):
@@ -582,6 +616,11 @@ def main():
             shutil.rmtree(packets)
 
     stages = COMPONENTS[args.component](args)
+    if isinstance(stages, int):
+        # A component may end the run before it has any stage to run: `document` does it
+        # when a manual has no answer artifact yet, which is a verdict about the run
+        # rather than a stage that failed. The code is the exit code.
+        return stages
     print("== %s: %d stage(s)" % (args.component, len(stages)))
     code = run(stages, dry_run=args.dry_run)
     print("\n== %s %s" % (args.component, "ok" if code == 0 else "exited %d" % code))

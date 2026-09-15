@@ -39,3 +39,6 @@ scripts/publish/sphinx_support.py          -> skills/document-codebase/scripts/p
 scripts/publish/wire_toctree.py            -> skills/document-codebase/scripts/publish/wire_toctree.py
 scripts/publish/check_prose.py             -> skills/document-codebase/scripts/publish/check_prose.py
 scripts/publish/quality_docs.py            -> skills/document-codebase/scripts/publish/quality_docs.py
+
+scripts/document/manual.py -> skills/document-codebase/scripts/document/manual.py
+scripts/document/manual_questions.json -> skills/document-codebase/scripts/document/manual_questions.json

@@ -1,354 +1,376 @@
 #!/usr/bin/env python3
-"""Behavioural tests for the `manual` preset and the pages it adds.
-
-Stdlib only, no test framework -- see tools/test_check_env.py for why.
-
-This preset exists because `handbook` predates the architecture, flow and operations
-analyses: it leaves the component map, the processing flow, the procedures and the
-coverage page to an author even when the run has all four. The tests here are about the
-line between the two halves. Every page the pipeline claims to generate must render
-something a reader can check; every page it cannot fill must be *named* as the author's
-rather than emitted empty, because a heading in a toctree over nothing is the failure the
-authored-page mechanism exists to prevent.
-
-The procedure split is the other thing worth pinning. Testing and releasing get their own
-pages here, so the same procedure must not also appear on the installation page -- a
-command shown twice reads as two different commands.
-
-    python3 tools/test_manual_preset.py
-"""
-
+"""Verify template answers survive RST rendering and incomplete manuals cannot pass."""
 import json
-import os
-import shutil
+import re
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import unittest
 
 from component_scripts import component_paths, script
-
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FIXTURE = os.path.join(REPO, "tests", "contracts", "flow-repo")
-
 sys.path[:0] = component_paths()
-import build_document_model as model                              # noqa: E402
-
-FAILURES = []
-
-
-def check(name, condition, detail=""):
-    if condition:
-        print("ok   %s" % name)
-    else:
-        print("FAIL %s %s" % (name, detail))
-        FAILURES.append(name)
+import manual
+import build_document_model as model
+import render_docs
+import check_prose
 
 
-def run(name, *args):
-    proc = subprocess.run([sys.executable, script(name)] + list(args),
-                          capture_output=True, text=True)
-    return proc.returncode, proc.stdout, proc.stderr
+class ManualTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / 'README.md').write_text('The example normalizes input.\nRun normalize to write cleaned output.\n')
+        self.index = {'schema_version': 3, 'index_hash': 'scan', 'files': [], 'coverage': {}}
+        self.answers = manual.scaffold(self.index)
+        # What a `confirmed` answer is allowed to stand on: one verified claim and one
+        # observed statement. The unverified pair beside them is what the rule refuses.
+        self.claims = [{'id': 'claim:verified', 'status': 'verified'},
+                       {'id': 'claim:candidate', 'status': 'candidate'}]
+        self.analysis = model.Analysis([
+            {'path': 'README.md', 'statements': [
+                {'id': 'stmt:observed', 'kind': 'responsibility', 'status': 'observed'},
+                {'id': 'stmt:guessed', 'kind': 'responsibility', 'status': 'inferred'}]}])
+
+        self.extra = {}
+
+    def build(self):
+        extra = dict(self.extra, manual=self.answers, root=str(self.root),
+                     diagram_directory=str(self.root / 'diagrams'))
+        return model.build(self.index, [], self.claims, 'manual', analysis=self.analysis,
+                           extra=extra)
+
+    def compose(self, page_id, heading, *answers):
+        """Write one section of a page from the answers behind it.
+
+        Answers are notes; a page is what someone composed from them. Every test that
+        wants prose on a page has to go through this, which is the point.
+        """
+        self.answers['pages'].setdefault(page_id, {'sections': []})['sections'].append(
+            {'heading': heading, 'body': 'Composed prose about %s.' % heading.lower(),
+             'answers': list(answers)})
+
+    def test_template_questions_are_preserved(self):
+        source = Path(__file__).resolve().parents[1] / 'plugins/docs/skills/document-codebase/references/documentation-template.md'
+        text = source.read_text()
+        sections = re.findall(r'^## (\d+\.\d+) [^\n]+\n(.*?)(?=^## |^# |\Z)', text, re.M | re.S)
+        actual = [q['text'] for page in manual.QUESTIONS[1:] for q in page['questions']]
+        expected = [q for _, body in sections for _, q in re.findall(r'^(\d+)\. (.+)$', body, re.M)]
+        self.assertEqual(actual, expected)
+
+    def test_the_page_carries_composed_prose_not_the_questions(self):
+        """The template question is the prompt. It must not reach the reader."""
+        self.answers['answers']['1.1.1'].update(
+            status='confirmed', text='Raw note: normalizes input, writes cleaned output.',
+            evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}],
+            verified_ids=['claim:verified', 'stmt:observed'])
+        self.compose('getting_started/introduction', 'What OrderLog is for', '1.1.1')
+        doc = self.build()
+        self.assertEqual(model.validate(doc), [])
+        self.assertEqual([c['id'] for c in doc['claims']], ['claim:verified'])
+        self.assertEqual([s['id'] for s in doc['statements']], ['stmt:observed'])
+        # 20 generated; the six a repository cannot answer are named, never written.
+        self.assertEqual(len(doc['pages']), len(manual.GENERATED))
+        self.assertEqual([p['id'] for p in doc['authored_pages']],
+                         [p['id'] for p in manual.AUTHORED])
+        self.assertNotIn('appendix/glossary', [p['id'] for p in doc['pages']])
+        page = next(p for p in doc['pages'] if p['id'] == 'getting_started/introduction')
+        titles = {p['id']: p['title'] for p in doc['pages']}
+        rst = render_docs.render_page(page, titles, render_docs.Rst())
+        self.assertIn('What OrderLog is for', rst)
+        self.assertIn('Composed prose about', rst)
+        self.assertIn('README.md:1-2', rst)
+        # Neither the question nor the raw note reaches the page.
+        self.assertNotIn('What is the product or system', rst)
+        self.assertNotIn('Raw note:', rst)
+        checker = check_prose.Checker(doc)
+        checker.check(doc)
+        self.assertIn({'page': 'getting_started/introduction',
+                       'block': 'section:getting_started/introduction:1'}, checker.queue)
+
+    def test_a_heading_may_not_be_a_question(self):
+        self.answers['answers']['1.1.1'].update(
+            status='inferred', text='A reading.',
+            evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}])
+        self.compose('getting_started/introduction',
+                     'What is the product or system, and what problem does it solve?',
+                     '1.1.1')
+        with self.assertRaises(ValueError): self.build()
+
+    def test_composition_may_narrow_what_an_answer_rests_on_never_add(self):
+        """Prose citing evidence no answer earned carries provenance nothing checked."""
+        self.answers['answers']['1.1.1'].update(
+            status='confirmed', text='A note.',
+            evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
+            verified_ids=['claim:verified'])
+        self.compose('getting_started/introduction', 'Purpose', '1.1.1')
+        section = self.answers['pages']['getting_started/introduction']['sections'][0]
+        section['evidence'] = [{'path': 'README.md', 'line_start': 2, 'line_end': 2}]
+        with self.assertRaises(ValueError): self.build()
+        section['verified_ids'] = ['stmt:observed']
+        section['evidence'] = [{'path': 'README.md', 'line_start': 1, 'line_end': 1}]
+        with self.assertRaises(ValueError): self.build()
+
+    def test_one_inferred_answer_makes_the_section_inferred(self):
+        """Composition cannot launder a reading into a fact by surrounding it."""
+        for qid, status in (('1.1.1', 'confirmed'), ('1.1.2', 'inferred')):
+            self.answers['answers'][qid].update(
+                status=status, text='A note.',
+                evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
+                verified_ids=['claim:verified'] if status == 'confirmed' else [])
+        self.compose('getting_started/introduction', 'Purpose', '1.1.1', '1.1.2')
+        doc = self.build()
+        block = next(b for p in doc['pages'] for b in p['blocks'] if b.get('manual_block'))
+        self.assertEqual(block['answer_status'], 'inferred')
+        self.assertTrue(block['text'].startswith('Inferred: '))
+
+    def test_an_answered_question_no_section_uses_fails_the_gate(self):
+        """Content the run paid for and then dropped is a defect, not a gap."""
+        self.answers['answers']['1.1.1'].update(
+            status='inferred', text='A note nobody composed.',
+            evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}])
+        doc = self.build()
+        self.assertEqual(doc['manual_coverage']['uncomposed'], ['1.1.1'])
+        ix = self.root / 'index.json'; ix.write_text(json.dumps(self.index))
+        out = self.root / 'doc.json'; out.write_text(json.dumps(doc))
+        report = self.root / 'report.json'
+        subprocess.run([sys.executable, script('quality_docs.py'), '--index', str(ix),
+                        '--doc', str(out), '--out', str(report)],
+                       capture_output=True, text=True)
+        data = json.loads(report.read_text())
+        self.assertEqual(data['status'], 'failed')
+        self.assertTrue(any('no section uses' in r for r in data['reasons']))
+
+    def test_absent_stale_and_invalid_evidence_refused(self):
+        del self.answers['answers']['1.1.1']
+        with self.assertRaises(ValueError): self.build()
+        self.answers = manual.scaffold(self.index)
+        self.answers['index_hash'] = 'old'
+        with self.assertRaises(ValueError): self.build()
+        self.answers['index_hash'] = 'scan'
+        self.answers['answers']['1.1.1'].update(status='confirmed', text='A factual answer.',
+            evidence=[{'path':'README.md','line_start':1,'line_end':99}])
+        with self.assertRaises(ValueError): self.build()
+        self.answers['answers']['1.1.1']['evidence'] = [{'path':'../outside','line_start':1,'line_end':1}]
+        with self.assertRaises(ValueError): self.build()
+
+    def test_confirmed_must_borrow_standing_from_a_check(self):
+        """Location is not support: `confirmed` names something that could have failed."""
+        answer = self.answers['answers']['1.1.1']
+        answer.update(status='confirmed', text='A factual answer.',
+                      evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}])
+        # Evidence that resolves, and nothing that was ever checked.
+        with self.assertRaises(ValueError): self.build()
+        # The same answer as a reading is fine, and any section built on it says so.
+        answer['status'] = 'inferred'
+        self.compose('getting_started/introduction', 'Purpose', '1.1.1')
+        doc = self.build()
+        block = next(b for p in doc['pages'] for b in p['blocks'] if b.get('manual_block'))
+        self.assertTrue(block['text'].startswith('Inferred: '))
+
+    def test_unverified_ids_are_refused_not_downgraded(self):
+        """A claim that did not verify is an unchecked citation, not a weaker one."""
+        answer = self.answers['answers']['1.1.1']
+        answer.update(status='confirmed', text='A factual answer.',
+                      evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}],
+                      verified_ids=['claim:candidate'])
+        with self.assertRaises(ValueError): self.build()
+        # `inferred` is the model's own reading; a statement recorded as one cannot
+        # stand in for a check either.
+        answer.update(verified_ids=['stmt:guessed'])
+        with self.assertRaises(ValueError): self.build()
+        # An id nothing in either file holds.
+        answer['verified_ids'] = ['stmt:invented']
+        with self.assertRaises(ValueError): self.build()
+
+    def test_the_three_analyses_can_confirm_an_answer(self):
+        """A validated procedure, flow or component is a check that could have failed.
+
+        It is the same bar a verified claim clears, reached by a different validator --
+        validate_operations matched the command character for character, validate_flows
+        proved every step is a call read at its call site, validate_architecture checked
+        the shape and the evidence. Without this the operations analysis renders nowhere
+        in `manual` and the commands it quoted are spent.
+        """
+        self.extra = {
+            'operations': {'procedures': [
+                {'id': 'op:test', 'kind': 'test', 'status': 'declared',
+                 'steps': [{'text': 'CI runs it.', 'command': 'python3 -m pytest'}]}]},
+            'flows': {'flows': [{'id': 'flow:record', 'status': 'observed',
+                                 'steps': [{'id': 'step:1'}]}]},
+            'architecture': {'components': [{'id': 'component:edge', 'status': 'observed',
+                                             'modules': ['src/api.py']}]}}
+        for question, ref, page in (('2.2.1', 'op:test', 'architecture/data_flow'),
+                                    ('2.1.1', 'flow:record', 'architecture/overview'),
+                                    ('2.1.2', 'component:edge', 'architecture/overview')):
+            self.answers['answers'][question].update(
+                status='confirmed', text='An answer resting on a validated analysis.',
+                evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
+                verified_ids=[ref])
+            self.compose(page, 'Section for ' + question, question)
+        doc = self.build()
+        self.assertEqual(model.validate(doc), [])
+        cited = doc['manual_coverage']['verified_ids_cited']
+        self.assertEqual(cited, {'component': ['component:edge'],
+                                 'flow': ['flow:record'], 'procedure': ['op:test']})
+        # These resolve against their own analyses, not against the claim set, so
+        # neither list grows.
+        self.assertEqual(doc['claims'], [])
+        self.assertEqual(doc['statements'], [])
+
+    def test_a_row_that_only_validated_cannot_confirm(self):
+        """Validation is not confirmation: the schema passing says nothing was checked.
+
+        `validate_operations.py` accepts an `inferred` procedure, and a step whose status
+        is `unknown` need carry no command at all — so such a row cleared its schema with
+        nothing mechanically matched against the source.
+        """
+        answer = self.answers['answers']['2.2.1']
+        answer.update(status='confirmed', text='An answer resting on an analysis.',
+                      evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
+                      verified_ids=['op:loose'])
+        for procedure in (
+                {'id': 'op:loose', 'kind': 'run', 'status': 'inferred',       # reading
+                 'steps': [{'text': 'x', 'command': 'python3 -m pytest'}]},
+                {'id': 'op:loose', 'kind': 'run', 'status': 'declared',       # no command
+                 'steps': [{'text': 'Deployment is mostly prose.'}]}):
+            self.extra = {'operations': {'procedures': [procedure]}}
+            with self.assertRaises(ValueError):
+                self.build()
+        # Declared, and carrying the command O006 matched: this one qualifies.
+        self.extra = {'operations': {'procedures': [
+            {'id': 'op:loose', 'kind': 'run', 'status': 'declared',
+             'steps': [{'text': 'x', 'command': 'python3 -m pytest'}]}]}}
+        self.assertEqual(model.validate(self.build()), [])
+
+    def test_prefill_answers_what_the_analyses_settled(self):
+        """The commands reach the page exactly as validate_operations matched them."""
+        # `status` is required by the operations schema, and is what decides whether a
+        # row may confirm: these are `declared`, as a validated analysis records them.
+        operations = {'index_hash': 'scan', 'procedures': [
+            {'id': 'op:test', 'kind': 'test', 'name': 'Running the tests',
+             'status': 'declared', 'steps': [
+                {'text': 'CI runs the suite.', 'status': 'declared',
+                 'command': 'python3 -m pytest',
+                 'evidence': [{'path': 'README.md', 'line_start': 2}]}]}],
+            'requirements': [{'id': 'req:python', 'name': 'Python', 'value': '>=3.9',
+                              'status': 'declared',
+                              'evidence': [{'path': 'README.md', 'line_start': 1}]}]}
+        draft = manual.scaffold(self.index, {'operations': operations})
+        self.assertEqual(draft['prefilled'], ['1.2.1', '4.2.3'])
+        commands = draft['answers']['4.2.3']
+        self.assertEqual(commands['status'], 'confirmed')
+        self.assertIn('`python3 -m pytest`', commands['text'])
+        self.assertEqual(commands['verified_ids'], ['op:test'])
+        # A citation with no line_end is one line, not a range guessed outwards.
+        self.assertEqual(commands['evidence'], [{'path': 'README.md', 'line_start': 2,
+                                                 'line_end': 2}])
+        self.assertIn('Python >=3.9', draft['answers']['1.2.1']['text'])
+        # Everything the analyses do not settle stays unknown rather than guessed.
+        self.assertEqual(draft['answers']['1.1.1']['status'], 'unknown')
+        # And the draft builds: a prefilled answer passes the rule it was written for.
+        self.answers = draft
+        self.extra = {'operations': operations}
+        self.assertEqual(model.validate(self.build()), [])
+
+    def test_prefill_skips_a_kind_the_analysis_never_recorded(self):
+        """An absent procedure leaves the question open, it does not invent a heading."""
+        draft = manual.scaffold(self.index, {'operations': {'procedures': [], 'requirements': []}})
+        self.assertEqual(draft['prefilled'], [])
+        self.assertEqual(draft['answers']['3.1.1']['status'], 'unknown')
+
+    def test_only_two_diagram_pages(self):
+        d = self.root / 'diagrams'; d.mkdir()
+        for name in ('class', 'flow'): (d / (name+'.puml')).write_text('@startuml\n@enduml\n')
+        (d / 'diagram-manifest.json').write_text(json.dumps({'schema_version':3,'views':[{'file':'class.puml'}]}))
+        (d / 'flow-diagram-manifest.json').write_text(json.dumps({'index_hash':'scan','validated':True,'views':[{'file':'flow.puml'}]}))
+        doc = self.build()
+        homes = {p['id'] for p in doc['pages'] if any(b['type']=='plantuml' for b in p['blocks'])}
+        self.assertEqual(homes, set(manual.DIAGRAMS))
+        self.assertFalse(doc['manual_coverage']['missing_diagrams'])
+
+    def test_unknowns_remain_incomplete_in_quality_report(self):
+        doc = self.build()
+        ix = self.root/'index.json'; ix.write_text(json.dumps(self.index))
+        out = self.root/'doc.json'; out.write_text(json.dumps(doc))
+        report = self.root/'report.json'
+        proc = subprocess.run([sys.executable, script('quality_docs.py'), '--index',str(ix),
+                               '--doc',str(out),'--out',str(report)],capture_output=True,text=True)
+        self.assertTrue(report.exists(), proc.stdout+proc.stderr)
+        data = json.loads(report.read_text())
+        self.assertTrue(data['manual']['unresolved'])
+        self.assertEqual(len(data['manual']['missing_diagrams']),2)
+        self.assertNotEqual(data['status'],'passed')
+        # A manual of unknowns satisfies every other check: the schema holds, each answer
+        # is honest, nothing is overstated. It used to report `partial` and exit 0, which
+        # told the run that answering nothing had worked.
+        self.assertEqual(data['manual']['answer_mode'], 'unanswered')
+        self.assertEqual(data['status'], 'failed')
+        self.assertEqual(proc.returncode, 1)
+        self.assertTrue(any('answer mode is unanswered' in r for r in data['reasons']))
+
+    def test_the_unanswered_count_is_never_masked(self):
+        """Each manual defect is reported on its own, not first-one-wins.
+
+        These were an `elif` chain, so a composition problem hid the unanswered count
+        and a report with 197 unanswered questions never mentioned them.
+        """
+        answer = self.answers['answers']['1.1.1']
+        answer.update(status='confirmed', text='An answer no section uses.',
+                      evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
+                      verified_ids=['claim:verified'])
+        doc = self.build()
+        ix = self.root/'index.json'; ix.write_text(json.dumps(self.index))
+        out = self.root/'doc.json'; out.write_text(json.dumps(doc))
+        report = self.root/'report.json'
+        subprocess.run([sys.executable, script('quality_docs.py'), '--index',str(ix),
+                        '--doc',str(out),'--out',str(report)],capture_output=True,text=True)
+        reasons = json.loads(report.read_text())['reasons']
+        self.assertTrue(any('answer mode is unanswered' in r for r in reasons), reasons)
+        self.assertTrue(any('no section uses' in r for r in reasons), reasons)
+
+    def test_handbook_authored_pages_remain_reachable(self):
+        # Preserve the upstream renderer regression after manual stops using authored pages.
+        doc = model.build(self.index, [], [], 'handbook')
+        existing, absent = doc['authored_pages'][:2]
+        out = self.root / 'docs'
+        authored = out / (existing['id'] + '.rst')
+        authored.parent.mkdir(parents=True)
+        original = 'Project introduction\n====================\n\nAuthored content.\n'
+        authored.write_text(original)
+        path = self.root / 'handbook.json'
+        path.write_text(json.dumps(doc))
+        proc = subprocess.run([sys.executable, script('render_docs.py'), '--doc', str(path),
+                               '--out', str(out)], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        index = (out / 'index.rst').read_text()
+        self.assertIn(existing['id'], index)
+        self.assertNotIn(absent['id'], index)
+        self.assertEqual(authored.read_text(), original)
+        expected = sorted(doc['pages'] + [existing], key=lambda page: page['order'])
+        positions = [index.index(page['id']) for page in expected]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_cli_writes_all_pages(self):
+        for name, data in [('index.json',self.index),('manual.json',self.answers)]:
+            (self.root/name).write_text(json.dumps(data))
+        (self.root/'empty.jsonl').write_text('')
+        doc = self.root/'doc.json'
+        proc = subprocess.run([sys.executable, script('build_document_model.py'),'--preset','manual',
+            '--index',str(self.root/'index.json'),'--claims',str(self.root/'empty.jsonl'),
+            '--fragments',str(self.root/'empty.jsonl'),'--manual-analysis',str(self.root/'manual.json'),
+            '--root',str(self.root),'--out',str(doc)],capture_output=True,text=True)
+        self.assertEqual(proc.returncode,0,proc.stdout+proc.stderr)
+        proc = subprocess.run([sys.executable,script('render_docs.py'),'--doc',str(doc),
+            '--out',str(self.root/'docs')],capture_output=True,text=True)
+        self.assertEqual(proc.returncode,0,proc.stdout+proc.stderr)
+        # Generated pages plus index.rst. An authored page is never written over.
+        self.assertEqual(len(list((self.root/'docs').rglob('*.rst'))),
+                         len(manual.GENERATED) + 1)
+        self.assertFalse((self.root/'docs/appendix/glossary.rst').exists())
+        self.assertTrue((self.root/'docs/architecture/class_diagram.rst').exists())
+        self.assertTrue((self.root/'docs/architecture/data_flow.rst').exists())
 
 
-def write_json(path, data):
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, sort_keys=True)
-    return path
-
-
-def read(path):
-    with open(path, encoding="utf-8") as fh:
-        return fh.read()
-
-
-def shape_tests():
-    """What the preset promises, before anything is built from it."""
-    rows = model.PRESETS["manual"]
-    ids = [r[0] for r in rows]
-    check("every page id is unique", len(ids) == len(set(ids)), repr(ids))
-    check("the tree is the five areas the blueprint names",
-          {i.split("/")[0] for i in ids if "/" in i}
-          == {"getting_started", "architecture", "usage", "development", "appendix"},
-          repr(sorted({i.split("/")[0] for i in ids if "/" in i})))
-    check("every named builder exists",
-          all(r[3] in model.BUILDERS for r in rows if r[3]),
-          repr([r[3] for r in rows if r[3] and r[3] not in model.BUILDERS]))
-
-    # A page the pipeline cannot fill is listed as the author's. Marking one mandatory
-    # *and* unfillable would fail every run on a repository that has no such content.
-    unfillable = [r for r in rows if r[3] is None and r[2]]
-    check("no page is both mandatory and impossible to generate",
-          not unfillable, repr([r[0] for r in unfillable]))
-    generated = [r[0] for r in rows if r[3]]
-    check("the generated half covers architecture, procedures and disclosure",
-          {"architecture/overview", "architecture/processing_flow",
-           "architecture/module_reference", "development/testing",
-           "appendix/limitations", "appendix/traceability"}.issubset(set(generated)),
-          repr(generated))
-
-    # Same rule the other prose presets keep: a document that omits its own coverage
-    # section reads exactly like one with nothing to disclose.
-    check("limitations is mandatory", ("appendix/limitations", "Limitations", True,
-                                       "limitations") in rows)
-
-    # The procedure kinds are partitioned, not repeated. A command on two pages reads as
-    # two commands.
-    kinds = {"installation": ("install", "build"), "testing": ("test",),
-             "release": ("deploy", "release", "observe"),
-             "configuration": ("configure",)}
-    seen = [k for group in kinds.values() for k in group]
-    check("no procedure kind is claimed by two pages",
-          len(seen) == len(set(seen)), repr(sorted(seen)))
-
-
-def build_tests(tmp):
-    """What it renders against a real scan."""
-    root = os.path.join(tmp, "repo")
-    shutil.copytree(FIXTURE, root)
-    index_path = os.path.join(tmp, "structure.json")
-    run("scan_repo.py", "--root", root, "--out", index_path, "--detail")
-    with open(index_path, encoding="utf-8") as fh:
-        index = json.load(fh)
-    digest = index["index_hash"]
-    hashes = {r["path"]: r["source_hash"] for r in index["files"]}
-
-    entry = "src/pipeline/entry.py"
-    transform = "src/pipeline/transform.py"
-    store = "src/pipeline/store.py"
-
-    claims_in = os.path.join(tmp, "claims.jsonl")
-    with open(claims_in, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({
-            "id": "claim:a", "kind": "calls", "subject": "symbol:%s:main" % entry,
-            "object": "symbol:%s:normalise" % transform,
-            "evidence": [{"path": entry, "line_start": 7}],
-            "index_hash": digest}, sort_keys=True) + "\n")
-    run("verify_doc.py", "--claims", claims_in, "--index", index_path,
-        "--root", root, "--out-dir", tmp)
-    claims_path = os.path.join(tmp, "claims.verified.jsonl")
-    fragments_path = os.path.join(tmp, "fragments.verified.jsonl")
-    # One verified fragment, so the module reference renders its table rather than the
-    # "nothing survived" absence. The page a manual's reader spends longest on was being
-    # exercised only in its empty form, and the intro block above the table -- the one
-    # that reached a reader as escaped markdown -- never rendered here at all.
-    with open(fragments_path, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({
-            "fragment_id": "fragment:%s" % entry, "source": entry,
-            "role": "Reads the argument list and hands it to the transform.",
-            "claim_ids": ["claim:a"], "status": "verified",
-            "index_hash": digest}, sort_keys=True) + "\n")
-
-    analysis_path = os.path.join(tmp, "module-analysis.jsonl")
-    with open(analysis_path, "w", encoding="utf-8") as fh:
-        for path, kind, sid, text, line in (
-            (entry, "responsibility", "s-entry",
-             "Hands its argument to the pipeline and returns the result.", 6),
-            (transform, "interaction", "s-interaction",
-             "Calls into the store and is called by the entry point.", 3),
-            (transform, "rationale", "s-rationale",
-             "Trimming lives here so the store never sees raw input.", 1),
-            (store, "state", "s-store", "Owns the count of what it was given.", 4),
-        ):
-            fh.write(json.dumps({
-                "analysis_version": 1, "path": path, "source_hash": hashes[path],
-                "index_hash": digest, "role": "A part of the pipeline.",
-                "statements": [{"id": sid, "kind": kind,
-                                "status": "declared" if kind == "rationale" else "observed",
-                                "text": text,
-                                "evidence": [{"path": path, "line_start": line}]}]},
-                sort_keys=True) + "\n")
-
-    architecture = write_json(os.path.join(tmp, "architecture-analysis.json"), {
-        "architecture_version": 1, "index_hash": digest,
-        "components": [
-            {"id": "component:pipeline", "name": "The pipeline", "status": "observed",
-             "modules": [entry, transform], "statement_ids": ["s-interaction"],
-             "rationale": {"status": "declared",
-                           "text": "Entry and normalisation share one rule set.",
-                           "evidence": [{"path": "README.md", "line_start": 3}]}},
-            {"id": "component:storage", "name": "Storage", "status": "observed",
-             "modules": [store, "src/pipeline/__init__.py"],
-             "rationale": {"status": "unknown",
-                           "text": "Why storage counts rather than persists."}},
-        ],
-        "relationships": [{"from": "component:pipeline", "to": "component:storage",
-                           "kind": "depends_on", "status": "observed",
-                           "evidence": [{"path": transform, "line_start": 3}]}],
-        "external_systems": [],
-    })
-    operations = write_json(os.path.join(tmp, "operations-analysis.json"), {
-        "operations_version": 1, "index_hash": digest,
-        "procedures": [
-            {"id": "op:test", "kind": "test", "name": "Running the tests",
-             "status": "declared",
-             "steps": [{"text": "The README names the test command.",
-                        "status": "declared", "command": "python3 -m pytest",
-                        "evidence": [{"path": "README.md", "line_start": 5}]}]},
-            {"id": "op:release", "kind": "release", "name": "Publishing",
-             "status": "declared",
-             "steps": [{"text": "The workflow builds on every push.",
-                        "status": "declared",
-                        "evidence": [{"path": ".github/workflows/ci.yml",
-                                      "line_start": 1}]}]},
-        ],
-        "requirements": [{"id": "req:python", "name": "Python", "value": ">=3.9",
-                          "status": "declared",
-                          "evidence": [{"path": "pyproject.toml", "line_start": 4}]}],
-    })
-    flows = write_json(os.path.join(tmp, "flow-analysis.json"), {
-        "flow_version": 1, "index_hash": digest, "flows": [],
-        "absent": {"reason": "No call chain was traced for this fixture."}})
-
-    doc_path = os.path.join(tmp, "doc-manual.json")
-    diagrams = os.path.join(tmp, "diagrams")
-    os.makedirs(diagrams, exist_ok=True)
-    code, out, err = run(
-        "build_document_model.py", "--index", index_path, "--claims", claims_path,
-        "--fragments", fragments_path, "--analysis", analysis_path,
-        "--architecture", architecture, "--operations", operations, "--flows", flows,
-        "--preset", "manual", "--diagrams", diagrams, "--out", doc_path)
-    check("the manual preset builds", code == 0, (out + err)[-400:])
-    if code != 0:
-        return
-
-    with open(doc_path, encoding="utf-8") as fh:
-        doc = json.load(fh)
-    pages = {p["id"]: p for p in doc["pages"]}
-    authored = [p["id"] for p in doc["authored_pages"]]
-
-    check("the pages a graph cannot answer are named as the author's",
-          {"usage/python_api", "appendix/glossary", "appendix/troubleshooting",
-           "getting_started/quick_start"}.issubset(set(authored)), repr(authored))
-    # Listed although nothing generates them: a page with no row is one the renderer
-    # neither writes nor names, so an authored changelog in the output directory is lost
-    # the next time a document is generated over it.
-    check("and the appendix a delivered manual carries has rows too",
-          {"appendix/faq", "appendix/references", "appendix/compliance",
-           "appendix/changelog"}.issubset(set(authored)), repr(authored))
-    check("and none of them was written",
-          not (set(authored) & set(pages)), repr(sorted(set(authored) & set(pages))))
-
-    # A prose block is plain text and the renderer escapes what it is handed, correctly.
-    # So a builder that writes markdown into one does not get emphasis -- it gets a
-    # backslash in front of every backtick, on the page, where a reader meets it. This
-    # was in the module reference for a while: "\\`verified\\` means every claim...".
-    marked = [(page["id"], block["id"])
-              for page in doc["pages"]
-              for block in page.get("blocks", ())
-              if block.get("type") == "prose" and "`" in (block.get("text") or "")]
-    check("no prose block carries markup the renderer will escape",
-          not marked, repr(marked))
-
-    def text_of(page_id):
-        return " ".join(
-            [b.get("text", "") for b in pages[page_id]["blocks"]]
-            + [str(c) for b in pages[page_id]["blocks"] for row in b.get("rows", ()) or ()
-               for c in row])
-
-    check("the test command is on the testing page",
-          "python3 -m pytest" in text_of("development/testing"),
-          text_of("development/testing")[:200])
-    check("and not also on the installation page",
-          "python3 -m pytest" not in text_of("getting_started/installation"),
-          text_of("getting_started/installation")[:200])
-    check("the declared requirement is on the installation page",
-          "Python" in text_of("getting_started/installation")
-          and ">=3.9" in text_of("getting_started/installation"),
-          text_of("getting_started/installation")[:200])
-    check("the release page carries the release procedure",
-          "workflow" in text_of("development/ci_cd_and_release"),
-          text_of("development/ci_cd_and_release")[:200])
-
-    # The traceability page is what a reviewer opens first: it says which scan the rest
-    # of the document is about.
-    trace = text_of("appendix/traceability")
-    check("traceability names the scan", digest in trace, trace[:200])
-    check("traceability lists the analyses this run carried",
-          "architecture" in trace and "operations" in trace, trace[:300])
-
-    # A repository with no git revision has no clean state to be dirty against; the
-    # scanner's default would otherwise read as uncommitted work.
-    check("a non-git tree is not reported as dirty",
-          "yes" not in [c for b in pages["appendix/traceability"]["blocks"]
-                        for row in b.get("rows", ()) or () for c in row
-                        if isinstance(c, str)],
-          repr([row for b in pages["appendix/traceability"]["blocks"]
-                for row in b.get("rows", ()) or ()]))
-
-    # Rationale gets its own page here, so the module reference must not also claim it.
-    check("rationale is filed where a reader looks for why",
-          "Trimming lives here" in text_of("architecture/design_decisions"),
-          text_of("architecture/design_decisions")[:200])
-    check("and not in the module reference",
-          "Trimming lives here" not in text_of("architecture/module_reference"),
-          text_of("architecture/module_reference")[:200])
-
-    out_dir = os.path.join(tmp, "docs")
-    code, out, err = run("render_docs.py", "--doc", doc_path, "--out", out_dir,
-                         "--diagrams", diagrams, "--check")
-    check("the manual preset renders", code == 0, (out + err)[-400:])
-    check("the tree is written as directories",
-          os.path.isfile(os.path.join(out_dir, "architecture", "overview.rst"))
-          and os.path.isfile(os.path.join(out_dir, "appendix", "traceability.rst")))
-    check("an authored page is not written",
-          not os.path.exists(os.path.join(out_dir, "appendix", "glossary.rst")))
-    index_rst = read(os.path.join(out_dir, "index.rst"))
-    check("every generated page is in the toctree",
-          all(pid in index_rst for pid in pages), index_rst[:400])
-    check("and an authored page nobody wrote is not, since it would point at nothing",
-          "appendix/changelog" not in index_rst, index_rst)
-
-    # The other half. Listing a page as authored gives it an identity; it earns a place
-    # in navigation by existing. Without this the author's own changelog sat in the
-    # output directory in no toctree, which Sphinx reports and a reader never finds.
-    os.makedirs(os.path.join(out_dir, "appendix"), exist_ok=True)
-    with open(os.path.join(out_dir, "appendix", "changelog.rst"), "w",
-              encoding="utf-8") as fh:
-        fh.write("Changelog\n=========\n\n- 0.1.0 first release\n")
-    os.remove(os.path.join(out_dir, "index.rst"))
-    code, out, err = run("render_docs.py", "--doc", doc_path, "--out", out_dir,
-                         "--diagrams", diagrams, "--check")
-    index_rst = read(os.path.join(out_dir, "index.rst"))
-    check("an authored page the author wrote is carried into the toctree",
-          "appendix/changelog" in index_rst, index_rst)
-    check("and the build check is satisfied by it", code == 0, (out + err)[-300:])
-    check("and it keeps the preset's order",
-          index_rst.index("appendix/changelog") < index_rst.index("appendix/limitations"),
-          index_rst)
-
-    # With no operations analysis the procedure pages must still say something rather
-    # than emit a heading over nothing.
-    bare = os.path.join(tmp, "doc-bare.json")
-    code, out, err = run(
-        "build_document_model.py", "--index", index_path, "--claims", claims_path,
-        "--fragments", fragments_path, "--analysis", analysis_path,
-        "--preset", "manual", "--diagrams", diagrams, "--out", bare)
-    check("the preset builds with no analyses at all", code == 0, (out + err)[-400:])
-    if code == 0:
-        with open(bare, encoding="utf-8") as fh:
-            thin = {p["id"]: p for p in json.load(fh)["pages"]}
-        check("and the procedure pages say what is missing",
-              all(any(b.get("absence") for b in thin[pid]["blocks"])
-                  for pid in ("getting_started/installation", "development/testing",
-                              "development/ci_cd_and_release", "usage/configuration")),
-              repr(sorted(thin)))
-
-
-def main():
-    tmp = tempfile.mkdtemp(prefix="manual-preset-test-")
-    try:
-        shape_tests()
-        build_tests(tmp)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-    print()
-    if FAILURES:
-        print("FAILED %d check(s): %s" % (len(FAILURES), ", ".join(FAILURES)))
-        return 1
-    print("all manual-preset checks passed")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == '__main__': unittest.main()

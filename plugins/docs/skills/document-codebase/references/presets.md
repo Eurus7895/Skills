@@ -4,7 +4,8 @@ A preset fixes the skeleton: which pages exist, in what order, and which may not
 about what is true — that comes entirely from the verified claims. Two documents built from the same preset
 against different repositories share a shape and nothing else.
 
-Pass one with `--preset`. `onboarding` is the default.
+Pass one with `--preset`. **`manual` is the default** — the delivered product manual. The four
+graph-driven presets below are one flag away and remain the right answer for an architecture report.
 
 ## `onboarding`
 
@@ -42,7 +43,7 @@ not the inventory; someone who wants a file-by-file list should generate `onboar
 What the thing is, then how to run it, then how it is built, then the inventory. Every other preset here
 opens on structure — the dependency graph, the entry points — which answers the question a reader has
 fourth. This is also the only preset that consumes the architecture and operations analyses, so it is the
-one to use when step 4 was done.
+one to use when the three analyses were written.
 
 | Page | Contains | Mandatory |
 | --- | --- | --- |
@@ -72,65 +73,26 @@ build and say the analysis was not supplied — a visibly thinner document, neve
 
 ## `manual`
 
-The five-area tree a delivered manual usually has — `getting_started/`, `architecture/`, `usage/`,
-`development/`, `appendix/` — filled from everything steps 2 to 4 produced. Use it when the deliverable is a
-product manual rather than an architecture report, and when the run has the architecture, flow and operations
-analyses to fill it with.
+Follow the [question template](documentation-template.md), with the documentation-wide review in the
+appendix. Read [manual.md](manual.md) for the answer schema, generation steps, review and migration.
+Unlike the graph-driven presets, manual requires `manual-analysis.json`: each question the run is asked gets
+an explicit, evidence-backed answer or a recorded unknown, and the pages are then **composed** from those
+answers. The questions are the prompt and never reach the reader.
 
-**It differs from `handbook` in what it can generate, not in shape.** `handbook` predates those three
-analyses, so it leaves the component map, the processing flow, the procedures and the coverage page to an
-author even on a run that has all four. Here they are generated.
+**Six of the 26 pages are authored, not generated**, and the run is not asked their questions at all:
+`appendix/glossary`, `faq`, `troubleshooting`, `compliance`, `changelog` and `references`. A glossary, an
+FAQ, a changelog and a troubleshooting table are things a person knows — the same reasoning `handbook`
+already applies. Asking the run for them buys 38 more `unknown`s and drags `answer_mode` down for gaps that
+were never the run's to fill, so they are declared with a `None` builder, reported as not generated, and
+left alone on disk. That leaves **161 questions across 20 generated pages**.
 
-| Page | Filled from | |
-| --- | --- | --- |
-| `getting_started/introduction` | what was scanned, its languages, the ways in | generated |
-| `getting_started/installation` | declared requirements, and the install and build procedures | generated |
-| `getting_started/quick_start` | — | **authored** |
-| `architecture/overview` | the components, their layers, and what crosses between them | generated |
-| `architecture/processing_flow` | the traced chains, or the stated reason there are none | generated |
-| `architecture/boundaries` | import edges that cross a directory, each with its proof line | generated |
-| `architecture/design_decisions` | why each boundary is there, and the ones nobody recorded | generated |
-| `architecture/module_reference` | one row per module whose description survived verification | generated |
-| `architecture/class_diagrams` | the class graph and its rendered views | generated |
-| `usage/configuration` | the `configure` procedures | generated |
-| `usage/command_line` | the `run` procedures, with their commands quoted | generated |
-| `usage/python_api`, `semantics`, `output_and_side_effects`, `errors_and_recovery` | — | **authored** |
-| `development/testing` | the `test` procedures, with their commands quoted | generated |
-| `development/ci_cd_and_release` | the `deploy`, `release` and `observe` procedures | generated |
-| `development/local_setup`, `code_quality`, `extending` | — | **authored** |
-| `appendix/limitations` | coverage counts, unresolved claims, scanner diagnostics | generated |
-| `appendix/traceability` | the scan identity, the citation convention, the artefacts | generated |
-| `appendix/supported_elements`, `glossary`, `faq`, `troubleshooting`, `references`, `compliance`, `changelog` | — | **authored** |
+**Under half of those answered is `answer_mode: unanswered`, which never passes** — the manual's counterpart
+to `derived_only`. `unknown` is for a question the repository does not answer, not one nobody looked up.
 
-**The procedure kinds are partitioned across pages, never repeated.** `install`/`build` go to installation,
-`test` to testing, `run` to the command-line page, `deploy`/`release`/`observe` to CI and release, `configure`
-to configuration. A command shown on two pages reads as two different commands, so no kind has two homes —
-which is why this preset does not reuse the `getting-started` and `operations` builders that pack four kinds
-onto one page each.
+Only `architecture/class_diagram` and `architecture/data_flow` require diagrams. Other pages require
+substantive explanations, not diagrams or file inventories. System Overview includes boundaries and design
+decisions; the template separates packaging/release from CI/CD.
 
-**Every kind has a home, and `tools/test_operations_homes.py` proves it.** The partition is declared in
-`PROCEDURE_HOMES` rather than written into each builder, because when it was inline this preset covered seven
-kinds of eight: a `run` procedure quoted out of a README rendered nowhere, and the page a reader opens to find
-out how to start the thing was an authored stub. An empty page says the analysis recorded nothing; a dropped
-kind says nothing at all.
-
-**Rationale gets its own page**, as in `outside-in`, rather than being folded into the architecture overview.
-The content has its own builder and its own required-topic home; filing it under the module reference would
-satisfy the coverage check while putting "why is this boundary here" in a list of files.
-
-**An authored page still needs a row.** The seven appendix pages above generate nothing, and they are listed
-anyway: a page with no row is one the renderer neither writes nor names, so an authored `changelog.rst` sitting
-in the output directory is lost the next time a document is generated over it.
-
-**The row gives it an identity; the file on disk earns it a place in the toctree.** The renderer lists an
-authored page when it finds one rendered beside the generated pages, in the preset's order, and leaves it out
-when there is nothing there — a toctree entry pointing at a page that does not exist fails a Sphinx build, and
-a page that exists in no toctree is one Sphinx warns about and no reader reaches.
-
-Two pages a reader might expect are deliberately not here. There is no root overview page beyond
-`getting_started/introduction` — `index.rst` is the renderer's, and a second front page competes with it. And
-there is no separate components page: `architecture/overview` is that page, because the blueprint this tree
-follows asks the overview to be a component map rather than a list of imports.
 
 ## `handbook`
 
@@ -163,11 +125,15 @@ cannot check against evidence, you leave.
 index already exists it is kept and the run says so, because that file lists pages this run knows nothing
 about. `--replace-index` overrides that, and then the toctree is the generated one.
 
+Authored pages enter the generated toctree only when their files exist, in preset order. Missing authored
+pages stay out of navigation so the toctree does not point at nonexistent documents. Existing authored
+content is preserved by the renderer.
+
 Page ids in this preset contain `/`, and a page id is its path under the output directory.
 
 ## What the model may and may not decide
 
-The agent chooses which modules are in scope (`units.txt`, from step 1 of `SKILL.md`), what each one's role is, and which
+The agent chooses which modules are in scope (`units.txt`, from `survey`), what each one's role is, and which
 claims support it. It does **not** choose whether the limitations page exists. Every mandatory page is
 generated whether or not there is much to put on it, because a document that silently omits its own coverage
 section reads exactly like one with nothing to disclose.

@@ -320,34 +320,45 @@ def driver_tests(tmp, root):
 
     # The optional analyses are absent far more often than they are broken.
     code, text = run("pipeline.py", "document", "--root", root, "--build", build,
-                     "--docs", os.path.join(tmp, "docs"), "--dry-run")
+                     "--docs", os.path.join(tmp, "docs"), "--preset", "outside-in",
+                     "--dry-run")
     check("document skips analyses that were not written",
           text.count("-- skip ") == 5, text)
     check("document says why it skipped each one", "will say so" in text, text)
 
-    # `auto` is not a guess: outside-in is the only preset that renders these analyses.
-    check("document defaults to onboarding with no architecture analysis",
-          "preset: onboarding" in text, text[:200])
+    # The default is a decision, not an inference from which files happen to exist.
+    code, text = run("pipeline.py", "document", "--root", root, "--build", build,
+                     "--docs", os.path.join(tmp, "docs"), "--dry-run")
+    check("document defaults to the manual preset",
+          "preset: manual (the default" in text, text[:300])
+    check("a first run says the draft would be written and writes nothing",
+          "would write" in text
+          and not os.path.exists(os.path.join(build, "manual-analysis.json")), text[:400])
     write(os.path.join(build, "architecture-analysis.json"), "{}")
     code, text = run("pipeline.py", "document", "--root", root, "--build", build,
                      "--docs", os.path.join(tmp, "docs"), "--dry-run")
-    check("document switches to outside-in once the analysis exists",
-          "preset: outside-in" in text, text[:200])
+    # An analysis appearing on disk no longer changes the deliverable under the reader's
+    # feet. It is material the chosen preset may use, not a vote for a different preset.
+    check("an analysis on disk does not change the default",
+          "preset: manual (the default" in text, text[:300])
+    code, text = run("pipeline.py", "document", "--root", root, "--build", build,
+                     "--docs", os.path.join(tmp, "docs"), "--preset", "outside-in",
+                     "--dry-run")
     check("an existing analysis reaches the model build",
           "--architecture" in text, text)
     code, text = run("pipeline.py", "document", "--root", root, "--build", build,
                      "--docs", os.path.join(tmp, "docs"), "--preset", "architecture",
                      "--dry-run")
     check("--preset overrides the choice", "preset: architecture" in text, text[:200])
-    # The three analyses are independently optional, so keying the choice on the
-    # architecture file alone would drop a run that only recorded how to operate the
-    # repository: onboarding has no builder that reads it.
+    # The three analyses are independently optional, and `outside-in` renders whichever
+    # of them exists: an operations analysis alone must still reach the model build.
     os.remove(os.path.join(build, "architecture-analysis.json"))
     write(os.path.join(build, "operations-analysis.json"), "{}")
     code, text = run("pipeline.py", "document", "--root", root, "--build", build,
-                     "--docs", os.path.join(tmp, "docs"), "--dry-run")
-    check("an operations analysis alone still selects outside-in",
-          "preset: outside-in" in text, text[:200])
+                     "--docs", os.path.join(tmp, "docs"), "--preset", "outside-in",
+                     "--dry-run")
+    check("an operations analysis alone reaches the model build",
+          "--operations" in text, text)
     os.remove(os.path.join(build, "operations-analysis.json"))
     write(os.path.join(build, "architecture-analysis.json"), "{}")
     code, text = run("pipeline.py", "publish", "--root", root, "--build", build,
