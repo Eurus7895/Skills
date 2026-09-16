@@ -26,6 +26,8 @@ import json
 from pathlib import Path
 
 
+MANUAL_VERSION = 2
+
 QUESTIONS = json.loads(Path(__file__).with_name("manual_questions.json").read_text())
 
 # Pages whose questions a repository cannot answer: a glossary, an FAQ, a changelog, a
@@ -49,203 +51,36 @@ CONFIRMING_CLAIM_STATUS = ("verified",)
 CONFIRMING_STATEMENT_STATUS = ("declared", "observed")
 
 
-# Which template question each of the three analyses actually answers. Deliberately
-# short: a mapping is justified only where the analysis holds the answer, not where it
-# holds something adjacent. `usage/configuration` asks for a configuration schema and the
-# operations analysis has procedures for configuring, which is a different question, so
-# it is not here -- a prefilled answer that is true and says nothing is the failure the
-# `A014` rule exists to catch, and it would arrive pre-approved.
-#
-# Each row is (question id, source key, section, what to call it in the sentence).
-PREFILL = (
-    ("1.2.1", "operations", "requirements", None),
-    ("1.2.3", "operations", ("install", "build"), "installing and building"),
-    ("2.1.1", "architecture", "components", None),
-    ("2.1.3", "architecture", "relationships", None),
-    ("2.2.1", "flows", "flows", None),
-    ("1.2.6", "config", "env", "environment variables"),
-    ("3.1.1", "operations", ("run",), "running"),
-    ("3.1.2", "config", "option", "command-line options"),
-    ("3.2.1", "config", "all", "settings"),
-    ("3.2.2", "config", "defaults", "defaults"),
-    ("4.2.3", "operations", ("test",), "testing"),
-    ("4.5.4", "operations", ("deploy", "release"), "deploying and releasing"),
-)
+def scaffold(index, extra=None, claims=(), analysis=None):
+    """An empty draft: every slot unanswered, and the facts available to answer it with.
 
+    **The initializer writes no prose.** It used to compose a sentence per mapped
+    question and mark it answered, which put text in the manual that no one had written
+    and no one had reviewed -- and it arrived looking decided, which is the worst of both.
+    Turning an extracted row into a sentence is the model's work, because deciding what a
+    setting *means* is the part the extraction cannot do.
 
-def cite(rows):
-    """Evidence entries from an analysis, in the shape build() checks.
-
-    The three analyses record `line_start` and often no `line_end`; a citation with one
-    line is the honest reading of that, not a range guessed outwards from it.
-
-    A procedure and a flow hold their evidence on their steps rather than on themselves,
-    so walking only the row would silently produce an unciteable answer -- and `prefill`
-    drops an answer with no evidence, so the symptom is a procedure that quietly fails
-    to prefill rather than one that prefills wrongly.
+    What it does hand over is `facts`: the ids this run verified, grouped by what vouched
+    for them. That is a reading list, not an answer -- the model still has to look at each
+    one, decide what it says, and write the sentence it stands behind.
     """
-    out = []
-    seen = set()
-    for row in rows:
-        items = list(row.get("evidence", ()) or ())
-        for step in row.get("steps", ()) or ():
-            items.extend(step.get("evidence", ()) or ())
-        for item in items:
-            start = item.get("line_start")
-            if not isinstance(item.get("path"), str) or not isinstance(start, int):
-                continue
-            entry = (item["path"], start, item.get("line_end") or start)
-            if entry in seen:
-                continue
-            seen.add(entry)
-            out.append({"path": entry[0], "line_start": entry[1], "line_end": entry[2]})
-    return out
-
-
-def procedures_of(operations, kinds):
-    return [p for p in (operations or {}).get("procedures", ()) or ()
-            if p.get("kind") in kinds]
-
-
-def answer_from(source, section, label, data):
-    """One prefilled answer, or None where the analysis recorded nothing.
-
-    The text quotes the analysis rather than paraphrasing it, so a command reaches the
-    page exactly as `validate_operations.py` matched it. Paraphrasing here would undo the
-    one check in that schema a parser can settle.
-    """
-    if source == "operations" and section == "requirements":
-        rows = [r for r in (data or {}).get("requirements", ()) or () if r.get("name")]
-        if not rows:
-            return None
-        named = ", ".join("%s %s" % (r["name"], r.get("value", "").strip() or "(unversioned)")
-                          for r in rows)
-        return ("The repository declares these prerequisites: %s." % named, rows)
-    if source == "operations":
-        rows = procedures_of(data, section)
-        if not rows:
-            return None
-        parts = []
-        for procedure in rows:
-            commands = [s["command"] for s in procedure.get("steps", ()) or ()
-                        if s.get("command")]
-            sentence = procedure.get("name") or procedure.get("id")
-            if commands:
-                sentence += ": " + ", ".join("`%s`" % c for c in commands)
-            parts.append(sentence)
-        return ("The repository records these procedures for %s. %s."
-                % (label, "; ".join(parts)), rows)
-    if source == "config":
-        rows = (data or {}).get("settings", ()) or []
-        if section in ("env", "option"):
-            rows = [r for r in rows if r.get("kind") == section]
-        elif section == "defaults":
-            rows = [r for r in rows if "default" in r or r.get("required")]
-        if not rows:
-            return None
-        if section == "defaults":
-            # Two of the five things this question asks. Saying which two is the point:
-            # a prefill that implied it had covered type, valid values and constraints
-            # would read as answered and be wrong about three of them.
-            named = ", ".join(
-                "%s (%s)" % (r["name"], "required" if r.get("required")
-                             else "default %r" % r["default"])
-                for r in rows)
-            return ("The repository sets these defaults and required flags: %s. Their "
-                    "types, legal values and constraints are not recorded mechanically "
-                    "and are not covered here." % named, rows)
-        named = ", ".join(sorted(r["name"] for r in rows))
-        return ("The repository reads these %s: %s." % (label, named), rows)
-    if source == "architecture" and section == "components":
-        rows = [c for c in (data or {}).get("components", ()) or () if c.get("name")]
-        if not rows:
-            return None
-        named = "; ".join("%s (%s)" % (c["name"], ", ".join(c.get("modules", ()) or ())
-                                       or "no module recorded") for c in rows)
-        return ("The architecture analysis groups the scanned modules into these "
-                "components: %s." % named, rows)
-    if source == "architecture" and section == "relationships":
-        rows = [r for r in (data or {}).get("relationships", ()) or ()
-                if r.get("from") and r.get("to")]
-        if not rows:
-            return None
-        by_id = {c.get("id"): c.get("name", c.get("id"))
-                 for c in (data or {}).get("components", ()) or ()}
-        named = "; ".join("%s %s %s" % (by_id.get(r["from"], r["from"]),
-                                        (r.get("kind") or "relates to").replace("_", " "),
-                                        by_id.get(r["to"], r["to"])) for r in rows)
-        # A relationship's id is the pair, not a row id, so the answer stands on the
-        # components it joins -- those are what validate_architecture checked.
-        endpoints = [c for c in (data or {}).get("components", ()) or ()
-                     if c.get("id") in {r["from"] for r in rows} | {r["to"] for r in rows}]
-        return ("The components cross these boundaries: %s." % named, rows + endpoints)
-    if source == "flows":
-        rows = [f for f in (data or {}).get("flows", ()) or () if f.get("steps")]
-        if not rows:
-            return None
-        parts = []
-        for flow in rows:
-            hops = " -> ".join([flow["steps"][0].get("from", "?")]
-                               + [s.get("to", "?") for s in flow["steps"]])
-            parts.append("%s: %s" % (flow.get("name") or flow.get("id"), hops))
-        return ("Each step below is a call verified at its call site. %s."
-                % "; ".join(parts), rows)
-    return None
-
-
-def prefill(answers, extra):
-    """Answer what the three analyses already settled, and leave the rest unknown.
-
-    The point is not to save typing. These answers carry the checks their analyses
-    passed -- a command matched character for character, a step read at its call site --
-    and an answer written freehand over the same material carries none of that. Every
-    other question stays `unknown` with its own text as the next check, because a
-    prefilled guess arrives looking like a decided one.
-    """
-    filled = []
-    # The same gate `build` applies, so prefill cannot write a `confirmed` answer that
-    # the builder would then refuse. A row that does not qualify is left for the model
-    # to answer itself rather than silently downgraded to `inferred`.
-    qualifies = confirmable((), None, extra)
-    for qid, source, section, label in PREFILL:
-        data = (extra or {}).get(source)
-        if not data or qid not in answers:
-            continue
-        produced = answer_from(source, section, label, data)
-        if not produced:
-            continue
-        text, rows = produced
-        evidence = cite(rows)
-        ids = [r["id"] for r in rows if r.get("id") in qualifies]
-        if not evidence or not ids:
-            # Without both it could only be written as `inferred`, and a reading the
-            # model did not make is not one it should be handed pre-written.
-            continue
-        answers[qid] = {"status": "confirmed", "text": text, "evidence": evidence,
-                        "verified_ids": sorted(set(ids))}
-        filled.append(qid)
-    return filled
-
-
-def scaffold(index, extra=None):
-    # The marker belongs to the renderer, which prepends it to every `unknown` answer.
-    # Carrying it here too rendered all 199 as "Unknown — evidence required. Unknown —
-    # evidence required Check next: ...".
-    # Every row starts unanswered and says so in the field a reader of the draft scans.
-    # The draft is a to-do list, not a filled form: the previous default paired a
-    # plausible-looking text with a `next_check` that restated the question, so a run
-    # that answered nothing produced 199 rows that each looked deliberate.
-    answers = {q["id"]: {"status": "unknown", "text": "TODO — not yet answered.",
-                         "next_check": "Look for this in the repository before "
-                                       "answering `unknown`.", "evidence": []}
+    answers = {q["id"]: {"basis": "unknown", "completeness": "unanswered",
+                         "content_review": "pending",
+                         "text": "TODO — not yet answered.",
+                         "next_check": "Read the source for this before answering "
+                                       "`unknown`.",
+                         "evidence": [], "verified_ids": [], "facets_missing": []}
                for page in GENERATED for q in page["questions"]}
-    prefilled = prefill(answers, extra)
+    facts = {}
+    for ref, source in confirmable(claims, analysis, extra).items():
+        facts.setdefault(source, []).append(ref)
     # `answers` are notes; `pages` is the document. Seeded empty rather than with a
     # section per question, because a section per question is the questionnaire this
     # step exists to stop producing -- the composing is the work, and a placeholder
     # would arrive looking like it was already done.
-    return {"manual_version": 1, "index_hash": index.get("index_hash"),
-            "prefilled": prefilled, "answers": answers,
+    return {"manual_version": MANUAL_VERSION, "index_hash": index.get("index_hash"),
+            "facts": {k: sorted(v) for k, v in sorted(facts.items())},
+            "answers": answers,
             "pages": {page["id"]: {"sections": []} for page in GENERATED}}
 
 
@@ -331,7 +166,20 @@ def holds_a_module(component):
     return bool(component.get("modules"))
 
 
-COMPOSABLE = ("confirmed", "inferred")
+# One `status` used to carry four independent things at once, and collapsing them is
+# what let a mechanical result stand in for a judgement: `confirmed` meant both "the
+# repository supports this" and "somebody accepted the wording", so passing a schema
+# check read as approval. They are separate now.
+#
+#   basis             how the answer is supported
+#   completeness      whether the facets the question asks for are answered
+#   content_review    whether a reviewer accepted this exact wording
+#   mechanical_checks whether the scripts that can run on it did, and passed
+BASIS = ("observed", "declared", "inferred", "unknown", "not_applicable")
+SUBSTANTIVE_BASIS = ("observed", "declared", "inferred")
+COMPLETENESS = ("unanswered", "partial", "complete")
+CONTENT_REVIEW = ("pending", "confirmed", "changes_requested", "unresolved")
+MECHANICAL_CHECKS = ("not_run", "passed", "failed")
 
 
 def read_answer(qid, answer, root, origins):
@@ -343,15 +191,38 @@ def read_answer(qid, answer, root, origins):
     """
     if not isinstance(answer, dict):
         raise ValueError("%s: answer must be an object" % qid)
-    status, text = answer.get("status"), answer.get("text")
-    if status not in ("confirmed", "inferred", "unknown", "not_applicable"):
-        raise ValueError("%s: invalid answer status" % qid)
+    if "status" in answer:
+        raise ValueError(
+            "%s: `status` is a manual_version 1 field. Version 2 splits it into `basis` "
+            "and `completeness`, with review recorded in prose-review.jsonl rather than "
+            "asserted here" % qid)
+    basis, text = answer.get("basis"), answer.get("text")
+    if basis not in BASIS:
+        raise ValueError("%s: basis must be one of %s" % (qid, ", ".join(BASIS)))
+    completeness = answer.get("completeness")
+    if completeness not in COMPLETENESS:
+        raise ValueError("%s: completeness must be one of %s"
+                         % (qid, ", ".join(COMPLETENESS)))
+    if basis in SUBSTANTIVE_BASIS and completeness == "unanswered":
+        raise ValueError("%s: an answer with a basis of %r has been answered; "
+                         "`unanswered` contradicts it" % (qid, basis))
+    if basis in ("unknown", "not_applicable") and completeness != "unanswered":
+        raise ValueError("%s: %r carries no answer, so completeness is `unanswered`"
+                         % (qid, basis))
+    # A writer may say a review has not happened. It may not say one has: the verdict
+    # lives in the review channel, bound to the revision it was made against, and
+    # trusting a self-set field here is exactly the promotion this split prevents.
+    review = answer.get("content_review", "pending")
+    if review != "pending":
+        raise ValueError(
+            "%s: content_review is %r, which only a bound review row may say. An answer "
+            "file records `pending`" % (qid, review))
     if not isinstance(text, str) or not text.strip() or text.strip() == "Answer:":
         raise ValueError("%s: answer text is required" % qid)
     evidence = answer.get("evidence", [])
     if not isinstance(evidence, list):
         raise ValueError("%s: evidence must be a list" % qid)
-    if status in COMPOSABLE and not evidence:
+    if basis in SUBSTANTIVE_BASIS and not evidence:
         raise ValueError("%s: substantive answers require repository evidence" % qid)
     for item in evidence:
         if not isinstance(item, dict):
@@ -376,18 +247,45 @@ def read_answer(qid, answer, root, origins):
         # provenance and carries none.
         raise ValueError("%s: cites %s, which nothing in this run verified"
                          % (qid, ", ".join(sorted(unknown_refs)[:3])))
-    if status == "confirmed" and not verified_ids:
+    # `observed` and `declared` assert the repository settles it, so they carry the same
+    # bar `confirmed` carried in v1: something a check could have failed. `inferred` is
+    # the model's reading and says so, and needs only its evidence locations.
+    if basis in ("observed", "declared") and not verified_ids:
         raise ValueError(
-            "%s: `confirmed` must name a verified_id -- a verified claim, a recorded "
-            "statement, or a validated procedure, flow or component. An answer the "
-            "pipeline never checked is `inferred`" % qid)
-    if status == "unknown" and not str(answer.get("next_check", "")).strip():
+            "%s: a basis of %r must name a verified_id -- a verified claim, a recorded "
+            "statement, or a validated procedure, flow, component or setting. An answer "
+            "the pipeline never checked has a basis of `inferred`" % (qid, basis))
+    if basis == "unknown" and not str(answer.get("next_check", "")).strip():
         raise ValueError("%s: unknown requires a concrete next_check" % qid)
-    if status == "not_applicable" and not str(answer.get("reviewer", "")).strip():
+    if basis == "not_applicable" and not str(answer.get("reviewer", "")).strip():
         raise ValueError("%s: not_applicable requires reviewer confirmation" % qid)
-    return {"id": qid, "status": status, "text": text, "evidence": evidence,
-            "verified_ids": verified_ids, "next_check": answer.get("next_check", ""),
+    # `partial` is a promise about what is missing, and an empty list makes it a label.
+    missing = answer.get("facets_missing", [])
+    if not isinstance(missing, list) or any(not isinstance(f, str) for f in missing):
+        raise ValueError("%s: facets_missing must be a list of strings" % qid)
+    if completeness == "partial" and not missing:
+        raise ValueError(
+            "%s: `partial` must name the facets still missing, or it is `complete` "
+            "wearing a hedge" % qid)
+    if completeness == "complete" and missing:
+        raise ValueError("%s: `complete` cannot also name missing facets: %s"
+                         % (qid, ", ".join(missing[:3])))
+    return {"id": qid, "basis": basis, "completeness": completeness,
+            "content_review": "pending", "text": text, "evidence": evidence,
+            "verified_ids": verified_ids, "facets_missing": missing,
+            "next_check": answer.get("next_check", ""),
             "reviewer": answer.get("reviewer", "")}
+
+
+def composable(note):
+    """Whether this note may be written into prose a reader sees.
+
+    Basis decides it, not review: a draft is rendered *so that* it can be reviewed, so
+    requiring review first would leave nothing to review. `unanswered` is excluded
+    because there is no answer to compose, whatever its basis.
+    """
+    return (note["basis"] in SUBSTANTIVE_BASIS
+            and note["completeness"] != "unanswered")
 
 
 def citation(item):
@@ -425,10 +323,11 @@ def read_section(page_id, order, section, notes, origins):
             raise ValueError("%s: names %r, which is not a question on this page"
                              % (where, qid))
         note = notes[qid]
-        if note["status"] not in COMPOSABLE:
+        if not composable(note):
             raise ValueError(
-                "%s: names %s, which is %s -- an unanswered or excluded question is "
-                "reported, never composed into prose" % (where, qid, note["status"]))
+                "%s: names %s, whose basis is %s and completeness %s -- an unanswered "
+                "or excluded question is reported, never composed into prose"
+                % (where, qid, note["basis"], note["completeness"]))
         cited_notes.append(note)
     allowed_evidence = {citation(e) for n in cited_notes for e in n["evidence"]}
     allowed_ids = {r for n in cited_notes for r in n["verified_ids"]}
@@ -447,13 +346,18 @@ def read_section(page_id, order, section, notes, origins):
     if not isinstance(verified_ids, list) or set(verified_ids) - allowed_ids:
         raise ValueError("%s: verified_ids must be a subset of what its answers name"
                          % where)
-    status = "inferred" if any(n["status"] == "inferred" for n in cited_notes) \
-        else "confirmed"
-    if status == "confirmed" and not verified_ids:
-        raise ValueError("%s: confirmed sections keep the verified_id their answers "
+    # One reading among the notes makes the section a reading: composition cannot
+    # launder an interpretation into an observation by surrounding it with facts.
+    basis = "inferred" if any(n["basis"] == "inferred" for n in cited_notes) \
+        else "observed"
+    # And one partial note leaves the section partial, for the same reason.
+    completeness = "partial" if any(n["completeness"] == "partial" for n in cited_notes) \
+        else "complete"
+    if basis == "observed" and not verified_ids:
+        raise ValueError("%s: an observed section keeps the verified_id its answers "
                          "stand on" % where)
     text = body.strip()
-    if status == "inferred":
+    if basis == "inferred":
         text = "Inferred: " + text
     citations = sorted({citation(e) for e in evidence})
     if citations:
@@ -463,7 +367,9 @@ def read_section(page_id, order, section, notes, origins):
         {"id": "heading:" + slug, "type": "subheading", "text": heading.strip()},
         {"id": "section:" + slug, "type": "prose", "text": text,
          "manual_block": True, "manual_answers": sorted(n["id"] for n in cited_notes),
-         "answer_status": status, "evidence": evidence,
+         "answer_basis": basis, "answer_completeness": completeness,
+         "content_review": "pending", "evidence": evidence,
+         "facets_missing": sorted({f for n in cited_notes for f in n["facets_missing"]}),
          "claim_refs": [r for r in verified_ids if origins.get(r) == "claim"],
          "analysis_refs": [r for r in verified_ids if origins.get(r) == "statement"],
          "verified_by": [{"id": r, "source": origins[r]} for r in sorted(verified_ids)]}]
@@ -476,10 +382,10 @@ def gaps_block(page_id, notes, composed):
     question is a note about the document, not a section of it. Collecting them under one
     marked block keeps the prose readable without letting a gap go unreported.
     """
-    unknown = [n for n in notes.values() if n["status"] == "unknown"]
-    excluded = [n for n in notes.values() if n["status"] == "not_applicable"]
+    unknown = [n for n in notes.values() if n["basis"] == "unknown"]
+    excluded = [n for n in notes.values() if n["basis"] == "not_applicable"]
     uncomposed = [n for n in notes.values()
-                  if n["status"] in COMPOSABLE and n["id"] not in composed]
+                  if composable(n) and n["id"] not in composed]
     if not (unknown or excluded or uncomposed):
         return None
     parts = []
@@ -497,7 +403,12 @@ def gaps_block(page_id, notes, composed):
 
 
 def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
-    if not isinstance(content, dict) or content.get("manual_version") != 1:
+    if isinstance(content, dict) and content.get("manual_version") == 1:
+        raise ValueError(
+            "manual-analysis.json is manual_version 1. Version 2 separates basis, "
+            "completeness and review, and a v1 `confirmed` cannot be carried across as "
+            "approval nobody gave. Migrate it rather than relabelling it")
+    if not isinstance(content, dict) or content.get("manual_version") != MANUAL_VERSION:
         raise ValueError("manual requires --manual-analysis with manual_version 1")
     if not index.get("index_hash") or content.get("index_hash") != index["index_hash"]:
         raise ValueError("manual analysis is missing its scan identity or is stale")
@@ -518,7 +429,7 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
     for order, spec in enumerate(GENERATED, 1):
         notes = {q["id"]: read_answer(q["id"], answers[q["id"]], root, origins)
                  for q in spec["questions"]}
-        unresolved.extend(n["id"] for n in notes.values() if n["status"] == "unknown")
+        unresolved.extend(n["id"] for n in notes.values() if n["basis"] == "unknown")
         blocks, composed = [], set()
         sections = (composed_pages.get(spec["id"]) or {}).get("sections") or []
         if not isinstance(sections, list):
@@ -529,7 +440,7 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
             composed.update(produced[1]["manual_answers"])
             cited.update(r["id"] for r in produced[1]["verified_by"])
         uncomposed.extend(n["id"] for n in notes.values()
-                          if n["status"] in COMPOSABLE and n["id"] not in composed)
+                          if composable(n) and n["id"] not in composed)
         gaps = gaps_block(spec["id"], notes, composed)
         if gaps:
             blocks.append(gaps)
@@ -606,7 +517,7 @@ def validate_document(doc):
                 continue
             if not str(block.get("text", "")).strip():
                 problems.append("manual contains an empty section")
-            if block.get("answer_status") not in COMPOSABLE:
+            if block.get("answer_basis") not in SUBSTANTIVE_BASIS:
                 problems.append("manual contains a section with an invalid status")
             if not block.get("evidence"):
                 problems.append("manual contains a section without evidence")
@@ -651,5 +562,6 @@ if __name__ == "__main__":
     with open(args.init, "x", encoding="utf-8") as handle:
         json.dump(draft, handle, indent=2, ensure_ascii=False)
         handle.write("\n")
-    print("wrote %s: %d question(s), %d prefilled from the analyses"
-          % (args.init, len(draft["answers"]), len(draft["prefilled"])))
+    facts = sum(len(v) for v in draft["facts"].values())
+    print("wrote %s: %d unanswered question(s); %d verified fact(s) available to cite"
+          % (args.init, len(draft["answers"]), facts))
