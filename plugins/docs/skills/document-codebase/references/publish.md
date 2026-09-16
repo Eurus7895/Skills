@@ -4,8 +4,10 @@ The last component, run twice: once to render, then again with `--review` once y
 it queued. Render outcomes and formats are in [`rendering.md`](rendering.md), the verb ranks and the review
 format in [`prose-rules.md`](prose-rules.md).
 
-**Checkpoint P4 needs no machinery**: a queued block nobody decided already holds the run at
-`review_required`.
+**P4 is an enforced checkpoint.** The first successful publish opens it only when `check_prose` queued
+content. The driver then refuses the reviewed publish until `decide --checkpoint P4` records the judgement.
+`review_required` remains the quality verdict for queued blocks without a review; P4 is what stops the
+workflow and puts those blocks in front of a reviewer.
 
 **Look at `docs/` before you run this.** This is the step hard rule 8 is about: the renderer writes each page
 with `"w"` and will replace a hand-written `index.rst` or a page of the same name without saying so. If
@@ -41,6 +43,7 @@ that does not carry it. Put each queued block next to its evidence and ask befor
 Write your verdicts to `.docs-build/prose-review.jsonl` and run the component again:
 
 ```bash
+python3 scripts/pipeline.py decide --checkpoint P4 --note "<what the review decided>"
 python3 scripts/pipeline.py publish --docs docs --review .docs-build/prose-review.jsonl
 ```
 

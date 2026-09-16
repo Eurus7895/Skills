@@ -47,10 +47,12 @@ as many answers as it takes.
    section may draw on several answers, and should where the answers overlap — three questions about
    configuration are usually one section, not three.
 6. Run `python3 scripts/pipeline.py document --preset manual`, then publish. The builder checks complete
-   question IDs, scan identity, repository-relative evidence line ranges, that every `confirmed` answer
-   names a `verified_ids` entry some validator already passed, and that every composed section stays inside
-   what its answers cite. It does not prove that a sentence is true or sufficient, so **every composed
-   section enters the prose review queue.**
+   question IDs, scan identity, repository-relative evidence line ranges, that every answer with an
+   `observed` or `declared` basis names a `verified_ids` entry some validator already passed, and that every
+   composed section stays inside
+   what its answers cite. It does not prove that a sentence is true or sufficient: deterministic prose
+   checks examine every composed section, and blocks that rest on readings or make stronger relationship
+   claims enter the model review queue.
 7. Review the rendered RST: does it read as a manual, and does each section still say what its answers said?
    Correct the notes or the composition in `manual-analysis.json` and rebuild; do not patch generated RST
    because the next build replaces it. Review verdicts apply to section blocks
@@ -84,13 +86,14 @@ as many answers as it takes.
 The excerpt shows one answer; a valid artifact contains every question. Use plain text in `text`, with
 paragraph breaks where helpful; the renderer owns RST/MyST syntax. Do not paste escaped RST directives.
 
-**`unknown` is for a question the repository does not answer, not for one nobody looked up.** This is the
-rule the other three hang off, and the one worth stating first, because the incentives run the other way:
-`confirmed` costs evidence and a verified id, `inferred` costs evidence, and `unknown` costs a sentence.
+**`basis: unknown` is for a question the repository does not answer, not for one nobody looked up.** This is
+the rule the other basis values hang off, and the one worth stating first, because the incentives run the
+other way: `observed` and `declared` cost evidence plus a verified id, `inferred` costs evidence, and
+`unknown` costs a sentence.
 A run that answers nothing is therefore cheapest, entirely honest question by question, and worthless — so
 the gate refuses it. **Under half the template answered is `answer_mode: unanswered`, which can never pass**,
 the same way `derived_only` can never pass on the analysis side. Before writing `unknown`, look: the README,
-the packaging manifest, the CI workflow, the configuration, the tests, the source. `inferred` is the status
+the packaging manifest, the CI workflow, the configuration, the tests, the source. `inferred` is the basis
 for what the repository shows without stating, and it is a real answer — reaching for `unknown` instead of
 `inferred` is the failure this rule is about.
 
@@ -130,8 +133,9 @@ The documentation-wide review records revision, audiences, sources, uncertainty 
 ```
 
 `heading` and `body` are yours. `answers` names the notes the section was written from, and everything else
-is derived from them — `evidence` and `verified_ids` default to the union of what those answers cite, and the
-status is the weaker of theirs.
+is derived from them — `evidence` and `verified_ids` default to the union of what those answers cite. The
+section keeps the weakest basis and completeness of the answers it uses; its content review remains pending
+until a reviewer decides that exact rendered wording.
 
 Five rules, all checked before `doc.json` is written:
 
@@ -139,12 +143,13 @@ Five rules, all checked before `doc.json` is written:
   the heading says what the section is about.
 - **A section names at least one answer, and only answers on its own page.** Prose attached to nothing is
   prose nothing checked.
-- **Only `confirmed` and `inferred` answers can be composed.** An `unknown` is a gap and an
-  `not_applicable` is an exclusion; both are reported on the page, neither is written up as content.
+- **Only substantive answers can be composed:** their basis is `observed`, `declared` or `inferred`, and
+  completeness is `partial` or `complete`. An `unknown` is a gap and a `not_applicable` is an exclusion;
+  both are reported on the page, neither is written up as content.
 - **Composition may narrow what an answer rests on, never add to it.** A section may cite fewer locations
   than its answers do — that is editing. Citing one they do not is provenance nothing checked, and is the
   failure this whole contract exists to prevent.
-- **One `inferred` answer makes the section `inferred`**, however many confirmed ones sit beside it.
+- **One `inferred` answer makes the section `inferred`**, however many observed or declared ones sit beside it.
   Surrounding a reading with facts does not turn it into one.
 
 **Every composable answer must reach some section on its page.** An answer the run paid for and then dropped
@@ -152,12 +157,13 @@ fails the quality gate rather than passing quietly — it is a defect in the com
 repository. Gaps are collected into one marked block per page instead of being scattered through the prose:
 what is not documented, what is not applicable, and what is answered but not yet written up.
 
-## `verified_ids` — what separates `confirmed` from `inferred`
+## `verified_ids` — what separates observed or declared support from inference
 
 **A citation that resolves is not a citation that supports.** `src/api.py:34-51` can exist, be in range, and
 have nothing to do with the sentence beside it; nothing downstream catches that, because the prose review
-queue is looking for verb inflation rather than fabricated support. So the status that asserts *the
-repository settles this* has to borrow its standing from a check that could have failed, and name it.
+queue is looking for verb inflation rather than fabricated support. So a basis that asserts *the repository
+settles this* has to borrow its standing from a check that could have failed, and name it. Content
+confirmation is separate and belongs to the review record.
 
 `verified_ids` accepts an id from any of five files, each already validated by the script that owns it:
 
@@ -179,47 +185,33 @@ This is also what puts the three analyses back to work in this preset. Without i
 manual run and rendered nowhere: the commands `validate_operations.py` quoted are spent, and the traced
 flows behind the data-flow diagram vouch for no sentence.
 
-## Prefill — the eight questions the analyses already answered
+## Facts — verified inputs available to the model
 
-Pass the analyses to the initializer and it answers the questions they settle, leaving the rest `unknown`:
+Pass the analyses to the initializer and it records eligible ids in `facts`, grouped by the validator or
+analysis that produced them. It leaves every answer unanswered:
 
 ```bash
 python3 scripts/document/manual.py --init .docs-build/manual-analysis.json \
   --index .docs-build/structure.json \
   --architecture .docs-build/architecture-analysis.json \
   --flows .docs-build/flow-analysis.json \
-  --operations .docs-build/operations-analysis.json
+  --operations .docs-build/operations-analysis.json \
+  --config .docs-build/config-analysis.json
 ```
 
-| Question | Filled from |
+| Facts group | Eligible inputs |
 | --- | --- |
-| `1.2.1` prerequisites | the declared `requirements` |
-| `1.2.3` how to install | the `install` and `build` procedures, with their commands |
-| `2.1.1` the major components | the components and the modules each holds |
-| `2.1.3` how components interact | the relationships, named by their endpoints |
-| `2.2.1` inputs, transformations and outputs in order | the traced flows, step by step |
-| `3.1.1` the primary entry point | the `run` procedures |
-| `4.2.3` which commands run the suite | the `test` procedures |
-| `4.5.4` which commands build a release | the `deploy` and `release` procedures |
-| `1.2.6` which environment variables are required | the extracted `env` settings |
-| `3.1.2` which arguments and options are required | the extracted `option` settings |
-| `3.2.1` the configuration schema's fields | every extracted setting |
-| `3.2.2` defaults and required status | the extracted defaults and `required` flags |
+| `claim` | verified structural or call claims |
+| `statement` | declared or observed module statements |
+| `component` | validated components that name modules |
+| `flow` | flows with verified call steps |
+| `procedure`, `requirement` | operations whose command or value was matched against source |
+| `setting` | extracted settings with source evidence |
 
-**The point is not saving typing.** A prefilled answer quotes its analysis rather than paraphrasing it, so a
-command arrives on the page exactly as `O006` matched it and a flow arrives as the steps `F006` verified.
-The same sentence written freehand over the same material carries none of that.
-
-The list is short on purpose. A mapping earns its place only where the analysis holds *the answer*, not
-something adjacent: `usage/configuration` asks for a configuration schema and the operations analysis has
-procedures for configuring, which is a different question, so it is not prefilled. A prefilled answer that
-is true and says nothing is the failure `A014` exists to catch, and it would arrive already marked
-`confirmed`.
-
-Nothing else is guessed. Every other question keeps its `unknown` status and its own text as the
-`next_check`, and a kind the analysis never recorded leaves its question open rather than growing an empty
-heading. Prefilled answers are ordinary answers: correct them, and they go through the prose review queue
-like the rest.
+The inventory is a reading list, never an answer. A setting id establishes its name and cited location; it
+does not establish what the setting means, its legal values or its precedence. The model reads the relevant
+source and writes every answer and section. Missing facts leave questions open rather than creating empty or
+generic prose.
 
 ## Diagrams
 

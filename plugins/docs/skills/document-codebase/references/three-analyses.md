@@ -1,8 +1,9 @@
 # The three analyses — what the repository is, how it runs, how it is operated
 
 **No command.** These three files are yours to write, between `check` and `document`, and they are what
-checkpoint P3 asks about. They are read by the `outside-in` preset and by `manual` — which prefills the
-eight questions they settle, and lets an answer cite them. Every schema and finding code is in
+checkpoint P3 asks about. They are read by the `outside-in` preset and by `manual`, whose initializer adds
+their eligible ids to the draft's `facts` inventory so the model can inspect and cite them while writing answers.
+They do not write or complete an answer. Every schema and finding code is in
 [`schemas.md`](schemas.md).
 
 **`architecture-analysis.json`** — components, the layers they sit in, what crosses between them, and which

@@ -16,13 +16,19 @@ their arguments never vary, and the failures that came of typing them out were s
 left off produced a document that read like an inventory, a `--flow-report` left off produced counts that
 included flows nothing had validated. Neither is reachable from here.
 
+These are phases of **one main workflow**: `survey` → `analyze` → `check` → model-written architecture,
+flow and operations synthesis → `document` → `publish`. Manual authoring is a sub-workflow inside
+`document`; claim repair and prose review are loops back into the same main workflow.
+
 **There is no command that runs the whole pipeline**, and that is the design rather than a gap. Four of the
 judgements the document rests on — the scope, the module roles, the architecture, the prose promotions — sit
 between components, and none of the validators downstream can tell a wrong role or a wrong boundary from a
 right one.
 
-**Three of them are enforced here, and the fourth elsewhere.** `survey` opens `P1` and `analyze` refuses while
-it is open; `analyze` opens `P2` and `check` refuses; `check` opens `P3` and `document` refuses. Each refusal
+**All four are enforced by the driver.** `survey` opens `P1` and `analyze` refuses while it is open;
+`analyze` opens `P2` and `check` refuses; `check` opens `P3` and `document` refuses; the first successful
+`publish` opens `P4` when prose is queued, and the reviewed `publish` is held until that checkpoint is
+decided. Each refusal
 prints what to put in front of the person, what to ask them, and the command that records the answer:
 
 | | Opened by | Blocks | Asks |
@@ -30,12 +36,15 @@ prints what to put in front of the person, what to ask them, and the command tha
 | `P1` | `survey` | `analyze` and everything after it | is this the right scope to spend the budget on |
 | `P2` | `analyze` | `check` and everything after it | do these roles match what the repository is |
 | `P3` | `check` | `document` and everything after it | is this the architecture, and are the boundaries right |
+| `P4` | `publish`, only when prose is queued | the reviewed `publish` | are these the intended readings |
 
 **An open checkpoint holds every later component, not only the next one.** A build directory that already
 holds an earlier run's artifacts is why: blocking `analyze` alone would leave `document` and `publish` free to
 run over what is on disk and produce a finished report with the scope decision still outstanding.
 
-`P4`, the prose queue, needs nothing added: an undecided block already holds the run at `review_required`.
+P4 is conditional: a publish that queues nothing does not open it. When it does open, the driver records the
+question and blocks the second publish. The quality gate's `review_required` result is the verdict; the
+checkpoint is the control-flow stop that makes the review happen before that second run.
 
 They are enforced because they used to be prose, and prose was the only rule in this pipeline that failed
 silently. Everything else here refuses — `analyze` will not overwrite hand-written claims, `assemble` will not
@@ -62,7 +71,7 @@ whether Ruff runs — it is a flag with a default, not a rule hidden in the driv
 
 | Component | Stages, in order |
 | --- | --- |
-| `survey` | `scan_repo` → `validate_index` → `annotate_import_usage` → `select_units` |
+| `survey` | `scan_repo` → `validate_index` → optional `annotate_import_usage` → `select_units` → `extract_config` → `validate_config` |
 | `analyze` | `derive_claims` → `query_graph --packet`, once per unit |
 | `check` | `validate_analysis` → `assemble` → `verify_doc` |
 | `document` | `validate_architecture` → `validate_flows` → `validate_operations` → `build_class_graph` → `build_diagrams` → `validate_diagrams` → `build_flow_diagrams` → `validate_flow_diagrams` → `build_document_model` |
@@ -105,7 +114,7 @@ the prose check and the gate. A run without them is a visibly thinner document, 
 | `--top` | `survey` | `25` | the fan-in cutoff for `units.txt` |
 | `--policy` | `survey` | `optional` | `disabled` drops the Ruff stage entirely |
 | `--force` | `analyze` | off | re-derive `claims.jsonl` over hand-written claims |
-| `--preset` | `document` | `auto` | `auto` picks `outside-in` when **any** of the architecture, flow or operations analyses exists, else `onboarding` |
+| `--preset` | `document` | `auto` | `auto` selects `manual`; name another preset explicitly for a graph-driven report |
 | `--detail` | `document` | `public` | class-diagram detail level |
 | `--format` | `publish` | `rst` | `rst` or `myst` |
 | `--review` | `publish` | — | your `prose-review.jsonl` verdicts |
