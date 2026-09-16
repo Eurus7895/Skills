@@ -51,6 +51,8 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -97,19 +99,54 @@ class Stage(object):
         return [path for path in self.needs if not os.path.exists(path)]
 
 
-def run(stages, dry_run=False):
+def utc_now():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def append_timing(path, record):
+    """Append one measurement without making telemetry a pipeline dependency."""
+    if not path:
+        return
+    try:
+        directory = os.path.dirname(os.path.abspath(path))
+        if directory and not os.path.isdir(directory):
+            os.makedirs(directory, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, sort_keys=True) + "\n")
+    except OSError as exc:
+        sys.stderr.write("WARN  could not write timing record: %s\n" % exc)
+
+
+def run(stages, dry_run=False, timings=None, invocation_id=None):
     """Run each stage in order. Returns the exit code the component should report."""
     worst = 0
     for position, stage in enumerate(stages):
+        started_at = utc_now()
+        started = time.perf_counter()
         absent = stage.missing()
         if absent:
             note = stage.skip_note or "input not written: %s" % ", ".join(absent)
             print("\n-- skip %s (%s)" % (stage.name, note))
+            append_timing(timings, {
+                "schema_version": 1, "record_type": "stage",
+                "invocation_id": invocation_id, "component": stage.component,
+                "stage": stage.name, "status": "skipped", "exit_code": None,
+                "started_at": started_at, "finished_at": utc_now(),
+                "duration_seconds": round(time.perf_counter() - started, 6),
+                "note": note,
+            })
             continue
         command = [sys.executable, stage.path] + stage.args
         print("\n-- %s%s" % (stage.name, " > %s" % stage.capture if stage.capture else ""))
         if dry_run:
             print(" ".join(command))
+            append_timing(timings, {
+                "schema_version": 1, "record_type": "stage",
+                "invocation_id": invocation_id, "component": stage.component,
+                "stage": stage.name, "status": "dry_run", "exit_code": None,
+                "started_at": started_at, "finished_at": utc_now(),
+                "duration_seconds": round(time.perf_counter() - started, 6),
+            })
             continue
         if stage.capture:
             directory = os.path.dirname(stage.capture)
@@ -119,6 +156,17 @@ def run(stages, dry_run=False):
                 code = subprocess.call(command, stdout=fh)
         else:
             code = subprocess.call(command)
+        status = "passed" if code == 0 else (
+            "tolerated" if code in stage.tolerate else "failed")
+        duration = time.perf_counter() - started
+        print("-- timing %s %.3fs" % (stage.name, duration))
+        append_timing(timings, {
+            "schema_version": 1, "record_type": "stage",
+            "invocation_id": invocation_id, "component": stage.component,
+            "stage": stage.name, "status": status, "exit_code": code,
+            "started_at": started_at, "finished_at": utc_now(),
+            "duration_seconds": round(duration, 6),
+        })
         if code == 0:
             continue
         if code in stage.tolerate:
@@ -133,6 +181,50 @@ def run(stages, dry_run=False):
                             if remaining else "it was the last stage of this component."))
         return code
     return worst
+
+
+def measure(args):
+    """Start or stop a model-driven step that runs between component commands."""
+    active_path = os.path.join(args.build, "timing-active.json")
+    timings = os.path.join(args.build, "timings.jsonl")
+    if not (args.step or "").strip():
+        return fail("measure requires --step")
+    step = args.step.strip()
+    if args.state == "start":
+        if os.path.isfile(active_path):
+            try:
+                with open(active_path, encoding="utf-8") as fh:
+                    active = json.load(fh)
+            except (OSError, ValueError):
+                active = {}
+            return fail("%s is already being measured; stop it before starting %s"
+                        % (active.get("step", "another step"), step), 1)
+        record = {"schema_version": 1, "step": step, "started_at": utc_now(),
+                  "started_epoch": time.time(), "kind": "model"}
+        with open(active_path, "w", encoding="utf-8") as fh:
+            json.dump(record, fh, indent=1, sort_keys=True)
+            fh.write("\n")
+        print("timing started: %s" % step)
+        return 0
+    if not os.path.isfile(active_path):
+        return fail("no model step is being measured", 1)
+    try:
+        with open(active_path, encoding="utf-8") as fh:
+            active = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return fail("cannot read %s: %s" % (active_path, exc))
+    if active.get("step") != step:
+        return fail("%s is being measured, not %s" % (active.get("step"), step), 1)
+    finished = time.time()
+    append_timing(timings, {
+        "schema_version": 1, "record_type": "model_step", "step": step,
+        "status": args.status, "started_at": active.get("started_at"),
+        "finished_at": utc_now(),
+        "duration_seconds": round(max(0.0, finished - active["started_epoch"]), 6),
+    })
+    os.remove(active_path)
+    print("timing stopped: %s (%s)" % (step, args.status))
+    return 0
 
 
 DERIVED_KINDS = {"defines", "imports", "inherits", "contains"}
@@ -545,11 +637,17 @@ def blocking_checkpoint(build, component, digest):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("component", choices=ORDER + ["decide"], metavar="COMPONENT",
-                        help="one of: %s, or decide" % ", ".join(ORDER))
+    parser.add_argument("component", choices=ORDER + ["decide", "measure"],
+                        metavar="COMPONENT",
+                        help="one of: %s, decide, or measure" % ", ".join(ORDER))
     parser.add_argument("--checkpoint", help="decide: which checkpoint (P1, P2, P3)")
     parser.add_argument("--note", help="decide: what was decided, and by whom -- this is "
                                        "what the closing report carries")
+    parser.add_argument("--step", help="measure: model-driven step name")
+    parser.add_argument("--state", choices=("start", "stop"), default="start",
+                        help="measure: start or stop the named step")
+    parser.add_argument("--status", choices=("completed", "failed", "cancelled"),
+                        default="completed", help="measure --state stop: outcome")
     parser.add_argument("--root", default=".", help="the repository being documented")
     parser.add_argument("--build", default=".docs-build", help="where intermediates go")
     parser.add_argument("--docs", default="docs", help="where the document is written")
@@ -582,6 +680,12 @@ def main():
         return fail("no such review file: %s" % args.review)
     build_dir.ensure(args.build)
     digest = index_hash_of(args.build)
+
+    if args.component == "measure":
+        if args.dry_run:
+            print("would %s timing for %s" % (args.state, args.step or "<missing step>"))
+            return 0
+        return measure(args)
 
     if args.component == "decide":
         known = {c["id"]: c for c in CHECKPOINTS}
@@ -653,14 +757,35 @@ def main():
         if os.path.isdir(packets):
             shutil.rmtree(packets)
 
+    component_started_at = utc_now()
+    component_started = time.perf_counter()
+    invocation_id = "%s-%d" % (args.component, time.time_ns())
     stages = COMPONENTS[args.component](args)
     if isinstance(stages, int):
         # A component may end the run before it has any stage to run: `document` does it
         # when a manual has no answer artifact yet, which is a verdict about the run
         # rather than a stage that failed. The code is the exit code.
+        append_timing(os.path.join(args.build, "timings.jsonl"), {
+            "schema_version": 1, "record_type": "component",
+            "invocation_id": invocation_id, "component": args.component,
+            "status": "passed" if stages == 0 else "failed", "exit_code": stages,
+            "started_at": component_started_at, "finished_at": utc_now(),
+            "duration_seconds": round(time.perf_counter() - component_started, 6),
+        })
         return stages
     print("== %s: %d stage(s)" % (args.component, len(stages)))
-    code = run(stages, dry_run=args.dry_run)
+    timings = None if args.dry_run else os.path.join(args.build, "timings.jsonl")
+    code = run(stages, dry_run=args.dry_run, timings=timings,
+               invocation_id=invocation_id)
+    if not args.dry_run:
+        append_timing(timings, {
+            "schema_version": 1, "record_type": "component",
+            "invocation_id": invocation_id, "component": args.component,
+            "status": "passed" if code == 0 else "failed", "exit_code": code,
+            "started_at": component_started_at, "finished_at": utc_now(),
+            "duration_seconds": round(time.perf_counter() - component_started, 6),
+            "stage_count": len(stages),
+        })
     print("\n== %s %s" % (args.component, "ok" if code == 0 else "exited %d" % code))
 
     # Opened only on success, and only by the component that produces the material the

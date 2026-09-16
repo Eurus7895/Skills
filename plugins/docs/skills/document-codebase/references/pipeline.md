@@ -122,6 +122,25 @@ the prose check and the gate. A run without them is a visibly thinner document, 
 | `--dry-run` | all | off | print the commands, run nothing (and neither open nor consult a checkpoint) |
 | `--checkpoint`, `--note` | `decide` | — | which judgement is being recorded, and what was decided |
 
+## Timing the workflow
+
+Every non-dry-run component appends one record per script stage and one component summary to
+`.docs-build/timings.jsonl`. Records include timestamps, elapsed seconds, status and exit code, so a slow
+`document` or `publish` can be split into the exact script responsible instead of inferred from object counts.
+
+Model work happens between component commands and cannot be observed by a child script. Bracket it explicitly:
+
+```bash
+python3 scripts/pipeline.py measure --step source_reading --state start
+# read source and write the analysis
+python3 scripts/pipeline.py measure --step source_reading --state stop
+```
+
+Use the same pattern for `architecture_synthesis`, `manual_authoring`, `prose_rewrite` and `model_review`.
+Stopping may add `--status failed` or `--status cancelled`. Only one model step may be active, preventing two
+overlapping measurements from being reported as separate elapsed time. Do not infer model duration from the
+gap between commands; that gap may include a checkpoint or time waiting for the user.
+
 ## Why `analyze` can refuse to run
 
 `derive_claims` writes `claims.jsonl` from the index, and a `calls` claim is appended to that same file by

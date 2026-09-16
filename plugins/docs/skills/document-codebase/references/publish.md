@@ -37,8 +37,9 @@ still says what it said. **A block may not use a stronger relationship verb than
 import proves a reference, so it may not be rendered *depends on* — and **a reading must stay a reading**.
 Read every `P003` and `P004`: they are promotions, not style.
 
-**Pause here — P4.** A verdict of `ok` is you telling the reader the stronger sentence is true, on evidence
-that does not carry it. Put each queued block next to its evidence and ask before writing the file.
+**Pause here — P4.** A verdict of `confirmed` accepts the exact wording and evidence identified by its
+hashes. Put each queued block next to its evidence and ask before writing the file. A later edit makes that
+review stale and requires another model review; a block id alone never approves changed content.
 
 Write your verdicts to `.docs-build/prose-review.jsonl` and run the component again:
 

@@ -55,6 +55,8 @@ import os
 import re
 import sys
 
+import review_records
+
 SUPPORTED_FORMAT = {1, 2}
 
 PASSED, REVIEW_REQUIRED, FAILED = "passed", "review_required", "failed"
@@ -91,9 +93,6 @@ CLAIM_CEILING = {
 
 # A statement recorded as a reading, rendered as though it were a fact, is the second
 # failure this file exists for. One of these has to survive the rewrite.
-# The only two a review row may carry. Anything else is an unreviewed block.
-VERDICTS = ("ok", "overstated")
-
 HEDGES = ("inferred", "not observed", "not recorded", "appears to", "seems to",
           "probably", "may ", "might ", "nobody answered", "does not say",
           "no reason", "unknown", "cannot be", "could not be")
@@ -309,19 +308,40 @@ def load_review(path):
         return None, None
     if not os.path.isfile(path):
         return None, "no such review file: %s" % path
-    verdicts = {}
+    verdicts, review_ids = {}, set()
     with open(path, encoding="utf-8") as fh:
-        for line in fh:
+        for number, line in enumerate(fh, 1):
             line = line.strip()
             if not line:
                 continue
             try:
                 row = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(row, dict) and row.get("block"):
-                verdicts[row["block"]] = row
+            except ValueError as exc:
+                return None, "%s:%d is not JSON: %s" % (path, number, exc)
+            problem = review_records.malformed(row)
+            if problem:
+                return None, "%s:%d: %s" % (path, number, problem)
+            if row["review_id"] in review_ids:
+                return None, "%s:%d duplicates review_id %s" % (
+                    path, number, row["review_id"])
+            if row["target_id"] in verdicts:
+                return None, "%s:%d supplies a second verdict for %s" % (
+                    path, number, row["target_id"])
+            review_ids.add(row["review_id"])
+            verdicts[row["target_id"]] = row
     return verdicts, None
+
+
+def review_inputs(doc, block):
+    """Hashes that bind a review to the current section and its source model."""
+    current = {"content_hash": review_records.content_hash(block)}
+    if doc.get("index_hash"):
+        current["index_hash"] = doc["index_hash"]
+    if doc.get("scope_hash"):
+        current["scope_hash"] = doc["scope_hash"]
+    if doc.get("statements") is not None:
+        current["analysis_hash"] = review_records.digest_of(doc.get("statements"))
+    return current
 
 
 def main():
@@ -334,8 +354,8 @@ def main():
                                         "outcome cannot be rendered as observed")
     parser.add_argument("--operations", help="operations-analysis.json, for the same "
                                              "reason")
-    parser.add_argument("--review", help="JSONL of model-pass verdicts: "
-                                         '{"block": "...", "verdict": "ok"|"overstated"}')
+    parser.add_argument("--review", help="review_version 2 JSONL bound to target and "
+                                         "content/input hashes")
     parser.add_argument("--require-review", action="store_true",
                         help="a queued block with no verdict leaves the run "
                              "review_required rather than passed")
@@ -368,24 +388,29 @@ def main():
                                            sources.get("operations")))
     checker.check(doc)
 
-    unreviewed = []
+    blocks = {block.get("id"): block for page in doc.get("pages", ())
+              for block in page.get("blocks", ())}
+    unreviewed, stale = [], []
     if verdicts is not None:
         for entry in checker.queue:
-            verdict = verdicts.get(entry["block"])
+            block_id = entry["block"]
+            verdict = verdicts.get(block_id)
             decision = verdict.get("verdict") if verdict else None
-            if decision not in VERDICTS:
-                # A typo is not a decision. Counting one as reviewed is how a block gets
-                # past the gate having been looked at by nobody, which is the single
-                # thing --require-review exists to prevent.
+            current = review_inputs(doc, blocks[block_id])
+            moved = review_records.staleness(verdict, current) if verdict else []
+            if verdict is None or moved or decision == "unresolved":
                 unreviewed.append(entry["block"])
-                if verdict is not None:
-                    checker.finding("P006", "review verdict %r is not one of %s"
-                                    % (decision, ", ".join(sorted(VERDICTS))),
-                                    entry["block"], severity="advisory")
-            elif decision == "overstated":
-                checker.finding("P007", "the model pass found this says more than its "
-                                "source: %s" % verdict.get("note", "no note given"),
-                                entry["block"])
+                if moved:
+                    stale.append(block_id)
+                    checker.finding("P008", "review is stale because %s changed"
+                                    % ", ".join(moved), block_id,
+                                    severity="advisory")
+            elif decision == "changes_requested":
+                open_findings = [f for f in verdict.get("findings", ())
+                                 if f.get("state", "open") == "open"]
+                detail = "; ".join(f["why"] for f in open_findings[:3]) \
+                    or "the reviewer requested changes"
+                checker.finding("P007", detail, block_id)
         for block_id in sorted(verdicts):
             if not any(e["block"] == block_id for e in checker.queue):
                 checker.finding("P006", "a verdict was supplied for a block that is not "
@@ -404,20 +429,28 @@ def main():
     else:
         status = PASSED
 
+    review_queue = []
+    for entry in checker.queue:
+        current = review_inputs(doc, blocks[entry["block"]])
+        review_queue.append(dict(
+            entry, target_id=entry["block"],
+            draft_revision=doc.get("source_revision") or doc.get("index_hash") or "unknown",
+            **current))
     report = {
         "schema_version": 1,
         "status": status,
         "passed": status == PASSED,
         "findings": checker.findings,
-        "review_queue": checker.queue,
+        "review_queue": review_queue,
         "unreviewed": sorted(unreviewed),
+        "stale_reviews": sorted(stale),
         "coverage": {
             "blocks_checked": sum(1 for page in doc.get("pages", ())
                                   for b in page.get("blocks", ())
                                   if b.get("type") in ("prose", "table")),
             "blocks_uncited": sum(1 for f in checker.findings if f["code"] == "P005"),
             "queued": len(checker.queue),
-            "reviewed": 0 if verdicts is None else len(verdicts),
+            "reviewed": 0 if verdicts is None else len(checker.queue) - len(unreviewed),
         },
     }
     text = json.dumps(report, indent=2, sort_keys=True)

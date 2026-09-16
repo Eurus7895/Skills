@@ -123,7 +123,8 @@ class ManualTests(unittest.TestCase):
         doc = self.build()
         block = next(b for p in doc['pages'] for b in p['blocks'] if b.get('manual_block'))
         self.assertEqual(block['answer_basis'], 'inferred')
-        self.assertTrue(block['text'].startswith('Inferred: '))
+        self.assertFalse(block['text'].startswith('Inferred: '))
+        self.assertIn('Source code:', block['text'])
 
     def test_an_answered_question_no_section_uses_fails_the_gate(self):
         """Content the run paid for and then dropped is a defect, not a gap."""
@@ -167,7 +168,8 @@ class ManualTests(unittest.TestCase):
         self.compose('getting_started/introduction', 'Purpose', '1.1.1')
         doc = self.build()
         block = next(b for p in doc['pages'] for b in p['blocks'] if b.get('manual_block'))
-        self.assertTrue(block['text'].startswith('Inferred: '))
+        self.assertEqual(block['answer_basis'], 'inferred')
+        self.assertFalse(block['text'].startswith('Inferred: '))
 
     def test_unverified_ids_are_refused_not_downgraded(self):
         """A claim that did not verify is an unchecked citation, not a weaker one."""

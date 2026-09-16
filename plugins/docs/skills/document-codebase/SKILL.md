@@ -89,7 +89,7 @@ is meant to be committed.
 
 Everything except the finished document is written to **`.docs-build/`** in the working directory:
 `structure.json`, the claims, fragments and analyses with their verified counterparts, `findings.jsonl`,
-`class-graph.json` and `doc.json`. Say so when you finish, and offer to delete it; nothing in there is meant to
+`class-graph.json`, `doc.json` and `timings.jsonl`. Say so when you finish, and offer to delete it; nothing in there is meant to
 be committed. The rendered diagrams are the exception — they belong beside the document, in `docs/_diagrams/`.
 
 ## Where the run pauses for the user
@@ -152,6 +152,12 @@ output and what to decide from it.
 | — | no command | `architecture-analysis.json`, `flow-analysis.json`, `operations-analysis.json` | [references/three-analyses.md](references/three-analyses.md) |
 | `document` | `pipeline.py document --docs docs` | — fix what its findings name | [references/document.md](references/document.md) |
 | `publish` | `pipeline.py publish --docs docs` | `prose-review.jsonl`, then rerun with `--review` | [references/publish.md](references/publish.md) |
+
+The driver times every script stage automatically. Bracket work done by the model with
+`pipeline.py measure --step <name> --state start|stop`; use `source_reading`, `architecture_synthesis`,
+`manual_authoring`, `prose_rewrite` and `model_review` as the stable step names. This is the only honest way
+to compare model work with `document` and `publish`: elapsed time between commands may include a checkpoint
+or time waiting for the user. Details and the record format are in [references/pipeline.md](references/pipeline.md).
 
 A component stops at the first stage that fails and names it, and exit codes pass through unchanged: `0` fine,
 `1` a policy the stage enforces was not met, `2` bad input or a missing dependency, `3` internal. **`1` is a

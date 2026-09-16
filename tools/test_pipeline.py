@@ -215,6 +215,24 @@ def driver_tests(tmp, root):
     check("survey writes the index and the scope",
           os.path.exists(os.path.join(build, "structure.json"))
           and os.path.exists(os.path.join(build, "units.txt")))
+    timing_path = os.path.join(build, "timings.jsonl")
+    timings = [json.loads(line) for line in open(timing_path, encoding="utf-8")]
+    check("the driver records stage and component durations",
+          any(r.get("record_type") == "stage" and r.get("stage") == "survey/scan_repo"
+              and r.get("duration_seconds", -1) >= 0 for r in timings)
+          and any(r.get("record_type") == "component" and r.get("component") == "survey"
+                  for r in timings), repr(timings[-3:]))
+
+    code, text = run("pipeline.py", "measure", "--root", root, "--build", build,
+                     "--step", "source_reading", "--state", "start")
+    check("a model-driven step can start explicit timing", code == 0, text)
+    code, text = run("pipeline.py", "measure", "--root", root, "--build", build,
+                     "--step", "source_reading", "--state", "stop")
+    timings = [json.loads(line) for line in open(timing_path, encoding="utf-8")]
+    check("and stopping it writes a model_step duration",
+          code == 0 and any(r.get("record_type") == "model_step"
+                            and r.get("step") == "source_reading"
+                            and r.get("duration_seconds", -1) >= 0 for r in timings), text)
 
     # The scope checkpoint. Every other invariant in this pipeline is a script that
     # refuses; this one was a paragraph in SKILL.md, so a run that read the units and

@@ -386,12 +386,12 @@ def read_section(page_id, order, section, notes, origins):
     if basis == "observed" and not verified_ids:
         raise ValueError("%s: an observed section keeps the verified_id its answers "
                          "stand on" % where)
+    # The body is authored for the reader. Basis and provenance stay structured so the
+    # checker can enforce them without leaking pipeline labels into the manual.
     text = body.strip()
-    if basis == "inferred":
-        text = "Inferred: " + text
     citations = sorted({citation(e) for e in evidence})
     if citations:
-        text += "\n\nEvidence: " + "; ".join(citations)
+        text += "\n\nSource code: " + "; ".join(citations)
     slug = "%s:%d" % (page_id, order)
     return [
         {"id": "heading:" + slug, "type": "subheading", "text": heading.strip()},
@@ -405,7 +405,7 @@ def read_section(page_id, order, section, notes, origins):
          "verified_by": [{"id": r, "source": origins[r]} for r in sorted(verified_ids)]}]
 
 
-def gaps_block(page_id, notes, composed):
+def gaps_blocks(page_id, notes, composed):
     """What the page could not say, in one place rather than scattered through it.
 
     A reader is owed the absences, and the run is held back by them -- but an unanswered
@@ -417,19 +417,21 @@ def gaps_block(page_id, notes, composed):
     uncomposed = [n for n in notes.values()
                   if composable(n) and n["id"] not in composed]
     if not (unknown or excluded or uncomposed):
-        return None
+        return []
     parts = []
     if unknown:
-        parts.append("Not documented: %d question(s) the repository does not answer "
-                     "yet (%s)." % (len(unknown), ", ".join(sorted(n["id"] for n in unknown))))
+        parts.append("The available repository evidence does not yet establish %d "
+                     "detail(s) covered by this page." % len(unknown))
     if excluded:
-        parts.append("Not applicable here: %s."
-                     % ", ".join(sorted(n["id"] for n in excluded)))
+        parts.append("%d template item(s) do not apply to this repository." % len(excluded))
     if uncomposed:
-        parts.append("Answered but not yet written into this page: %s."
-                     % ", ".join(sorted(n["id"] for n in uncomposed)))
-    return {"id": "gaps:" + page_id, "type": "prose", "text": " ".join(parts),
-            "absence": True}
+        parts.append("%d answered detail(s) still need to be incorporated into the "
+                     "reader-facing explanation." % len(uncomposed))
+    return [
+        {"id": "heading:gaps:" + page_id, "type": "subheading", "text": "Limitations"},
+        {"id": "gaps:" + page_id, "type": "prose", "text": " ".join(parts),
+         "absence": True},
+    ]
 
 
 def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
@@ -487,9 +489,7 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
             cited.update(r["id"] for r in produced[1]["verified_by"])
         uncomposed.extend(n["id"] for n in notes.values()
                           if composable(n) and n["id"] not in composed)
-        gaps = gaps_block(spec["id"], notes, composed)
-        if gaps:
-            blocks.append(gaps)
+        blocks.extend(gaps_blocks(spec["id"], notes, composed))
         if not blocks:
             blocks.append({"id": "empty:" + spec["id"], "type": "prose", "absence": True,
                            "text": "Nothing is recorded for this page yet."})

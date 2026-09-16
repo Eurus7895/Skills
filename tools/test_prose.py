@@ -23,7 +23,10 @@ import subprocess
 import sys
 import tempfile
 
-from component_scripts import script
+from component_scripts import component_paths, script
+
+sys.path[:0] = component_paths()
+import review_records
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -242,6 +245,10 @@ def main():
         check("a block resting on a reading is queued for the model pass",
               [q["block"] for q in report["review_queue"]] == ["block:c"],
               repr(report["review_queue"]))
+        check("the queue carries hashes needed to write a fresh v2 review",
+              report["review_queue"][0].get("content_hash", "").startswith("sha256:")
+              and report["review_queue"][0].get("analysis_hash", "").startswith("sha256:"),
+              repr(report["review_queue"]))
 
         code, report = check_prose(queued, "queued2.json", "--require-review")
         check("and with no verdicts the run is review_required, not passed",
@@ -251,37 +258,51 @@ def main():
               report["unreviewed"] == ["block:c"], repr(report.get("unreviewed")))
 
         review = os.path.join(tmp, "review.jsonl")
+        queued_block = queued["pages"][0]["blocks"][0]
+        def review_row(verdict="confirmed", **extra):
+            row = {"review_version": 2, "review_id": "rev-1",
+                   "target_id": "block:c", "draft_revision": "rev-0001",
+                   "verdict": verdict, "review_mode": "self_review",
+                   "reviewer": "test-reviewer",
+                   "content_hash": review_records.content_hash(queued_block),
+                   "analysis_hash": review_records.digest_of(queued["statements"]),
+                   "findings": []}
+            row.update(extra)
+            return row
         with open(review, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps({"block": "block:c", "verdict": "ok"}) + "\n")
+            fh.write(json.dumps(review_row()) + "\n")
         code, report = check_prose(queued, "queued3.json", "--require-review",
                                    "--review", review)
-        check("a verdict of ok lets it pass",
+        check("a fresh confirmed verdict lets it pass",
               code == 0 and report["status"] == "passed", repr(report)[:200])
 
         with open(review, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps({"block": "block:c", "verdict": "overstated",
-                                 "note": "the reading became the reason"}) + "\n")
+            fh.write(json.dumps(review_row(
+                "changes_requested", findings=[{
+                    "finding_id": "f1", "severity": "major", "location": "block:c",
+                    "why": "the reading became the reason", "requested": "restore the hedge",
+                    "state": "open"}])) + "\n")
         code, report = check_prose(queued, "queued4.json", "--require-review",
                                    "--review", review)
-        check("and a verdict of overstated is a finding",
+        check("and changes_requested is a finding",
               "P007" in codes(report) and report["status"] == "failed",
               repr(codes(report)))
 
-        # A typo is not a decision. Treating one as reviewed is exactly how a block
-        # reaches a reader having been looked at by nobody.
+        # A malformed record is refused rather than silently treated as missing.
         with open(review, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps({"block": "block:c", "verdict": "okay"}) + "\n")
+            fh.write(json.dumps(review_row("okay")) + "\n")
         code, report = check_prose(queued, "queued5.json", "--require-review",
                                    "--review", review)
-        check("a verdict outside the schema leaves the block unreviewed",
+        check("a verdict outside review v2 is an input error",
+              code == 2 and "not one of" in report["_output"], repr(report))
+
+        with open(review, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(review_row(content_hash="sha256:stale")) + "\n")
+        code, report = check_prose(queued, "queued6.json", "--require-review",
+                                   "--review", review)
+        check("a stale approval leaves the current block unreviewed",
               code == 1 and report["status"] == "review_required"
-              and report["unreviewed"] == ["block:c"],
-              "%s %r" % (report["status"], report.get("unreviewed")))
-        # Advisory, not an error: the run is already held at review_required, and a
-        # typo in a review row is not a defect in the document that was checked.
-        check("and the bad value is named",
-              any(f["code"] == "P006" and "okay" in f["message"]
-                  for f in report["findings"]), repr(report["findings"]))
+              and report["stale_reviews"] == ["block:c"], repr(report))
 
         code, out, err = run("check_prose.py",
                              write_json(os.path.join(tmp, "typo.json"), honest),
@@ -317,7 +338,7 @@ def main():
         check("and reports review_required as itself, never as partial or passed",
               report["status"] == "review_required", repr(report.get("status")))
         check("with the reason naming what was not decided",
-              any("did not decide" in r for r in report["reasons"]),
+              any("no fresh confirmed model review" in r for r in report["reasons"]),
               repr(report.get("reasons")))
 
         # --- Same input, same report.

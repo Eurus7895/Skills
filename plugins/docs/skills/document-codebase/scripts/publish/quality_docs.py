@@ -772,15 +772,20 @@ def main():
                            "findings": len([f for f in prose.get("findings", ())
                                             if f.get("severity") != "advisory"]),
                            "queued": (prose.get("coverage") or {}).get("queued"),
-                           "unreviewed": len(prose.get("unreviewed", ()))}
+                           "unreviewed": len(prose.get("unreviewed", ())),
+                           "stale_reviews": len(prose.get("stale_reviews", ()))}
         if prose.get("status") == FAILED:
             status = FAILED
             reasons.append("the prose says more than the analysis behind it: %d finding(s)"
                            % report["prose"]["findings"])
         elif prose.get("status") == REVIEW_REQUIRED:
             status = min(status, REVIEW_REQUIRED, key=lambda s: RANK[s])
-            reasons.append("%d block(s) were queued for a model pass that did not "
-                           "decide them" % report["prose"]["unreviewed"])
+            if report["prose"]["stale_reviews"]:
+                reasons.append("%d prose review(s) are stale; review the current content "
+                               "and inputs again"
+                               % report["prose"]["stale_reviews"])
+            reasons.append("%d block(s) have no fresh confirmed model review"
+                           % report["prose"]["unreviewed"])
 
     if args.diagrams:
         report["diagrams"] = diagram_report(args.diagrams)
