@@ -80,6 +80,19 @@ separately to prove it still is.
    hand-edited — are the owner's to set, and rule 8 already requires confirming before overwriting. Read those
    conventions and raise them with the user; never let them change a claim about what the code does.
 
+## Project-specific manual authoring
+
+Before answering the manual template, the model must map its questions to this repository's actual
+actors, commands, configuration loaders, components and data paths. Record that mapping in
+`.docs-build/manual-grounding.json` as described in [references/manual.md](references/manual.md).
+Read the mapped source before composing answers; extracted facts and graph packets are navigation aids.
+A broad question calls for a concrete interpretation, never a placeholder. Keep unanswered work pending.
+
+Every manual section requires a model review of source support, question coverage and usefulness to the
+intended reader. A successful build or resolving citation does not establish these. Generic summaries,
+instructions to a future author and statements about running the pipeline require changes. Iterate through
+draft, review and repair; only the model reviewer can assign `confirmed` to the current content.
+
 ## Where the intermediate files go
 
 **`.docs-build/` ignores itself.** The pipeline writes a `.gitignore` of `*` into it the first time it

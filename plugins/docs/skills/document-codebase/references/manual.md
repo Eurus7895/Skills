@@ -36,7 +36,7 @@ as many answers as it takes.
    how many slots it wrote and how many facts are available to cite. `pipeline.py document` does all of
    this for you on a first run, passing whichever of the four exist.
 
-4. Replace each unknown draft with a project-specific explanation. A question about a component needs its
+4. Complete the question-to-source mapping below and read its sources. Then replace each unknown draft with a project-specific explanation. A question about a component needs its
    responsibility, collaborators and mechanism; a question about a phase needs its inputs, processing,
    decisions, outputs and failure behavior. Use source paths for evidence and navigation, not as the answer.
    Include use cases in Introduction, design decisions and boundaries in System Overview, and precise
@@ -51,13 +51,56 @@ as many answers as it takes.
    `observed` or `declared` basis names a `verified_ids` entry some validator already passed, and that every
    composed section stays inside
    what its answers cite. It does not prove that a sentence is true or sufficient: deterministic prose
-   checks examine every composed section, and blocks that rest on readings or make stronger relationship
-   claims enter the model review queue.
+   checks examine every composed section, and **every manual section enters the model review queue**.
 7. Review the rendered RST: does it read as a manual, and does each section still say what its answers said?
    Correct the notes or the composition in `manual-analysis.json` and rebuild; do not patch generated RST
    because the next build replaces it. Review verdicts apply to section blocks
    `section:<page-id>:<n>`. Unknown answers and missing mandatory diagrams keep the quality report
    incomplete; an answered question no section uses **fails** it.
+
+## Map the template to this repository
+
+Before writing answers, create `.docs-build/manual-grounding.json` with the current `index_hash` and a
+`questions` map keyed by every generated question ID. This is a model-authored working artifact: scripts do
+not interpret or approve it. For each entry record:
+
+- `project_question`: rewrite the prompt using the actual repository entities and the reader's task.
+- `applicability`: `applicable`, `needs_evidence` or `not_applicable`, with a repository-specific reason.
+- `sources_read`: actual file paths and line ranges inspected, and what each establishes. A search hit or
+  generated packet alone is not a source reading.
+- `answer_outline`: concrete behavior, conditions and consequences that the answer must explain.
+- `remaining_checks`: unresolved questions and where to investigate next.
+
+For configuration, locate the loader and its callers, defaults, environment and CLI overrides, validation
+and failure paths. For processing, trace a real input from its entry point through transformations to an
+output or failure. For installation, read packaging metadata and the actual startup path. Adapt these
+investigations to the project; do not assume it has a server, database or deployment pipeline.
+
+Group related questions while reading so the same source need not be loaded repeatedly, but account for each
+question. Follow references beyond the initial module shortlist when needed. Test code may provide supporting
+evidence; test modules remain outside the product inventory and product diagrams.
+
+`needs_evidence` means continue investigating. Use an unknown answer only after documenting what was checked
+and the specific fact still unavailable. `not_applicable` needs a concrete reason. Never fill an answer with
+“Explain the actual product”, “The repository reads these settings”, or a restatement of the question.
+Examples in this guide illustrate schema shape; their prose and IDs must not be copied as project facts.
+
+## Review and repair the draft
+
+The model reviewer reads each rendered section, the questions it covers, the grounding record and relevant
+source. Apply the content review criteria in [prose-rules.md](prose-rules.md). A citation that exists does not
+prove its paragraph answers the question. Record stable findings with the missing behavior or unsupported
+claim and a concrete requested correction. Generic but accurate text still requires changes when it leaves
+its assigned question unanswered.
+
+Repair `manual-analysis.json`, update the grounding record if more source was read, rebuild, and review the
+changed sections again. Do not manufacture `confirmed` records merely to clear a gate. If the agreed budget
+runs out, leave the draft at `changes_requested` or `unresolved` and report the remaining findings.
+
+The documentation-review appendix describes the covered product revision, intended audiences, verified
+scope, specific uncertainties and limitations. Pipeline execution counts, Sphinx success and claims-checking
+summaries belong in the generation report. Do not use them as answers about the product or as filler in
+`documentation_review.rst`.
 
 ## Answer contract
 

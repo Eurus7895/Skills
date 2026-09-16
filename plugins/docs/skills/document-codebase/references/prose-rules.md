@@ -92,3 +92,23 @@ records are refused rather than silently treated as missing. The complete schema
 
 `review_required` ranks below `partial` in the quality gate and above `failed` — it can never be reported as
 a pass, and a real defect still outranks "could not tell".
+
+## Content review criteria for manual sections
+
+Before assigning `confirmed`, the model reviewer checks all of the following against the source and the
+question-to-source mapping:
+
+- **Support:** the cited code or repository documentation supports the actual claim and its certainty.
+- **Coverage:** the section answers the assigned questions, including relevant conditions, failure behavior
+  and limits. Mentioning a component or attaching a citation is insufficient.
+- **Reader usefulness:** the explanation enables the intended reader to understand a mechanism or perform
+  a task using the project's actual commands, settings, inputs and outputs where relevant.
+- **Specificity:** ask whether the paragraph could describe an unrelated repository after changing only its
+  name. If so, inspect what concrete information is missing. This is a review heuristic, not a keyword rule.
+- **Composition:** prose contains no TODOs, instructions to an author, copied schema examples or pipeline
+  progress reports standing in for product information. Necessary uncertainty identifies the specific gap.
+
+Use `changes_requested` for generic or incomplete content, with a stable finding ID and the missing detail
+in `requested`. Use `unresolved` when evidence cannot settle the reading. A sequential second pass reports
+`self_review`; do not claim independent review. Deterministic validators check format and consistency;
+semantic adequacy remains the model reviewer's responsibility.
