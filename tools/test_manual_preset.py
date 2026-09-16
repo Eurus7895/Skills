@@ -342,6 +342,32 @@ class ManualTests(unittest.TestCase):
         self.assertEqual(block['answer_completeness'], 'partial')
         self.assertEqual(block['facets_missing'], ['constraints', 'precedence', 'type'])
 
+    def test_one_sentence_repeated_is_not_a_set_of_answers(self):
+        """The reported failure: 161 questions, one generic answer, every check green.
+
+        The count was right, each citation resolved, and `A013`/`A014` are advisory and
+        never reach the manual. The only mechanical tell is that the text does not vary.
+        """
+        for qid in ('1.1.1', '1.1.2', '1.1.3', '1.1.4', '1.1.5'):
+            self.answers['answers'][qid].update(
+                basis='inferred', completeness='complete',
+                text='This project provides functionality described in the README.',
+                evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}])
+        with self.assertRaises(ValueError) as caught:
+            self.build()
+        self.assertIn('share one answer', str(caught.exception))
+
+        # Genuinely distinct answers at the same count are fine.
+        for n, qid in enumerate(('1.1.1', '1.1.2', '1.1.3', '1.1.4', '1.1.5')):
+            self.answers['answers'][qid]['text'] = 'A distinct answer number %d.' % n
+        self.assertEqual(model.validate(self.build()), [])
+
+    def test_identical_placeholders_are_not_duplicate_answers(self):
+        """A fresh draft shares one TODO in every slot. That is honest, not a template."""
+        self.assertTrue(all(a['text'].startswith('TODO')
+                            for a in self.answers['answers'].values()))
+        self.assertEqual(model.validate(self.build()), [])
+
     def test_only_two_diagram_pages(self):
         d = self.root / 'diagrams'; d.mkdir()
         for name in ('class', 'flow'): (d / (name+'.puml')).write_text('@startuml\n@enduml\n')

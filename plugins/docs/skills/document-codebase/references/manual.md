@@ -18,11 +18,10 @@ as many answers as it takes.
    documentation to answer questions the structural index cannot answer. Keep module, architecture, flow
    and operations analyses as supporting evidence; a list of files is not a manual answer.
 3. Initialize the answer artifact once (exclusive creation refuses to replace existing answers).
-   **Write the architecture, flow and operations analyses first and pass them here**: the initializer
-   answers the twelve questions they settle, and the answers carry the checks those analyses passed.
-   Initializing before they exist is not wrong, but exclusive creation means you cannot pick the prefill
-   up afterwards without deleting the draft. `config-analysis.json` needs no writing — `survey` extracts
-   and validates it.
+   **The initializer writes no prose.** It writes an unanswered slot per question and a `facts` list —
+   the ids this run verified, grouped by what vouched for them. That is a reading list, not an answer:
+   every sentence in the manual is yours to write. Pass the analyses so `facts` is complete;
+   `config-analysis.json` needs no writing, since `survey` extracts and validates it.
 
    ```bash
    python3 scripts/document/manual.py --init .docs-build/manual-analysis.json \
@@ -33,9 +32,9 @@ as many answers as it takes.
      --config .docs-build/config-analysis.json
    ```
 
-   Each input is optional and is refused if it was written against a different scan. The command
-   reports how many questions it prefilled. `pipeline.py document` does all of this for you on a first
-   run, passing whichever of the four exist.
+   Each input is optional and is refused if it was written against a different scan. The command reports
+   how many slots it wrote and how many facts are available to cite. `pipeline.py document` does all of
+   this for you on a first run, passing whichever of the four exist.
 
 4. Replace each unknown draft with a project-specific explanation. A question about a component needs its
    responsibility, collaborators and mechanism; a question about a phase needs its inputs, processing,
@@ -60,20 +59,23 @@ as many answers as it takes.
 
 ## Answer contract
 
-`manual_version` is `1`; `index_hash` must match the current scan. `answers` maps every stable question ID
+`manual_version` is `2`; `index_hash` must match the current scan. `answers` maps every stable question ID
 (`1.1.1`, `1.1.2`, ..., `5.7.6`, and `review.1` ... `review.8`) to one answer. The bundled
 `manual_questions.json` is the machine-readable mapping; the initializer writes all IDs.
 
 ```json
 {
-  "manual_version": 1,
+  "manual_version": 2,
   "index_hash": "<current index_hash>",
   "answers": {
     "1.1.1": {
-      "status": "confirmed",
+      "basis": "observed",
+      "completeness": "complete",
+      "content_review": "pending",
       "text": "Explain the actual product and the problem it solves, using the cited evidence.",
       "evidence": [{"path": "README.md", "line_start": 1, "line_end": 12}],
-      "verified_ids": ["claim:imports:src/api.py:src/service.py", "op:test"]
+      "verified_ids": ["claim:imports:src/api.py:src/service.py", "op:test"],
+      "facets_missing": []
     }
   }
 }
@@ -92,8 +94,15 @@ the packaging manifest, the CI workflow, the configuration, the tests, the sourc
 for what the repository shows without stating, and it is a real answer — reaching for `unknown` instead of
 `inferred` is the failure this rule is about.
 
-- `confirmed`: repository-supported answer with evidence **and at least one `verified_ids` entry**.
-- `inferred`: supported interpretation with evidence, visibly labelled Inferred. Explain its basis and limits.
+**One sentence repeated across the template is not a set of answers, and the build refuses it.** A run
+once answered every question with the same generic text citing the same line range, and every check
+passed: the count was right and each citation resolved. Past 30% of the answered set sharing one
+answer, the build stops — questions asking different things cannot honestly share an answer. Identical
+`TODO` placeholders in a fresh draft are exempt: that is the initializer saying nothing yet.
+
+- `basis: observed` or `declared`: the repository settles it — evidence **and at least one `verified_ids`
+  entry**, something a validator could have rejected.
+- `basis: inferred`: supported interpretation with evidence, visibly labelled Inferred. Explain its limits.
 - `unknown`: only once you have looked and the repository is silent. Give a concrete `next_check` naming what
   to inspect or whom to ask — a real next step, not the question restated. Keep the question; do not silently
   omit it or call the manual finished.

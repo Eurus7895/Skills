@@ -28,7 +28,7 @@ component lives beside it in `references/`**, so what you load is what you are a
 | [When to use](#when-to-use-this-skill) · [when not to](#when-not-to-use-this-skill) | whether this is the right skill at all |
 | [Hard rules](#hard-rules) | the nine that hold whatever else you do |
 | [Where the intermediate files go](#where-the-intermediate-files-go) | `.docs-build/`, and what may be deleted |
-| [Where the run pauses](#where-the-run-pauses-for-the-user) | P1–P4, and which three the driver enforces |
+| [Where the run pauses](#where-the-run-pauses-for-the-user) | P1–P4, all four enforced by the driver |
 | [The run](#the-run) | the five commands, and which reference to open at each |
 | [Bundled resources](#bundled-resources) | every reference, and when to load it |
 | [Side effects](#side-effects) · [conventions](#conventions) | what this writes, and how it reports |
@@ -106,8 +106,8 @@ the next component.**
 | **P3 shape** | `check`, once the three analyses are written | are the boundaries where they would put them |
 | **P4 prose** | `publish` | are the queued readings the intended ones |
 
-**P1, P2 and P3 are enforced by the driver**, which prints what to show and what to ask at the moment it
-opens one, and refuses to run the next component until a decision is recorded:
+**All four are enforced by the driver**, which prints what to show and what to ask at the moment it opens
+one, and refuses to run the next component until a decision is recorded:
 
 ```bash
 python3 scripts/pipeline.py decide --checkpoint P1 --note "<what they said>"
@@ -115,8 +115,13 @@ python3 scripts/pipeline.py decide --checkpoint P1 --note "<what they said>"
 
 The note is required and goes in the closing report, so "ran unattended, kept the default scope" is a
 permitted answer and a recorded one. A decision is bound to the `index_hash` it was made against: rescanning
-reopens the checkpoints, because the units may now be different. **P4 needs no such machinery** — a queued
-block nobody decided already holds the run at `review_required`.
+reopens the checkpoints, because the units may now be different.
+
+**P4 was once left out of this**, on the reasoning that a queued block nobody decided already holds the run
+at `review_required`. That confuses holding the *gate* with opening a *pause*: nothing printed the question
+and nothing refused to run, so a run reached a published manual with twenty blocks queued, zero reviewed,
+and the final validation never executed. `publish` now opens P4 when it queues anything, and refuses to run
+again until it is decided. A run that queued nothing opens nothing.
 
 A pause is a question with the material attached, not a request for permission: the user should be able to
 answer without opening a file. Summarise — a pause that pastes a whole JSONL file is not a question. Then

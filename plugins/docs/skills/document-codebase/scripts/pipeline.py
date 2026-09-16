@@ -421,9 +421,12 @@ ORDER = ["survey", "analyze", "check", "document", "publish"]
 # a wrong scope or a wrong set of module roles survives every check downstream, because a
 # check compares a claim against evidence and never against what the repository is *for*.
 #
-# There is no fourth entry. P4, the prose queue, is already enforced: a block queued by
-# `check_prose` and not decided holds the run at `review_required`, which is the same
-# mechanism arrived at from the other direction.
+# P4 was left out of this table once, on the reasoning that a queued block nobody decided
+# already holds the run at `review_required`. That confuses two things. Holding the *gate*
+# is not opening a *pause*: nothing printed the question, nothing refused to run, and a
+# run went all the way to a published manual with twenty blocks queued, zero reviewed, and
+# the final validation never executed -- because the workflow was never told to stop.
+# P1-P3 stop it by refusing the next component. P4 now does the same.
 CHECKPOINTS = (
     {"id": "P1", "opened_by": "survey", "blocks": "analyze",
      "show": "the selected units with their fan-in, the cutoff, and every warning the "
@@ -436,7 +439,27 @@ CHECKPOINTS = (
      "show": "the components and their boundaries, the flows traced and the ones "
              "refused, the operations found",
      "ask": "is this the architecture, and are the boundaries where they would put them"},
+    # Opened by `publish` and blocking `publish`: the first run renders and queues, and
+    # the second -- the one that carries `--review` and reaches the final gate -- is the
+    # one held. `opens_when` keeps it quiet on a run that queued nothing, because a
+    # checkpoint that opens with no question to ask teaches people to decide it blind.
+    {"id": "P4", "opened_by": "publish", "blocks": "publish", "opens_when": "prose_queued",
+     "show": "each queued block beside the evidence under it, and the verb you propose",
+     "ask": "are these the intended readings"},
 )
+
+
+def prose_queued(build):
+    """Whether `check_prose` left blocks nobody has decided."""
+    try:
+        with open(os.path.join(build, "prose-report.json"), encoding="utf-8") as fh:
+            report = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    return (report.get("queued") or 0) > (report.get("reviewed") or 0)
+
+
+OPENS_WHEN = {"prose_queued": prose_queued}
 
 
 def invoked_as():
@@ -645,6 +668,9 @@ def main():
     if code == 0 and not args.dry_run:
         for checkpoint in CHECKPOINTS:
             if checkpoint["opened_by"] != args.component:
+                continue
+            condition = OPENS_WHEN.get(checkpoint.get("opens_when"))
+            if condition and not condition(args.build):
                 continue
             if open_checkpoint(args.build, checkpoint, index_hash_of(args.build)):
                 print("\n-- checkpoint %s is open, and %s will not run until it is "

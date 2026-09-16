@@ -277,6 +277,39 @@ def read_answer(qid, answer, root, origins):
             "reviewer": answer.get("reviewer", "")}
 
 
+# A run once answered all 161 questions with the same sentence, citing the same line
+# range, and every check passed: the count was right, each citation resolved, and
+# `A013`/`A014` -- which do catch this on the module side -- are advisory and do not
+# reach here at all. One template answer repeated is not 161 answers, and the only
+# mechanical tell is that the text does not vary.
+#
+# The module analysis already flags a near-constant field at 0.95 as a *warning*, because
+# a genuinely skewed category is real there. Here it is a failure: 161 questions asking
+# different things cannot honestly share one answer, and a manual that shipped them would
+# be the questionnaire failure wearing a passing grade.
+CONSTANT_ANSWER_LIMIT = 0.30
+DUPLICATE_SAMPLE = 3
+
+
+def repeated_answers(notes):
+    """Answer texts used for more than `CONSTANT_ANSWER_LIMIT` of the answered set.
+
+    Only answered notes count: a draft's identical `TODO` placeholders are the initializer
+    saying nothing yet, which is the honest state and not a duplicate answer.
+    """
+    answered = [n for n in notes if composable(n)]
+    if len(answered) < 4:
+        # Too few to tell a repeated template from a short manual.
+        return [], len(answered)
+    counts = {}
+    for note in answered:
+        key = " ".join(note["text"].split()).strip().lower()
+        counts.setdefault(key, []).append(note["id"])
+    repeated = [ids for ids in counts.values()
+                if len(ids) > CONSTANT_ANSWER_LIMIT * len(answered)]
+    return sorted(repeated, key=len, reverse=True), len(answered)
+
+
 def composable(note):
     """Whether this note may be written into prose a reader sees.
 
@@ -409,7 +442,8 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
             "completeness and review, and a v1 `confirmed` cannot be carried across as "
             "approval nobody gave. Migrate it rather than relabelling it")
     if not isinstance(content, dict) or content.get("manual_version") != MANUAL_VERSION:
-        raise ValueError("manual requires --manual-analysis with manual_version 1")
+        raise ValueError("manual requires --manual-analysis with manual_version %d"
+                         % MANUAL_VERSION)
     if not index.get("index_hash") or content.get("index_hash") != index["index_hash"]:
         raise ValueError("manual analysis is missing its scan identity or is stale")
     answers = content.get("answers")
@@ -426,6 +460,21 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
     origins = confirmable(claims, analysis, extra)
     cited, unresolved, uncomposed, missing_diagrams = set(), [], [], []
     pages, root = [], Path(root).resolve()
+
+    # Before any page is built: one sentence repeated across the template is not a set of
+    # answers, and every other check here passes on it.
+    all_notes = [read_answer(q["id"], answers[q["id"]], root, origins)
+                 for page in GENERATED for q in page["questions"]]
+    repeated, answered_total = repeated_answers(all_notes)
+    if repeated:
+        worst = repeated[0]
+        raise ValueError(
+            "%d of %d answered question(s) share one answer (%s%s). Questions asking "
+            "different things cannot share an answer; this is a template repeated, not a "
+            "manual written"
+            % (len(worst), answered_total, ", ".join(worst[:DUPLICATE_SAMPLE]),
+               ", ..." if len(worst) > DUPLICATE_SAMPLE else ""))
+
     for order, spec in enumerate(GENERATED, 1):
         notes = {q["id"]: read_answer(q["id"], answers[q["id"]], root, origins)
                  for q in spec["questions"]}
