@@ -554,3 +554,94 @@ Shared by every script here:
 
 `1` and `2` are different on purpose: one means the repository or the claims are wrong, the other means the
 invocation was.
+
+## `scope.json` — scope_version 1
+
+**What the run promised to document, and what it did with every file it found.** This is the denominator.
+Coverage measured against the units a run chose to read says whether it finished its own to-do list;
+coverage measured against this says whether the document covers the product. A fan-in cutoff may order the
+work — it may not quietly decide which features are in the manual.
+
+```json
+{
+  "scope_version": 1,
+  "index_hash": "sha256:…",
+  "product_roots": ["src"],
+  "required_topics": ["configuration", "failure-modes"],
+  "files": [
+    {"path": "src/app.py", "disposition": "product", "reading": "analyzed"},
+    {"path": "tests/test_app.py", "disposition": "test", "reading": "excluded",
+     "reason": "pytest suite under tests/"}
+  ]
+}
+```
+
+`disposition` is `product`, `test`, `generated`, `vendor` or `asset`. `reading` is `unread`, `read`,
+`analyzed` or `excluded`, and is tracked **apart from** disposition: they answer "is this ours?" and "did
+anyone look at it?", and a run that conflates them cannot report an unread product file at all.
+
+**Anything that is not `product` must give a reason**, and "the path contains `test`" is not one —
+`src/latest/` and `contest.py` are product source. The rule that excluded a file is recorded so a reader can
+disagree with it.
+
+`documented_paths()` is the single product view. The class graph, component inventory, module pages, diagram
+completeness check and coverage report all read it rather than each deciding what counts, which is how a test
+class once reached a product diagram after the module pages had already dropped it.
+
+`scope_hash` covers the roots, the required topics and each file's disposition — **not** its reading state.
+Reading a file is progress against the scope, not a change to it; if it moved the hash, every review would
+go stale each time the run read one more file, which is the opposite of what freshness is for.
+
+## `prose-review.jsonl` — review_version 2
+
+One row is one verdict about one section, **bound to what it judged**. Three things are kept apart, because
+collapsing them into a single `confirmed` is what let a mechanical result read as an approval:
+
+| | Asks |
+| --- | --- |
+| **content review** | did a reviewer accept this wording? |
+| **freshness** | is that verdict still about what the document now says? |
+| **completeness** | does the answer cover what its question asked for? |
+
+A section can be reviewed *and* stale. It can be reviewed, fresh, and still `partial`. Those are three
+different reports to a reader and three different pieces of work.
+
+```json
+{"review_version": 2, "review_id": "rev-1", "target_id": "section:usage/configuration:1",
+ "draft_revision": "rev-0001", "verdict": "confirmed", "review_mode": "independent",
+ "reviewer": "analyst-2", "content_hash": "sha256:…", "index_hash": "sha256:…",
+ "scope_hash": "sha256:…", "analysis_hash": "sha256:…",
+ "findings": [{"finding_id": "f1", "severity": "blocking", "location": "section:…:1",
+               "why": "the fallback described is not the one the code takes",
+               "requested": "read app.py:12 and restate the default", "state": "open"}]}
+```
+
+`verdict` is `confirmed`, `changes_requested` or `unresolved`. `review_mode` is `independent` or
+`self_review` — **a sequential pass reports `self_review`** and may not claim independence it did not have.
+`severity` is `blocking`, `major` or `minor`; `state` is `open`, `resolved` or `withdrawn`.
+
+**`content_hash` is over heading, body and evidence** — what a reader sees and what it rests on. Never over
+the verdict, a timestamp or a revision number: hashing the result into the thing the result is about is a
+cycle, where approving a section changes its hash and instantly stales the approval that just landed.
+Evidence is normalised and sorted, so reordering two citations is not an edit while adding one is.
+
+**Freshness is decided by comparing hashes, not by remembering to invalidate.** A row is stale when any
+bound input — `content_hash`, `index_hash`, `scope_hash`, `analysis_hash` — differs from what the run
+computes now. An input the run cannot compute is skipped rather than assumed equal: the conservative
+reading, because the alternative silently revives a stale approval whenever a hash is unavailable.
+
+A malformed row is **refused, not dropped**. A review file whose bad rows are quietly skipped reports fewer
+approvals than it holds, and the run reads that as work still to do rather than as a file to fix. Refused:
+a missing required field, a duplicate `review_id`, an unknown verdict or mode, and `confirmed` alongside an
+open blocking finding — a row disagreeing with itself, where reading either half as the answer is a guess.
+
+### Migrating v1 rows
+
+A v1 row was `{"page": …, "block": …, "verdict": "ok"}`: a block id and a word, bound to nothing. It names
+no content hash, so **nothing can establish what it approved** — the same text may have been rewritten twice
+since. Every v1 row migrates to review-pending. None migrates to an approval, and a block id alone never
+re-approves changed text.
+
+The same rule applies to `manual_version: 1` answers, whose single `status: confirmed` was a mechanical
+result rather than a judgement: the prose and its citations are preserved, and `content_review` becomes
+`pending`.

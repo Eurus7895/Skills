@@ -18,6 +18,7 @@ scripts/survey/annotate_import_usage.py    -> skills/document-codebase/scripts/s
 scripts/survey/select_units.py             -> skills/document-codebase/scripts/survey/select_units.py
 scripts/survey/extract_config.py           -> skills/document-codebase/scripts/survey/extract_config.py
 scripts/survey/validate_config.py          -> skills/document-codebase/scripts/survey/validate_config.py
+scripts/survey/scope_record.py             -> skills/document-codebase/scripts/survey/scope_record.py
 
 scripts/analyze/query_graph.py             -> skills/document-codebase/scripts/analyze/query_graph.py
 scripts/analyze/derive_claims.py           -> skills/document-codebase/scripts/analyze/derive_claims.py
@@ -40,6 +41,7 @@ scripts/publish/render_docs.py             -> skills/document-codebase/scripts/p
 scripts/publish/sphinx_support.py          -> skills/document-codebase/scripts/publish/sphinx_support.py
 scripts/publish/wire_toctree.py            -> skills/document-codebase/scripts/publish/wire_toctree.py
 scripts/publish/check_prose.py             -> skills/document-codebase/scripts/publish/check_prose.py
+scripts/publish/review_records.py          -> skills/document-codebase/scripts/publish/review_records.py
 scripts/publish/quality_docs.py            -> skills/document-codebase/scripts/publish/quality_docs.py
 
 scripts/document/manual.py -> skills/document-codebase/scripts/document/manual.py
