@@ -11,6 +11,7 @@
 # Regenerate with: python3 tools/materialize.py
 
 scripts/pipeline.py                        -> skills/document-codebase/scripts/pipeline.py
+scripts/build_dir.py                       -> skills/document-codebase/scripts/build_dir.py
 
 scripts/survey/scan_repo.py                -> skills/document-codebase/scripts/survey/scan_repo.py
 scripts/survey/validate_index.py           -> skills/document-codebase/scripts/survey/validate_index.py

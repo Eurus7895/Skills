@@ -82,6 +82,11 @@ separately to prove it still is.
 
 ## Where the intermediate files go
 
+**`.docs-build/` ignores itself.** The pipeline writes a `.gitignore` of `*` into it the first time it
+creates it, so the directory never appears in `git status` and nobody has to learn that lesson once per
+repository. An edited one is left alone, and the rendered document is untouched — that is a deliverable and
+is meant to be committed.
+
 Everything except the finished document is written to **`.docs-build/`** in the working directory:
 `structure.json`, the claims, fragments and analyses with their verified counterparts, `findings.jsonl`,
 `class-graph.json` and `doc.json`. Say so when you finish, and offer to delete it; nothing in there is meant to

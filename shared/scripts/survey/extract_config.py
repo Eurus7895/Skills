@@ -30,6 +30,11 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
+
+import build_dir  # noqa: E402
+
 CONFIG_VERSION = 1
 
 ENV = "env"
@@ -193,9 +198,7 @@ def main():
     settings = extract(index, args.root)
     out = {"config_version": CONFIG_VERSION, "index_hash": index.get("index_hash"),
            "settings": settings}
-    directory = os.path.dirname(os.path.abspath(args.out))
-    if directory and not os.path.isdir(directory):
-        os.makedirs(directory)
+    build_dir.ensure_parent(args.out)
     with open(args.out, "w", encoding="utf-8") as handle:
         json.dump(out, handle, indent=1, ensure_ascii=False)
         handle.write("\n")

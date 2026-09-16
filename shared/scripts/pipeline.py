@@ -50,6 +50,9 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import build_dir  # noqa: E402
 
 
 def fail(message, code=2):
@@ -551,7 +554,7 @@ def main():
         return fail("--top must not be negative")
     if args.review and not os.path.isfile(args.review):
         return fail("no such review file: %s" % args.review)
-    os.makedirs(args.build, exist_ok=True)
+    build_dir.ensure(args.build)
     digest = index_hash_of(args.build)
 
     if args.component == "decide":

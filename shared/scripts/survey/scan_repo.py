@@ -50,6 +50,11 @@ import os
 import re
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
+
+import build_dir  # noqa: E402
 from collections import Counter, defaultdict
 
 LANG_BY_EXT = {
@@ -1213,9 +1218,7 @@ def main():
         sys.stderr.write("FAIL  no source files found under %s\n" % args.root)
         return 1
 
-    directory = os.path.dirname(os.path.abspath(args.out))
-    if directory and not os.path.isdir(directory):
-        os.makedirs(directory)
+    build_dir.ensure_parent(args.out)
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, sort_keys=True)
 
