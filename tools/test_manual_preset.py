@@ -11,6 +11,7 @@ import unittest
 from component_scripts import component_paths, script
 sys.path[:0] = component_paths()
 import manual
+import authored
 import build_document_model as model
 import render_docs
 import check_prose
@@ -453,10 +454,19 @@ class ManualTests(unittest.TestCase):
         proc = subprocess.run([sys.executable,script('render_docs.py'),'--doc',str(doc),
             '--out',str(self.root/'docs')],capture_output=True,text=True)
         self.assertEqual(proc.returncode,0,proc.stdout+proc.stderr)
-        # Generated pages plus index.rst. An authored page is never written over.
+        # Generated pages, index.rst, and a scaffold for every authored page nobody has
+        # settled. `compliance` is waived by default, so it gets none.
+        scaffolded = [p for p in manual.AUTHORED
+                      if p['id'] not in authored.DEFAULT_WAIVED]
         self.assertEqual(len(list((self.root/'docs').rglob('*.rst'))),
-                         len(manual.GENERATED) + 1)
-        self.assertFalse((self.root/'docs/appendix/glossary.rst').exists())
+                         len(manual.GENERATED) + 1 + len(scaffolded))
+        glossary = self.root/'docs/appendix/glossary.rst'
+        self.assertTrue(glossary.exists())
+        body = glossary.read_text()
+        # A brief, not a draft: it says it is unwritten and it composes no definition.
+        self.assertIn('DRAFT', body)
+        self.assertIn('5.2.1', body)
+        self.assertFalse((self.root/'docs/appendix/compliance.rst').exists())
         self.assertTrue((self.root/'docs/architecture/class_diagram.rst').exists())
         self.assertTrue((self.root/'docs/architecture/data_flow.rst').exists())
 

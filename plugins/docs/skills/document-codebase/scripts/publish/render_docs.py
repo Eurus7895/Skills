@@ -244,6 +244,71 @@ def authored_on_disk(doc, out, emitter):
     return found
 
 
+SETTLED_AUTHORED = ("complete", "waived")
+
+
+def render_scaffold(row, emitter):
+    """A page for a person to fill, carrying what this run verified on its behalf.
+
+    Not a draft of the page: a brief for writing one. It states who the page is for, hands
+    over the evidence the pipeline already checked, says plainly what it looked for and
+    did not find, and lists the questions. What it never does is compose a sentence --
+    a troubleshooting table nobody wrote, built from the model's guess at what usually
+    goes wrong, is the failure mode this whole skill is arranged against, and it would
+    arrive looking finished.
+    """
+    parts = [emitter.heading(row["title"]),
+             emitter.prose("DRAFT — this page is written by a person, not generated. "
+                           "Status: %s. Replace everything below before publishing."
+                           % row["status"])]
+    if row.get("purpose"):
+        parts.append(emitter.subheading("Who this page is for"))
+        parts.append(emitter.prose("%s %s" % (row["purpose"], row["audience"])))
+    offered = row.get("evidence_offered") or ()
+    parts.append(emitter.subheading("Evidence this run verified"))
+    if offered:
+        parts.append(emitter.prose(
+            "Each row was checked by the pipeline and is cited elsewhere in this "
+            "document. Cite these rather than re-deriving them."))
+        parts.append(emitter.table(
+            ["Reference", "Source", "Location", "What it says"],
+            [[r.get("ref", ""), r.get("source", ""), r.get("cite") or "",
+              r.get("text", "")] for r in offered]))
+    else:
+        parts.append(emitter.prose("Nothing this run verified bears on this page."))
+    absent = row.get("evidence_absent") or ()
+    if absent:
+        parts.append(emitter.subheading("What the run looked for and did not find"))
+        parts.append(emitter.prose(" ".join(s[0].upper() + s[1:] + "." for s in absent)))
+    questions = row.get("questions") or ()
+    if questions:
+        parts.append(emitter.subheading("Questions this page answers"))
+        parts.append(emitter.table(
+            ["ID", "Question", "Answered"],
+            [[q.get("id", ""), q.get("text", ""),
+              "yes" if q.get("answered") else "no"] for q in questions]))
+    return "\n".join(parts).rstrip() + "\n"
+
+
+def scaffolds(doc, out, emitter):
+    """Scaffolds for unsettled authored pages that have no file yet, as {name: text}.
+
+    **Never overwrites.** A page on disk is somebody's work, whatever the ledger says
+    about it, and the ledger is the thing that can be out of date. Returned rather than
+    written so these land with everything else, in the one pass that has already resolved
+    -- a half-written docs/ directory is worse than none, scaffolds included.
+    """
+    out_pages = {}
+    for row in doc.get("authored_ledger", ()) or ():
+        if row.get("status") in SETTLED_AUTHORED:
+            continue
+        name = row["page_id"] + emitter.extension
+        if os.path.exists(os.path.join(out, name)):
+            continue
+        out_pages[name] = render_scaffold(row, emitter)
+    return out_pages
+
+
 def render_index(doc, pages, emitter, authored=()):
     revision = doc.get("source_revision")
     parts = [emitter.heading("Documentation"),
@@ -325,7 +390,18 @@ def main():
     except ValueError as exc:
         sys.stderr.write("FAIL  %s\n" % exc)
         return 2
+    # Scaffolds first: an authored page this run is about to create is as real as one
+    # already on disk, and leaving it out of the toctree would publish a page Sphinx
+    # warns is included nowhere and no reader can reach.
+    fresh = scaffolds(doc, args.out, emitter)
+    rendered.update(fresh)
     carried = authored_on_disk(doc, args.out, emitter)
+    carried_ids = {page["id"] for page in carried}
+    by_id = {page["id"]: page for page in doc.get("authored_pages", ())}
+    for name in sorted(fresh):
+        page_id = name[:-len(emitter.extension)]
+        if page_id not in carried_ids and page_id in by_id:
+            carried.append(by_id[page_id])
     rendered[index_name] = render_index(doc, pages, emitter, carried)
 
     # A figure pointing at a file that is not there renders as a broken image and

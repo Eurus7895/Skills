@@ -46,4 +46,5 @@ scripts/publish/review_records.py          -> skills/document-codebase/scripts/p
 scripts/publish/quality_docs.py            -> skills/document-codebase/scripts/publish/quality_docs.py
 
 scripts/document/manual.py -> skills/document-codebase/scripts/document/manual.py
+scripts/document/authored.py -> skills/document-codebase/scripts/document/authored.py
 scripts/document/manual_questions.json -> skills/document-codebase/scripts/document/manual_questions.json
