@@ -29,6 +29,7 @@ component lives beside it in `references/`**, so what you load is what you are a
 | [Hard rules](#hard-rules) | the nine that hold whatever else you do |
 | [Where the intermediate files go](#where-the-intermediate-files-go) | `.docs-build/`, and what may be deleted |
 | [Where the run pauses](#where-the-run-pauses-for-the-user) | P1–P4, all four enforced by the driver |
+| [Planning the run](#planning-the-run) | the eight blocks every detailed plan must expose |
 | [The run](#the-run) | the seven runtime commands, and which reference to open at each |
 | [Bundled resources](#bundled-resources) | every reference, and when to load it |
 | [Side effects](#side-effects) · [conventions](#conventions) | what this writes, and how it reports |
@@ -97,6 +98,19 @@ For the two generative blocks, read [references/prose-generation.md](references/
 composing manual pages and [references/diagram-policy.md](references/diagram-policy.md) before accepting class
 or data-flow diagrams. The former defines what a reader-facing section must contain; the latter separates
 verified diagram semantics from presentation choices.
+
+## Planning the run
+
+When the user asks for a plan, proposed sequence, or preview before execution, read the **Detailed-plan
+contract** in [references/pipeline.md](references/pipeline.md). Present the plan under exactly these eight
+logical blocks, in order: **Survey**, **Analyze**, **Analysis Review**, **Prose Generation**, **Diagram
+Generation**, **Render**, **Final Review**, and **Publish**. Put runtime commands, model work, checkpoints,
+repair loops, and outputs inside their owning block; do not replace the blocks with a flat command list.
+
+The plan must keep prose and diagram generation distinct, keep render separate from publication, and show
+that repairs invalidate the old final review: repair returns to render, receives a fresh review, and only then
+may be sealed and published. A request to plan does not authorize running the plan or modifying the target
+repository.
 
 ## Where the intermediate files go
 

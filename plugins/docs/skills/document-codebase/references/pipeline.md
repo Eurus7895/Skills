@@ -36,6 +36,38 @@ where model work begins or where a deliverable becomes publishable:
 | Final review | fresh review-v2 records over rendered content | every required block is confirmed or remains explicitly unresolved |
 | Publish | promotion of the confirmed output | only the reviewed revision is handed off or committed |
 
+## Detailed-plan contract
+
+A detailed plan is a reader-facing expansion of the eight logical blocks above, not a transcription of the
+seven runtime commands. Use the block names as the plan's top-level headings and keep them in this order:
+
+1. **Survey** — confirm target, audience, preset and scope; inspect repository conventions and existing docs;
+   exclude test, generated, vendored, cache and build-output trees; run the survey; present its findings and
+   record P1.
+2. **Analyze** — select production modules; map documentation topics and manual questions to concrete source;
+   have the model read that source; write module, architecture, flow and operations evidence with valid
+   citations.
+3. **Analysis Review** — review roles at P2; validate and repair claims; review architecture boundaries at P3;
+   do not describe an import edge as a call flow.
+4. **Prose Generation** — answer every applicable preset question from reviewed evidence; compose
+   project-specific reader-facing sections; reject placeholders, internal metadata and unsupported claims;
+   build and validate the manual draft.
+5. **Diagram Generation** — build and validate the class graph and class views; emit data-flow diagrams only
+   for verified call-site sequences; apply the diagram policy and record evidence limitations explicitly.
+6. **Render** — render the combined draft into `.docs-build/rendered-docs/`; run the target-format/Sphinx checks;
+   inspect the pages; do not modify the published `docs/` tree.
+7. **Final Review** — review prose, diagrams, citations, navigation, coverage and limitations against the exact
+   rendered hashes; record stable findings; repair blocking findings and return to Render; perform a fresh
+   review after every content-changing repair; record P4 and create a seal only for confirmed current content.
+8. **Publish** — verify that the review and seal are fresh; atomically promote the sealed staging tree to
+   `docs/`; report artifacts, timings, validation results, unresolved limitations and cleanup choices.
+
+Within those headings, adapt the number and granularity of steps to the repository and preset. Never collapse
+**Prose Generation** and **Diagram Generation** into `document`, or **Render**, **Final Review** and **Publish**
+into one delivery step. If the user asked only for a plan, state that no documentation has been generated or
+published and stop after presenting it. Do not claim that no files were modified unless that is known from the
+current run.
+
 The last three are separate runtime components. `render` writes only to staging and hashes the result;
 `review` first rejects any direct edit or changed `doc.json`, then binds its verdict to that draft and creates
 a seal only after the gate passes; `publish` verifies the seal and atomically promotes the staged tree. None
