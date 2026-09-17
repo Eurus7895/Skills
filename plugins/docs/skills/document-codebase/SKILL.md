@@ -93,6 +93,11 @@ intended reader. A successful build or resolving citation does not establish the
 instructions to a future author and statements about running the pipeline require changes. Iterate through
 draft, review and repair; only the model reviewer can assign `confirmed` to the current content.
 
+For the two generative blocks, read [references/prose-generation.md](references/prose-generation.md) before
+composing manual pages and [references/diagram-policy.md](references/diagram-policy.md) before accepting class
+or data-flow diagrams. The former defines what a reader-facing section must contain; the latter separates
+verified diagram semantics from presentation choices.
+
 ## Where the intermediate files go
 
 **`.docs-build/` ignores itself.** The pipeline writes a `.gitignore` of `*` into it the first time it
@@ -208,6 +213,7 @@ is the one script you call yourself, for a packet's parts. You do not need to re
 | `references/manual.md`, `references/documentation-template.md` | `--preset manual`, before choosing scope |
 | `references/rendering.md` | `publish`, before rendering into a project that already has documentation |
 | `references/prose-rules.md` | `publish`, for the verb ranks, the ceilings and the review format |
+| `references/prose-generation.md` | manual prose generation, after answers validate and before rendering |
 
 ## Side effects
 

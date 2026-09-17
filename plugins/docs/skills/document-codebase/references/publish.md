@@ -4,8 +4,10 @@ The last component, run twice: once to render, then again with `--review` once y
 it queued. Render outcomes and formats are in [`rendering.md`](rendering.md), the verb ranks and the review
 format in [`prose-rules.md`](prose-rules.md).
 
-**P4 is an enforced checkpoint.** The first successful publish opens it only when `check_prose` queued
-content. The driver then refuses the reviewed publish until `decide --checkpoint P4` records the judgement.
+**P4 is an enforced checkpoint.** The first publish that completes the prose check opens it when
+`check_prose` queued content. That run normally returns `review_required` rather than success; the queue is
+the condition that opens the checkpoint. The driver then refuses the reviewed publish until
+`decide --checkpoint P4` records the judgement.
 `review_required` remains the quality verdict for queued blocks without a review; P4 is what stops the
 workflow and puts those blocks in front of a reviewer.
 

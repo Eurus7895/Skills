@@ -16,8 +16,8 @@
   ],
   "edges": [
     {"id": "edge:inheritance:class:pkg/models.py:Order:class:pkg/base.py:Record", "layer": "inheritance", "from": "class:pkg/models.py:Order", "to": "class:pkg/base.py:Record", "verified": true, "cite": "pkg/models.py:4"},
-    {"id": "edge:composition:class:pkg/models.py:Order:class:pkg/base.py:Record", "layer": "composition", "from": "class:pkg/models.py:Order", "to": "class:pkg/base.py:Record", "verified": true, "labels": ["engine"], "cites": ["pkg/models.py:5"]}
+    {"id": "edge:association:class:pkg/models.py:Order:class:pkg/base.py:Record", "layer": "association", "from": "class:pkg/models.py:Order", "to": "class:pkg/base.py:Record", "verified": true, "labels": ["engine"], "cites": ["pkg/models.py:5"]}
   ],
   "unresolved": [],
-  "coverage": {"classes": 3, "modules_with_detail": 2, "modules_without_detail": 0, "by_layer": {"inheritance": 1, "composition": 1, "association": 0, "calls": 0, "inference": 0}, "unresolved_relationships": 0}
+  "coverage": {"classes": 3, "modules_with_detail": 2, "modules_without_detail": 0, "by_layer": {"inheritance": 1, "composition": 0, "association": 1, "calls": 0, "inference": 0}, "unresolved_relationships": 0}
 }

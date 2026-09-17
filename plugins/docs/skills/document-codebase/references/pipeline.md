@@ -20,6 +20,25 @@ These are phases of **one main workflow**: `survey` → `analyze` → `check` �
 flow and operations synthesis → `document` → `publish`. Manual authoring is a sub-workflow inside
 `document`; claim repair and prose review are loops back into the same main workflow.
 
+For design and review, treat that implementation as eight logical blocks. Component names do not define
+where model work begins or where a deliverable becomes publishable:
+
+| Logical block | Runtime/model work | Completion condition |
+| --- | --- | --- |
+| Survey | `survey` plus the P1 scope decision | scope, assets, entry points, configuration and exclusions are recorded |
+| Analyze | packets, source reading, module and three-analysis artifacts | required source was read and claims carry evidence |
+| Analysis review | validators plus P2/P3 decisions | roles, boundaries, flows and operations are accepted or repaired |
+| Prose generation | manual grounding, validated answers and composed `pages` | project-specific draft covers its applicable questions |
+| Diagram generation | class graph plus class and verified data-flow PlantUML | diagram semantics validate and presentation follows diagram policy |
+| Render | `render_docs` and Sphinx check | the draft is viewable in its target format |
+| Final review | fresh review-v2 records over rendered content | every required block is confirmed or remains explicitly unresolved |
+| Publish | promotion of the confirmed output | only the reviewed revision is handed off or committed |
+
+The current command surface still combines Render, Final review gating, and file output under `publish`.
+Therefore the last three are not yet isolated runtime components: the review hash is enforced, but rendering
+writes into the target directory before confirmation and there is no separate atomic promotion command. Do
+not describe those three blocks as strictly separated until staging and promotion exist.
+
 **There is no command that runs the whole pipeline**, and that is the design rather than a gap. Four of the
 judgements the document rests on — the scope, the module roles, the architecture, the prose promotions — sit
 between components, and none of the validators downstream can tell a wrong role or a wrong boundary from a

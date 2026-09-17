@@ -548,7 +548,8 @@ def prose_queued(build):
             report = json.load(fh)
     except (OSError, ValueError):
         return False
-    return (report.get("queued") or 0) > (report.get("reviewed") or 0)
+    coverage = report.get("coverage") or {}
+    return (coverage.get("queued") or 0) > (coverage.get("reviewed") or 0)
 
 
 OPENS_WHEN = {"prose_queued": prose_queued}
@@ -640,7 +641,7 @@ def main():
     parser.add_argument("component", choices=ORDER + ["decide", "measure"],
                         metavar="COMPONENT",
                         help="one of: %s, decide, or measure" % ", ".join(ORDER))
-    parser.add_argument("--checkpoint", help="decide: which checkpoint (P1, P2, P3)")
+    parser.add_argument("--checkpoint", help="decide: which checkpoint (P1, P2, P3, P4)")
     parser.add_argument("--note", help="decide: what was decided, and by whom -- this is "
                                        "what the closing report carries")
     parser.add_argument("--step", help="measure: model-driven step name")
@@ -788,13 +789,17 @@ def main():
         })
     print("\n== %s %s" % (args.component, "ok" if code == 0 else "exited %d" % code))
 
-    # Opened only on success, and only by the component that produces the material the
-    # question is about. A failed survey has no scope to approve.
-    if code == 0 and not args.dry_run:
+    # Ordinarily a checkpoint opens only on success: a failed survey has no scope to
+    # approve. A conditional checkpoint is different. P4 is intentionally produced by
+    # the review-required result (exit 1), so its predicate -- the report the stage just
+    # wrote -- is the authority on whether there is material to review.
+    if not args.dry_run:
         for checkpoint in CHECKPOINTS:
             if checkpoint["opened_by"] != args.component:
                 continue
             condition = OPENS_WHEN.get(checkpoint.get("opens_when"))
+            if code != 0 and condition is None:
+                continue
             if condition and not condition(args.build):
                 continue
             if open_checkpoint(args.build, checkpoint, index_hash_of(args.build)):

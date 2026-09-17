@@ -871,7 +871,8 @@ def resolve_attribute_types(records, aliases_by_path, by_module, by_suffix, by_s
     plausible.
 
     Only attributes are resolved. A parameter type says a function is passed something;
-    an attribute type says the class holds one, which is what composition means.
+    an attribute type says the class references one. It does not establish lifecycle
+    ownership, so the class graph records an association rather than composition.
     """
     classes_by_path = {r["path"]: {c["name"] for c in r.get("classes", [])}
                        for r in records if "classes" in r}

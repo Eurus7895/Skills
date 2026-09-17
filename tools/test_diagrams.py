@@ -55,10 +55,16 @@ def main():
         check("the source is a complete PlantUML document",
               source.startswith("@startuml\n") and source.endswith("@enduml\n"))
         check("inheritance direction is represented", "--|>" in source)
-        check("composition and its label are represented",
-              "*-->" in source and '"engine"' in source)
+        relationship_lines = [line for line in source.splitlines()
+                              if line.startswith("n_")]
+        check("a typed attribute is represented as association, not ownership",
+              any("-->" in line and '"engine"' in line for line in relationship_lines)
+              and not any("*-->" in line for line in relationship_lines))
         check("class members are represented", "+engine: Engine" in source and "+total()" in source)
         check("a relationship legend is present", "legend right" in source)
+        check("the class view uses the readable neutral style baseline",
+              "classBackgroundColor #FFFFFF" in source
+              and "defaultFontName Segoe UI" in source and "title " in source)
 
         if shutil.which("plantuml"):
             proc = subprocess.run(["plantuml", "-tsvg", os.path.join(

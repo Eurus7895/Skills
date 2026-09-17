@@ -12,14 +12,15 @@ builder and the PlantUML generator use only the Python standard library.
 Relationships live in named layers, because they are not equally well known:
 
     inheritance   a base class resolved to the file defining it. Deterministic
-    composition   an attribute whose written type resolves to a class here.
-                  Deterministic, and only as good as the annotation
+    association   an attribute whose written type resolves to a class here, or a
+                  deterministic module import. A type annotation does not prove that
+                  the source owns the target's lifecycle.
     association   the defining modules import one another. Weaker: a reference
                   between files, not between the classes in them
     calls         from a `calls` claim verified at its call site. Never inferred
     inference     anything the model asserted that no pass could confirm
 
-A class with no annotations produces no composition edges, and that absence is reported
+A class with no annotations produces no typed-association edges, and that absence is reported
 rather than filled in from parameter names or attribute spelling.
 
 Detail levels: `summary` (name only), `public` (public methods and typed attributes),
@@ -199,17 +200,19 @@ def collect_edges(index, classes, modules, claims):
 
             # Two attributes of the same type are one relationship carrying two names,
             # not two relationships. Drawn separately they are parallel lines a reader
-            # has to compare; merged, the labels say what is held.
+            # has to compare; merged, the labels say what is referenced. A typed
+            # attribute proves this association, not lifecycle ownership, so it must not
+            # be promoted to composition.
             for attribute in cls.get("attributes", ()):
                 for typed in attribute.get("types", ()):
                     target = names_by_path.get(typed["resolved"], {}).get(typed["name"])
                     if target is None or target == source:
                         continue
-                    edge_id = "edge:composition:%s:%s" % (source, target)
+                    edge_id = "edge:association:%s:%s" % (source, target)
                     existing = next((e for e in edges if e["id"] == edge_id), None)
                     if existing is None:
                         edges.append({
-                            "id": edge_id, "layer": "composition", "from": source,
+                            "id": edge_id, "layer": "association", "from": source,
                             "to": target, "verified": True,
                             "labels": [attribute["name"]],
                             "cites": ["%s:%d" % (path, attribute["line"])]})
@@ -317,11 +320,14 @@ def validate(graph, index):
         edge_ids.add(edge["id"])
         if edge["layer"] not in LAYERS:
             problems.append("edge %r is in unknown layer %r" % (edge["id"], edge["layer"]))
-        # Each layer connects the kind of thing it is a fact about: inheritance and
-        # composition join classes, association joins modules, and a call claim names
+        # Each layer connects the kind of thing it is a fact about: inheritance,
+        # composition and typed association join classes; import association joins
+        # modules; and a call claim names
         # modules and symbols. Checking them all against the class set would either
         # reject correct edges or force association into a shape it does not have.
-        if edge["layer"] in ("inheritance", "composition"):
+        if edge["layer"] in ("inheritance", "composition") or (
+                edge["layer"] == "association"
+                and not edge["from"].startswith("module:")):
             for end in ("from", "to"):
                 if edge[end] not in class_ids:
                     problems.append("edge %r end %r is not a class in this graph"

@@ -42,7 +42,7 @@ as many answers as it takes.
    Include use cases in Introduction, design decisions and boundaries in System Overview, and precise
    processing behavior in Data Flow and Detailed Processing Phases. Do not invent authors' motivations.
    **These are notes.** Write them to be complete and citable, not to be read aloud.
-5. **Compose each page** into `pages` (see below). Read that page's answers together and write the sections a
+5. Read [prose-generation.md](prose-generation.md), then **compose each page** into `pages` (see below). Read that page's answers together and write the sections a
    reader needs: a heading that says what the section is about, and prose that reads as documentation. One
    section may draw on several answers, and should where the answers overlap — three questions about
    configuration are usually one section, not three.
@@ -117,7 +117,7 @@ summaries belong in the generation report. Do not use them as answers about the 
       "basis": "observed",
       "completeness": "complete",
       "content_review": "pending",
-      "text": "Explain the actual product and the problem it solves, using the cited evidence.",
+      "text": "OrderLog records orders in a local store so the team can retain order history without running a database server.",
       "evidence": [{"path": "README.md", "line_start": 1, "line_end": 12}],
       "verified_ids": ["claim:imports:src/api.py:src/service.py", "op:test"],
       "facets_missing": []

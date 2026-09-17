@@ -134,10 +134,18 @@ def render(flow, index_hash):
                           "text": one_line(entry["reason"]), "status": "unknown"})
     notes = before + after
 
+    title = flow.get("name") or flow.get("id") or "Verified data flow"
     meta = {"schema_version": 1, "flow": flow.get("id"), "index_hash": index_hash,
-            "flow_hash": digest(flow), "steps": len(steps)}
+            "flow_hash": digest(flow), "steps": len(steps), "title": title}
     lines = ["@startuml",
              "' Generated from flow-analysis.json; do not edit by hand.",
+             "skinparam backgroundColor #FFFFFF", "skinparam defaultFontName Segoe UI",
+             "skinparam defaultFontSize 11", "skinparam defaultFontColor #2C3E50",
+             "skinparam sequenceArrowColor #34495E",
+             "skinparam sequenceLifeLineBorderColor #2C3E50",
+             "skinparam sequenceParticipantBackgroundColor #FFFFFF",
+             "skinparam sequenceParticipantBorderColor #2C3E50",
+             "skinparam shadowing false", "title %s" % quote(title),
              "autonumber", "skinparam sequenceMessageAlign left",
              "' @sequence %s" % json.dumps(meta, sort_keys=True, separators=(",", ":"))]
     for entity in order:
@@ -166,7 +174,9 @@ def render(flow, index_hash):
              "label": one_line(where or step.get("id", ""))},
             sort_keys=True, separators=(",", ":")))
     emit_notes(after)
-    lines.extend(["@enduml", ""])
+    lines.extend(["legend right", "  Verified arrows: source call sites",
+                  "  Notes: trigger, outcome, or unresolved boundary",
+                  "endlegend", "@enduml", ""])
     return "\n".join(lines), meta, order, notes
 
 

@@ -20,7 +20,10 @@ import subprocess
 import sys
 import tempfile
 
-from component_scripts import script
+from component_scripts import component_paths, script
+
+sys.path[:0] = component_paths()
+import pipeline
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURE = os.path.join(REPO, "tests", "contracts", "flow-repo")
@@ -408,6 +411,23 @@ def driver_tests(tmp, root):
     check("a missing review file is an input error", code == 2, text)
     code, text = run("pipeline.py", "audit", "--root", root, "--build", build)
     check("a component this driver does not have is refused", code != 0, text[-200:])
+
+    # check_prose stores these counts under coverage. P4 used to read top-level keys,
+    # so it never opened even when every manual section was waiting for review.
+    report_dir = os.path.join(tmp, "p4-report")
+    os.makedirs(report_dir)
+    write(os.path.join(report_dir, "prose-report.json"), json.dumps({
+        "status": "review_required",
+        "coverage": {"queued": 19, "reviewed": 0},
+    }))
+    check("P4 detects the review queue written by check_prose",
+          pipeline.prose_queued(report_dir))
+    write(os.path.join(report_dir, "prose-report.json"), json.dumps({
+        "status": "passed",
+        "coverage": {"queued": 19, "reviewed": 19},
+    }))
+    check("P4 stays closed after the whole queue is reviewed",
+          not pipeline.prose_queued(report_dir))
 
 
 def diagram_directory_test(tmp):
