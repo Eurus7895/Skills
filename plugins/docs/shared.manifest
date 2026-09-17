@@ -52,4 +52,5 @@ scripts/review/validate_draft.py            -> skills/document-codebase/scripts/
 scripts/publish/promote_docs.py             -> skills/document-codebase/scripts/publish/promote_docs.py
 
 scripts/document/manual.py -> skills/document-codebase/scripts/document/manual.py
+scripts/document/authored.py -> skills/document-codebase/scripts/document/authored.py
 scripts/document/manual_questions.json -> skills/document-codebase/scripts/document/manual_questions.json

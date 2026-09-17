@@ -121,9 +121,9 @@ is meant to be committed.
 
 Everything except the finished document is written to **`.docs-build/`** in the working directory:
 `structure.json`, the claims, fragments and analyses with their verified counterparts, `findings.jsonl`,
-`class-graph.json`, `doc.json`, `diagrams/`, `rendered-docs/` and `timings.jsonl`. Say so when you finish, and
-offer to delete it; nothing in there is meant to be committed. Publication copies the reviewed diagrams and
-pages into the target tree together.
+`class-graph.json`, `authored.jsonl`, `doc.json`, `diagrams/`, `rendered-docs/` and `timings.jsonl`. Say so when
+you finish, and offer to delete it; nothing in there is meant to be committed. Publication copies the reviewed
+diagrams and pages into the target tree together.
 
 ## Where the run pauses for the user
 
@@ -237,6 +237,10 @@ is the one script you call yourself, for a packet's parts. You do not need to re
 
 Writes intermediates and the rendered draft under `.docs-build/`. Only `publish` replaces `docs/` (or a path
 you name), after validating the final-review seal.
+
+With `--preset manual` the draft includes a scaffold for each appendix page nobody has written or waived — a
+brief carrying the questions and the evidence this run verified for them. **An existing page is never
+overwritten**; a scaffold is only ever created where no file is.
 Reads the working tree only. Uses `git ls-files` when the target is a git repository so ignored files are
 skipped, and `git rev-parse`/`git status` to record which revision was scanned. `annotate_import_usage.py`
 invokes `ruff` when enabled, read-only and with `--no-cache`, so nothing is written into the scanned

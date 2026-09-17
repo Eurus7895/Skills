@@ -446,13 +446,36 @@ def operations_report(operations):
     }
 
 
+SETTLED_AUTHORED = ("complete", "waived")
+
+
 def page_report(doc):
+    """Which mandatory pages the run owes, separating the two ways of owing one.
+
+    A generated page the builder did not produce is the run's failure. An authored page
+    is a different debt: nothing generates it, and it is owed by a person. Counting the
+    second as the first is what made the manual preset report six missing pages on every
+    run it ever made -- an unconditional failure nobody could clear, because the pages it
+    named live in `authored_pages` and could never appear in `pages`.
+
+    So an authored page is discharged by its ledger row being settled, and until then it
+    is reported as what it is: unwritten, and whose.
+    """
     preset = doc.get("preset")
     pages = {page["id"] for page in doc.get("pages", ())}
+    ledger = doc.get("authored_ledger", ()) or ()
+    known = {row.get("page_id") for row in ledger}
+    unsettled = sorted(row.get("page_id") for row in ledger
+                       if row.get("status") not in SETTLED_AUTHORED)
     required = [page_id for page_id, _, mandatory, _ in PRESETS.get(preset, ())
                 if mandatory]
+    # Every ledger page leaves `missing`, settled or not. An unsettled one is still owed,
+    # but it is owed by a person and reported as such -- listing it here too said the
+    # builder had failed to generate a page that was never the builder's to generate, and
+    # put the same five names under two headings with two different remedies.
     return {"preset": preset, "generated": len(pages), "mandatory": len(required),
-            "missing": sorted(set(required) - pages)}
+            "missing": sorted(set(required) - pages - known),
+            "authored_unsettled": unsettled}
 
 
 def diagram_report(directory):
@@ -687,6 +710,26 @@ def main():
                 status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
                 reasons.append("manual is missing required diagram(s): %s"
                                % ", ".join(missing_diagrams))
+
+            # The authored pages, reported in their own right rather than folded into
+            # `answer_mode`. The run was never asked to answer them, so they must not
+            # count against what it did answer -- and must not be excused by it either.
+            authored = doc.get("authored_coverage") or {}
+            if authored:
+                report["manual"]["authored_mode"] = authored.get("mode")
+                report["manual"]["authored_settled"] = authored.get("settled")
+                report["manual"]["authored_total"] = authored.get("total")
+                owed = [pid for pid, _ in authored.get("unsettled") or ()]
+                if owed:
+                    # Not `partial`: a manual published with an empty troubleshooting
+                    # page is a manual that promised a reader something and shipped the
+                    # promise. Clearing it needs a page or a waiver, and either is a
+                    # minute's work -- which is the point of holding here.
+                    status = FAILED
+                    reasons.append(
+                        "manual has %d authored page(s) nobody has written or waived: "
+                        "%s. Fill the scaffold, or waive it with an owner and a reason"
+                        % (len(owed), ", ".join(owed)))
         if report["pages"]["missing"]:
             status = FAILED
             reasons.append("the %s preset requires pages that were not generated: %s"

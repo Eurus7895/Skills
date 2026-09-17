@@ -22,6 +22,8 @@ import argparse
 import json
 from pathlib import Path
 
+import authored
+
 
 MANUAL_VERSION = 2
 
@@ -36,6 +38,11 @@ QUESTIONS = json.loads(Path(__file__).with_name("manual_questions.json").read_te
 # has no source for, which buys 38 more `unknown`s and drags `answer_mode` down for
 # gaps that were never the run's to fill. A page the report names as authored is honest;
 # a page of unknowns pretending the run tried is not.
+#
+# That reasoning still holds, and it used to end here -- which made "not the run's to
+# fill" indistinguishable from "nobody's to fill". `authored.py` carries the other half:
+# the pages stay out of `answer_mode`, and gain a ledger that records the obligation, the
+# evidence this run already verified for them, and what it found nothing for.
 GENERATED = [page for page in QUESTIONS if not page.get("authored")]
 AUTHORED = [page for page in QUESTIONS if page.get("authored")]
 DIAGRAMS = {"architecture/class_diagram": "diagram-manifest.json",
@@ -533,12 +540,25 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
     for ref in cited:
         by_source.setdefault(origins[ref], []).append(ref)
     sections_written = sum(1 for p in pages for b in p["blocks"] if b.get("manual_block"))
+    # Named, not generated -- the way `handbook` treats the same material -- but no longer
+    # only named. Each carries its ledger row, so the report can say which are still owed
+    # and a scaffold can hand the writer what this run already verified for them.
+    authored_rows = authored.ledger(AUTHORED, index, analysis, extra,
+                                    (extra or {}).get("authored") or ())
+    authored_by_page = {row["page_id"]: row for row in authored_rows}
+    mode, settled, authored_total = authored.authored_mode(authored_rows)
     return {"preset": "manual", "pages": pages,
-            # Named and never written, the way `handbook` treats the same material. The
-            # report says they were not generated, so a reader can see the gap instead
-            # of meeting a page of unknowns that looks like a failed attempt.
-            "authored_pages": [{"id": page["id"], "title": page["title"]}
-                               for page in AUTHORED],
+            # `order` continues past the generated pages: the renderer sorts generated
+            # and authored together into one toctree, and a page without it sorts to
+            # zero -- which would put the glossary ahead of the introduction.
+            "authored_pages": [{"id": page["id"], "title": page["title"],
+                                "order": len(pages) + position,
+                                "status": authored_by_page[page["id"]]["status"]}
+                               for position, page in enumerate(AUTHORED, 1)],
+            "authored_ledger": authored_rows,
+            "authored_coverage": {"mode": mode, "settled": settled,
+                                  "total": authored_total,
+                                  "unsettled": authored.unsettled(authored_rows)},
             "claims": [by_claim[i] for i in sorted(cited) if i in by_claim],
             "statements": [by_statement[i] for i in sorted(cited) if i in by_statement],
             "coverage": index.get("coverage", {}),
@@ -588,6 +608,8 @@ if __name__ == "__main__":
     parser.add_argument("--flows", help="flow-analysis.json")
     parser.add_argument("--operations", help="operations-analysis.json")
     parser.add_argument("--config", help="config-analysis.json")
+    parser.add_argument("--authored", help="where to write the authored-page ledger; "
+                                           "an existing one is never overwritten")
     args = parser.parse_args()
     index = json.loads(Path(args.index).read_text())
     extra = {}
@@ -611,3 +633,13 @@ if __name__ == "__main__":
     facts = sum(len(v) for v in draft["facts"].values())
     print("wrote %s: %d unanswered question(s); %d verified fact(s) available to cite"
           % (args.init, len(draft["answers"]), facts))
+    # The six pages the run does not answer get their obligation recorded at the same
+    # moment the questions it does answer get theirs. Writing this only at build time
+    # would leave the first run's report saying six pages are missing with nothing on
+    # disk that a person could pick up and fill.
+    if args.authored and not Path(args.authored).exists():
+        rows = authored.ledger(AUTHORED, index, None, extra)
+        authored.dump(rows, args.authored)
+        owed = len(authored.unsettled(rows))
+        print("wrote %s: %d authored page(s), %d still owed a writer"
+              % (args.authored, len(rows), owed))

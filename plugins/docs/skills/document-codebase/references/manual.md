@@ -52,7 +52,9 @@ as many answers as it takes.
    composed section stays inside
    what its answers cite. It does not prove that a sentence is true or sufficient: deterministic prose
    checks examine every composed section, and **every manual section enters the model review queue**.
-7. Review `.docs-build/rendered-docs/`: does it read as a manual, and does each section still say what its answers said?
+7. **Settle the six authored pages** (see below). Fill each scaffold `render` wrote into the draft, or waive it
+   with an owner and a reason. The gate holds publication until every one is `complete` or `waived`.
+8. Review `.docs-build/rendered-docs/`: does it read as a manual, and does each section still say what its answers said?
    Correct the notes or the composition in `manual-analysis.json` and rebuild; do not patch generated RST
    because the next build replaces it. Review verdicts apply to section blocks
    `section:<page-id>:<n>`. Unknown answers and missing mandatory diagrams keep the quality report
@@ -102,6 +104,59 @@ The documentation-review appendix describes the covered product revision, intend
 scope, specific uncertainties and limitations. Pipeline execution counts, Sphinx success and claims-checking
 summaries belong in the generation report. Do not use them as answers about the product or as filler in
 `documentation_review.rst`.
+
+## The six pages the run does not answer
+
+`appendix/troubleshooting`, `faq`, `glossary`, `references`, `compliance` and `changelog` carry 38 template
+questions between them that **no repository answers**. What users actually ask, which terms need defining,
+what a compliance position is — none of that is in the source, and asking the run for it would buy 38 more
+`unknown`s and drag `answer_mode` down for gaps that were never the run's to fill.
+
+They are not silent, though. Each carries a row in **`.docs-build/authored.jsonl`**:
+
+```json
+{"authored_version": 1, "page_id": "appendix/troubleshooting", "status": "scaffolded",
+ "owner": null, "waiver_reason": null, "default_waiver": false,
+ "questions": [{"id": "5.3.1", "answered": false}]}
+```
+
+`status` is `scaffolded`, `drafted`, `complete` or `waived`. **Only `complete` and `waived` release the
+publication gate** — `drafted` deliberately does not, because a draft is what gets reviewed and treating it
+as done would publish the review's input as its output. A waiver names an owner and a reason: "we looked,
+and this page is not needed here" is an answer, and an answer has somebody behind it.
+
+The file holds only what a person owns. The evidence a page is offered is recomputed on every build against
+that run's index, so a stale reading list never sits in a file somebody is editing.
+
+**`appendix/compliance` starts `waived` by default**, with `default_waiver: true` and no owner. It asserts a
+legal position rather than describing behaviour, and an unowned compliance claim is worse than an absent one:
+a reader cannot tell a considered "this does not apply" from nobody having looked. Set an owner to make it an
+assertion.
+
+### What the run hands over
+
+`render` writes a scaffold for every unsettled page that has no file yet — **never overwriting one that
+exists** — carrying the audience, the questions, and the evidence this run already verified:
+
+| Page | Gets |
+| --- | --- |
+| `troubleshooting` | every `declared`/`observed` **`failure`** statement, and the validated procedures |
+| `faq` | the validated procedures, and the README |
+| `changelog` | the repository's changelog asset |
+| `references` | its licence and packaging assets |
+| `glossary`, `compliance` | nothing, and the scaffold says so |
+
+**Nothing here is extracted.** Every row was collected and checked by a component that already runs, and
+arrives with the id it carries elsewhere in the document, so the page cites what the rest of the manual
+cites. `inferred` rows are excluded: the model's own reading, on a page whose whole problem is that evidence
+is thin, would arrive looking like evidence.
+
+The scaffold also says what the run looked for and **did not** find — *"1 of 2 analysed module(s) carry no
+failure statement (src/store.py)"*. Without it a thin troubleshooting page and a thin analysis look
+identical, and the difference decides whose problem it is.
+
+What a scaffold never does is compose a sentence. A symptom-and-cause table built from a guess at what
+usually goes wrong would arrive looking finished, and that is the failure this skill is arranged against.
 
 ## Answer contract
 

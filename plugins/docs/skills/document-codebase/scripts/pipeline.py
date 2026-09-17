@@ -395,7 +395,8 @@ def document(args):
             # the draft here rather than failing with a command to go and type -- `--init`
             # refuses to overwrite, so this can never eat answers that already exist.
             argv = [sys.executable, os.path.join(HERE, "document", "manual.py"),
-                    "--init", answers, "--index", index]
+                    "--init", answers, "--index", index,
+                    "--authored", os.path.join(build, "authored.jsonl")]
             for flag, path in (("--architecture", architecture), ("--flows", flows),
                                ("--operations", operations), ("--config", config)):
                 if os.path.exists(path):
@@ -417,7 +418,8 @@ def document(args):
              "--out", os.path.join(build, "doc.json")]
     if preset == "manual":
         model.extend(["--manual-analysis", os.path.join(build, "manual-analysis.json"),
-                      "--root", args.root])
+                      "--root", args.root,
+                      "--authored", os.path.join(build, "authored.jsonl")])
     for flag, path in (("--architecture", architecture), ("--flows", flows),
                        ("--operations", operations), ("--config", config)):
         if os.path.exists(path):
