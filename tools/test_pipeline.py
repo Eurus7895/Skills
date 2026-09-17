@@ -20,7 +20,10 @@ import subprocess
 import sys
 import tempfile
 
-from component_scripts import script
+from component_scripts import component_paths, script
+
+sys.path[:0] = component_paths()
+import pipeline
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURE = os.path.join(REPO, "tests", "contracts", "flow-repo")
@@ -215,6 +218,24 @@ def driver_tests(tmp, root):
     check("survey writes the index and the scope",
           os.path.exists(os.path.join(build, "structure.json"))
           and os.path.exists(os.path.join(build, "units.txt")))
+    timing_path = os.path.join(build, "timings.jsonl")
+    timings = [json.loads(line) for line in open(timing_path, encoding="utf-8")]
+    check("the driver records stage and component durations",
+          any(r.get("record_type") == "stage" and r.get("stage") == "survey/scan_repo"
+              and r.get("duration_seconds", -1) >= 0 for r in timings)
+          and any(r.get("record_type") == "component" and r.get("component") == "survey"
+                  for r in timings), repr(timings[-3:]))
+
+    code, text = run("pipeline.py", "measure", "--root", root, "--build", build,
+                     "--step", "source_reading", "--state", "start")
+    check("a model-driven step can start explicit timing", code == 0, text)
+    code, text = run("pipeline.py", "measure", "--root", root, "--build", build,
+                     "--step", "source_reading", "--state", "stop")
+    timings = [json.loads(line) for line in open(timing_path, encoding="utf-8")]
+    check("and stopping it writes a model_step duration",
+          code == 0 and any(r.get("record_type") == "model_step"
+                            and r.get("step") == "source_reading"
+                            and r.get("duration_seconds", -1) >= 0 for r in timings), text)
 
     # The scope checkpoint. Every other invariant in this pipeline is a script that
     # refuses; this one was a paragraph in SKILL.md, so a run that read the units and
@@ -361,9 +382,9 @@ def driver_tests(tmp, root):
           "--operations" in text, text)
     os.remove(os.path.join(build, "operations-analysis.json"))
     write(os.path.join(build, "architecture-analysis.json"), "{}")
-    code, text = run("pipeline.py", "publish", "--root", root, "--build", build,
+    code, text = run("pipeline.py", "review", "--root", root, "--build", build,
                      "--docs", os.path.join(tmp, "docs"), "--dry-run")
-    check("publish passes the analyses to the prose check and the gate",
+    check("review passes the analyses to the prose check and the gate",
           text.count("--architecture") == 2, text)
     os.remove(os.path.join(build, "architecture-analysis.json"))
 
@@ -385,11 +406,28 @@ def driver_tests(tmp, root):
     code, text = run("pipeline.py", "survey", "--root", os.path.join(tmp, "no-such-dir"),
                      "--build", build)
     check("a missing root is an input error", code == 2, text)
-    code, text = run("pipeline.py", "publish", "--root", root, "--build", build,
+    code, text = run("pipeline.py", "review", "--root", root, "--build", build,
                      "--review", os.path.join(tmp, "no-such-review.jsonl"))
     check("a missing review file is an input error", code == 2, text)
     code, text = run("pipeline.py", "audit", "--root", root, "--build", build)
     check("a component this driver does not have is refused", code != 0, text[-200:])
+
+    # check_prose stores these counts under coverage. P4 used to read top-level keys,
+    # so it never opened even when every manual section was waiting for review.
+    report_dir = os.path.join(tmp, "p4-report")
+    os.makedirs(report_dir)
+    write(os.path.join(report_dir, "prose-report.json"), json.dumps({
+        "status": "review_required",
+        "coverage": {"queued": 19, "reviewed": 0},
+    }))
+    check("P4 detects the review queue written by check_prose",
+          pipeline.prose_queued(report_dir))
+    write(os.path.join(report_dir, "prose-report.json"), json.dumps({
+        "status": "passed",
+        "coverage": {"queued": 19, "reviewed": 19},
+    }))
+    check("P4 stays closed after the whole queue is reviewed",
+          not pipeline.prose_queued(report_dir))
 
 
 def diagram_directory_test(tmp):

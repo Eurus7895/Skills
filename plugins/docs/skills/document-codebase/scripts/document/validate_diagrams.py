@@ -119,7 +119,7 @@ def validate_view(entry, parsed, graph, findings):
     meta = parsed["diagram"]
     if meta != {key: entry.get(key) for key in
                 ("schema_version", "source_graph_hash", "view_spec_hash", "view",
-                 "scope", "detail", "layers")}:
+                 "scope", "detail", "layers", "title")}:
         add(findings, "G002", "PlantUML metadata does not match the manifest", view)
     if meta.get("source_graph_hash") != graph.get("source_graph_hash"):
         add(findings, "G002", "view was generated from a different class graph", view)

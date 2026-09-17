@@ -10,12 +10,14 @@
     python3 scripts/pipeline.py check
     #   ... write architecture-analysis.json, flow-analysis.json, operations-analysis.json ...
     python3 scripts/pipeline.py document
+    python3 scripts/pipeline.py render --docs docs
+    python3 scripts/pipeline.py review
     python3 scripts/pipeline.py publish --docs docs
 
-Five components, and each is a directory beside this file holding the scripts that answer
-one kind of question. `survey` asks what is in the repository, `analyze` what the model
-needs in front of it, `check` whether a claim holds, `document` what the pages will say,
-`publish` what a reader gets and whether the run may be called done. This driver runs a
+Seven runtime components answer one kind of question each. `survey` asks what is in the
+repository, `analyze` what the model needs in front of it, `check` whether a claim holds,
+`document` what the pages will say, `render` what the draft looks like, `review` whether
+that exact draft may ship, and `publish` promotes it. This driver runs a
 component's scripts in order with the arguments that component fixes; nothing here decides
 anything a script was already the authority on.
 
@@ -26,7 +28,7 @@ is reachable from here.
 
 **The pauses between components are the pipeline.** `analyze` ends because a module's
 purpose is not in an index; `check` ends because what the modules add up to is not in a
-claim; `publish` ends by queueing the sentences only a person can settle. A driver that ran
+claim; `review` ends by queueing the sentences only a person can settle. A driver that ran
 straight through would be a pipeline that documents nothing.
 
 **A component stops at the first stage that fails, and says which one.** Exit codes pass
@@ -51,8 +53,13 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import build_dir  # noqa: E402
 
 
 def fail(message, code=2):
@@ -71,7 +78,7 @@ class Stage(object):
     """
 
     def __init__(self, component, script, args, needs=(), tolerate=(), skip_note=None,
-                 capture=None, label=None):
+                 capture=None, label=None, script_component=None):
         self.component = component
         self.script = script
         self.args = [str(a) for a in args]
@@ -80,6 +87,7 @@ class Stage(object):
         self.skip_note = skip_note
         self.capture = capture
         self.label = label
+        self.script_component = script_component or component
 
     @property
     def name(self):
@@ -88,25 +96,60 @@ class Stage(object):
 
     @property
     def path(self):
-        return os.path.join(HERE, self.component, self.script)
+        return os.path.join(HERE, self.script_component, self.script)
 
     def missing(self):
         return [path for path in self.needs if not os.path.exists(path)]
 
 
-def run(stages, dry_run=False):
+def utc_now():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def append_timing(path, record):
+    """Append one measurement without making telemetry a pipeline dependency."""
+    if not path:
+        return
+    try:
+        directory = os.path.dirname(os.path.abspath(path))
+        if directory and not os.path.isdir(directory):
+            os.makedirs(directory, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, sort_keys=True) + "\n")
+    except OSError as exc:
+        sys.stderr.write("WARN  could not write timing record: %s\n" % exc)
+
+
+def run(stages, dry_run=False, timings=None, invocation_id=None):
     """Run each stage in order. Returns the exit code the component should report."""
     worst = 0
     for position, stage in enumerate(stages):
+        started_at = utc_now()
+        started = time.perf_counter()
         absent = stage.missing()
         if absent:
             note = stage.skip_note or "input not written: %s" % ", ".join(absent)
             print("\n-- skip %s (%s)" % (stage.name, note))
+            append_timing(timings, {
+                "schema_version": 1, "record_type": "stage",
+                "invocation_id": invocation_id, "component": stage.component,
+                "stage": stage.name, "status": "skipped", "exit_code": None,
+                "started_at": started_at, "finished_at": utc_now(),
+                "duration_seconds": round(time.perf_counter() - started, 6),
+                "note": note,
+            })
             continue
         command = [sys.executable, stage.path] + stage.args
         print("\n-- %s%s" % (stage.name, " > %s" % stage.capture if stage.capture else ""))
         if dry_run:
             print(" ".join(command))
+            append_timing(timings, {
+                "schema_version": 1, "record_type": "stage",
+                "invocation_id": invocation_id, "component": stage.component,
+                "stage": stage.name, "status": "dry_run", "exit_code": None,
+                "started_at": started_at, "finished_at": utc_now(),
+                "duration_seconds": round(time.perf_counter() - started, 6),
+            })
             continue
         if stage.capture:
             directory = os.path.dirname(stage.capture)
@@ -116,6 +159,17 @@ def run(stages, dry_run=False):
                 code = subprocess.call(command, stdout=fh)
         else:
             code = subprocess.call(command)
+        status = "passed" if code == 0 else (
+            "tolerated" if code in stage.tolerate else "failed")
+        duration = time.perf_counter() - started
+        print("-- timing %s %.3fs" % (stage.name, duration))
+        append_timing(timings, {
+            "schema_version": 1, "record_type": "stage",
+            "invocation_id": invocation_id, "component": stage.component,
+            "stage": stage.name, "status": status, "exit_code": code,
+            "started_at": started_at, "finished_at": utc_now(),
+            "duration_seconds": round(duration, 6),
+        })
         if code == 0:
             continue
         if code in stage.tolerate:
@@ -130,6 +184,50 @@ def run(stages, dry_run=False):
                             if remaining else "it was the last stage of this component."))
         return code
     return worst
+
+
+def measure(args):
+    """Start or stop a model-driven step that runs between component commands."""
+    active_path = os.path.join(args.build, "timing-active.json")
+    timings = os.path.join(args.build, "timings.jsonl")
+    if not (args.step or "").strip():
+        return fail("measure requires --step")
+    step = args.step.strip()
+    if args.state == "start":
+        if os.path.isfile(active_path):
+            try:
+                with open(active_path, encoding="utf-8") as fh:
+                    active = json.load(fh)
+            except (OSError, ValueError):
+                active = {}
+            return fail("%s is already being measured; stop it before starting %s"
+                        % (active.get("step", "another step"), step), 1)
+        record = {"schema_version": 1, "step": step, "started_at": utc_now(),
+                  "started_epoch": time.time(), "kind": "model"}
+        with open(active_path, "w", encoding="utf-8") as fh:
+            json.dump(record, fh, indent=1, sort_keys=True)
+            fh.write("\n")
+        print("timing started: %s" % step)
+        return 0
+    if not os.path.isfile(active_path):
+        return fail("no model step is being measured", 1)
+    try:
+        with open(active_path, encoding="utf-8") as fh:
+            active = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return fail("cannot read %s: %s" % (active_path, exc))
+    if active.get("step") != step:
+        return fail("%s is being measured, not %s" % (active.get("step"), step), 1)
+    finished = time.time()
+    append_timing(timings, {
+        "schema_version": 1, "record_type": "model_step", "step": step,
+        "status": args.status, "started_at": active.get("started_at"),
+        "finished_at": utc_now(),
+        "duration_seconds": round(max(0.0, finished - active["started_epoch"]), 6),
+    })
+    os.remove(active_path)
+    print("timing stopped: %s (%s)" % (step, args.status))
+    return 0
 
 
 DERIVED_KINDS = {"defines", "imports", "inherits", "contains"}
@@ -197,6 +295,16 @@ def survey(args):
     stages.append(Stage("survey", "select_units.py",
                         ["--index", index, "--top", args.top,
                          "--out", os.path.join(args.build, "units.txt")]))
+    # Settings are cross-cutting: the answer to "what does this project take" is spread
+    # across every file that reads one, which is the shape a per-module packet cannot
+    # deliver. Extracting them here, once, is what lets a configuration answer cite
+    # something a check passed instead of something the model went looking for.
+    config = os.path.join(args.build, "config-analysis.json")
+    stages.append(Stage("survey", "extract_config.py",
+                        ["--index", index, "--root", args.root, "--out", config]))
+    stages.append(Stage("survey", "validate_config.py",
+                        [config, "--index", index, "--root", args.root,
+                         "--out", os.path.join(args.build, "config-report.json")]))
     return stages
 
 
@@ -261,13 +369,14 @@ def preset_for(args, *analyses):
 
 def document(args):
     """What the pages will say: check the three analyses, draw, then build the model."""
-    build, docs = args.build, args.docs
-    diagrams = os.path.join(docs, "_diagrams")
+    build = args.build
+    diagrams = os.path.join(build, "diagrams")
     index = os.path.join(build, "structure.json")
     verified = os.path.join(build, "claims.verified.jsonl")
     architecture = os.path.join(build, "architecture-analysis.json")
     flows = os.path.join(build, "flow-analysis.json")
     operations = os.path.join(build, "operations-analysis.json")
+    config = os.path.join(build, "config-analysis.json")
     report = os.path.join(build, "flow-report.json")
     graph = os.path.join(build, "class-graph.json")
     preset = preset_for(args, architecture, operations, flows)
@@ -288,7 +397,7 @@ def document(args):
             argv = [sys.executable, os.path.join(HERE, "document", "manual.py"),
                     "--init", answers, "--index", index]
             for flag, path in (("--architecture", architecture), ("--flows", flows),
-                               ("--operations", operations)):
+                               ("--operations", operations), ("--config", config)):
                 if os.path.exists(path):
                     argv.extend([flag, path])
             code = subprocess.call(argv)
@@ -310,7 +419,7 @@ def document(args):
         model.extend(["--manual-analysis", os.path.join(build, "manual-analysis.json"),
                       "--root", args.root])
     for flag, path in (("--architecture", architecture), ("--flows", flows),
-                       ("--operations", operations)):
+                       ("--operations", operations), ("--config", config)):
         if os.path.exists(path):
             model.extend([flag, path])
 
@@ -345,23 +454,39 @@ def document(args):
     ]
 
 
-def publish(args):
-    """What a reader gets: render it, check the sentences, and report on the run."""
-    build, docs = args.build, args.docs
-    diagrams = os.path.join(docs, "_diagrams")
+def staging_of(args):
+    return args.staging or os.path.join(args.build, "rendered-docs")
+
+
+def render(args):
+    """Render a reviewable draft without changing the published documentation."""
+    build, staging = args.build, staging_of(args)
+    render_args = ["--doc", os.path.join(build, "doc.json"), "--out", staging,
+                   "--diagrams", os.path.join(build, "diagrams"),
+                   "--format", args.format, "--check"]
+    if args.write_conf:
+        render_args.append("--write-conf")
+        if args.project:
+            render_args.extend(["--project", args.project])
+    return [
+        Stage("render", "prepare_stage.py", ["--source", args.docs, "--out", staging]),
+        Stage("render", "render_docs.py", render_args, script_component="publish"),
+        Stage("render", "snapshot_draft.py",
+              ["--draft", staging, "--doc", os.path.join(build, "doc.json"),
+               "--out", os.path.join(build, "render-manifest.json")]),
+    ]
+
+
+def review(args):
+    """Review and seal the exact rendered draft; never promote it."""
+    build, staging = args.build, staging_of(args)
+    diagrams = os.path.join(staging, "_diagrams")
     doc = os.path.join(build, "doc.json")
     prose = os.path.join(build, "prose-report.json")
     architecture = os.path.join(build, "architecture-analysis.json")
     flows = os.path.join(build, "flow-analysis.json")
     operations = os.path.join(build, "operations-analysis.json")
     report = os.path.join(build, "flow-report.json")
-
-    render = ["--doc", doc, "--out", docs, "--diagrams", diagrams,
-              "--format", args.format, "--check"]
-    if args.write_conf:
-        render.append("--write-conf")
-        if args.project:
-            render.extend(["--project", args.project])
 
     checker = [doc, "--require-review", "--out", prose]
     gate = ["--index", os.path.join(build, "structure.json"),
@@ -381,19 +506,37 @@ def publish(args):
     if args.review:
         checker.extend(["--review", args.review])
 
+    generation = os.path.join(build, "generation-report.json")
     return [
-        Stage("publish", "render_docs.py", render),
+        Stage("review", "validate_draft.py",
+              ["--draft", staging, "--doc", doc,
+               "--manifest", os.path.join(build, "render-manifest.json")]),
         # A block queued for review is honest, not broken: quality_docs still has to run
         # so the report carries `review_required` rather than the component ending in
         # silence.
-        Stage("publish", "check_prose.py", checker, tolerate=(1,)),
-        Stage("publish", "quality_docs.py", gate),
+        Stage("review", "check_prose.py", checker, tolerate=(1,),
+              script_component="publish"),
+        Stage("review", "quality_docs.py", gate, script_component="publish"),
+        Stage("review", "seal_draft.py",
+              ["--draft", staging, "--doc", doc, "--report", generation,
+               "--render-manifest", os.path.join(build, "render-manifest.json"),
+               "--out", os.path.join(build, "publish-seal.json")]),
     ]
 
 
+def publish(args):
+    """Promote only the sealed draft; perform no generation or review."""
+    return [Stage("publish", "promote_docs.py",
+                  ["--draft", staging_of(args), "--target", args.docs,
+                   "--doc", os.path.join(args.build, "doc.json"),
+                   "--report", os.path.join(args.build, "generation-report.json"),
+                   "--seal", os.path.join(args.build, "publish-seal.json")])]
+
+
 COMPONENTS = {"survey": survey, "analyze": analyze, "check": check,
-              "document": document, "publish": publish}
-ORDER = ["survey", "analyze", "check", "document", "publish"]
+              "document": document, "render": render, "review": review,
+              "publish": publish}
+ORDER = ["survey", "analyze", "check", "document", "render", "review", "publish"]
 
 # The judgements the document rests on that no script can make, and the component each
 # one stands in front of.
@@ -406,9 +549,12 @@ ORDER = ["survey", "analyze", "check", "document", "publish"]
 # a wrong scope or a wrong set of module roles survives every check downstream, because a
 # check compares a claim against evidence and never against what the repository is *for*.
 #
-# There is no fourth entry. P4, the prose queue, is already enforced: a block queued by
-# `check_prose` and not decided holds the run at `review_required`, which is the same
-# mechanism arrived at from the other direction.
+# P4 was left out of this table once, on the reasoning that a queued block nobody decided
+# already holds the run at `review_required`. That confuses two things. Holding the *gate*
+# is not opening a *pause*: nothing printed the question, nothing refused to run, and a
+# run went all the way to a published manual with twenty blocks queued, zero reviewed, and
+# the final validation never executed -- because the workflow was never told to stop.
+# P1-P3 stop it by refusing the next component. P4 now does the same.
 CHECKPOINTS = (
     {"id": "P1", "opened_by": "survey", "blocks": "analyze",
      "show": "the selected units with their fan-in, the cutoff, and every warning the "
@@ -421,7 +567,28 @@ CHECKPOINTS = (
      "show": "the components and their boundaries, the flows traced and the ones "
              "refused, the operations found",
      "ask": "is this the architecture, and are the boundaries where they would put them"},
+    # Opened by `review` and blocking `review`: the first run queues, and
+    # the second -- the one that carries `--review` and reaches the final gate -- is the
+    # one held. `opens_when` keeps it quiet on a run that queued nothing, because a
+    # checkpoint that opens with no question to ask teaches people to decide it blind.
+    {"id": "P4", "opened_by": "review", "blocks": "review", "opens_when": "prose_queued",
+     "show": "each queued block beside the evidence under it, and the verb you propose",
+     "ask": "are these the intended readings"},
 )
+
+
+def prose_queued(build):
+    """Whether `check_prose` left blocks nobody has decided."""
+    try:
+        with open(os.path.join(build, "prose-report.json"), encoding="utf-8") as fh:
+            report = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    coverage = report.get("coverage") or {}
+    return (coverage.get("queued") or 0) > (coverage.get("reviewed") or 0)
+
+
+OPENS_WHEN = {"prose_queued": prose_queued}
 
 
 def invoked_as():
@@ -507,14 +674,22 @@ def blocking_checkpoint(build, component, digest):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("component", choices=ORDER + ["decide"], metavar="COMPONENT",
-                        help="one of: %s, or decide" % ", ".join(ORDER))
-    parser.add_argument("--checkpoint", help="decide: which checkpoint (P1, P2, P3)")
+    parser.add_argument("component", choices=ORDER + ["decide", "measure"],
+                        metavar="COMPONENT",
+                        help="one of: %s, decide, or measure" % ", ".join(ORDER))
+    parser.add_argument("--checkpoint", help="decide: which checkpoint (P1, P2, P3, P4)")
     parser.add_argument("--note", help="decide: what was decided, and by whom -- this is "
                                        "what the closing report carries")
+    parser.add_argument("--step", help="measure: model-driven step name")
+    parser.add_argument("--state", choices=("start", "stop"), default="start",
+                        help="measure: start or stop the named step")
+    parser.add_argument("--status", choices=("completed", "failed", "cancelled"),
+                        default="completed", help="measure --state stop: outcome")
     parser.add_argument("--root", default=".", help="the repository being documented")
     parser.add_argument("--build", default=".docs-build", help="where intermediates go")
     parser.add_argument("--docs", default="docs", help="where the document is written")
+    parser.add_argument("--staging", help="rendered draft directory; defaults to "
+                                          ".docs-build/rendered-docs")
     parser.add_argument("--top", type=int, default=25, help="survey: fan-in cutoff")
     parser.add_argument("--policy", default="optional",
                         choices=("disabled", "optional", "required"),
@@ -527,11 +702,11 @@ def main():
     parser.add_argument("--detail", default="public",
                         help="document: class-diagram detail")
     parser.add_argument("--format", default="rst", choices=("rst", "myst"),
-                        help="publish: markup the renderer emits")
-    parser.add_argument("--review", help="publish: prose-review.jsonl with your verdicts")
+                        help="render: markup the renderer emits")
+    parser.add_argument("--review", help="review: prose-review.jsonl with your verdicts")
     parser.add_argument("--write-conf", action="store_true",
-                        help="publish: generate a Sphinx conf.py if the output has none")
-    parser.add_argument("--project", help="publish: project name for --write-conf")
+                        help="render: generate a Sphinx conf.py in staging if none exists")
+    parser.add_argument("--project", help="render: project name for --write-conf")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the commands this component would run, and run nothing")
     args = parser.parse_args()
@@ -542,8 +717,14 @@ def main():
         return fail("--top must not be negative")
     if args.review and not os.path.isfile(args.review):
         return fail("no such review file: %s" % args.review)
-    os.makedirs(args.build, exist_ok=True)
+    build_dir.ensure(args.build)
     digest = index_hash_of(args.build)
+
+    if args.component == "measure":
+        if args.dry_run:
+            print("would %s timing for %s" % (args.state, args.step or "<missing step>"))
+            return 0
+        return measure(args)
 
     if args.component == "decide":
         known = {c["id"]: c for c in CHECKPOINTS}
@@ -615,21 +796,49 @@ def main():
         if os.path.isdir(packets):
             shutil.rmtree(packets)
 
+    component_started_at = utc_now()
+    component_started = time.perf_counter()
+    invocation_id = "%s-%d" % (args.component, time.time_ns())
     stages = COMPONENTS[args.component](args)
     if isinstance(stages, int):
         # A component may end the run before it has any stage to run: `document` does it
         # when a manual has no answer artifact yet, which is a verdict about the run
         # rather than a stage that failed. The code is the exit code.
+        append_timing(os.path.join(args.build, "timings.jsonl"), {
+            "schema_version": 1, "record_type": "component",
+            "invocation_id": invocation_id, "component": args.component,
+            "status": "passed" if stages == 0 else "failed", "exit_code": stages,
+            "started_at": component_started_at, "finished_at": utc_now(),
+            "duration_seconds": round(time.perf_counter() - component_started, 6),
+        })
         return stages
     print("== %s: %d stage(s)" % (args.component, len(stages)))
-    code = run(stages, dry_run=args.dry_run)
+    timings = None if args.dry_run else os.path.join(args.build, "timings.jsonl")
+    code = run(stages, dry_run=args.dry_run, timings=timings,
+               invocation_id=invocation_id)
+    if not args.dry_run:
+        append_timing(timings, {
+            "schema_version": 1, "record_type": "component",
+            "invocation_id": invocation_id, "component": args.component,
+            "status": "passed" if code == 0 else "failed", "exit_code": code,
+            "started_at": component_started_at, "finished_at": utc_now(),
+            "duration_seconds": round(time.perf_counter() - component_started, 6),
+            "stage_count": len(stages),
+        })
     print("\n== %s %s" % (args.component, "ok" if code == 0 else "exited %d" % code))
 
-    # Opened only on success, and only by the component that produces the material the
-    # question is about. A failed survey has no scope to approve.
-    if code == 0 and not args.dry_run:
+    # Ordinarily a checkpoint opens only on success: a failed survey has no scope to
+    # approve. A conditional checkpoint is different. P4 is intentionally produced by
+    # the review-required result (exit 1), so its predicate -- the report the stage just
+    # wrote -- is the authority on whether there is material to review.
+    if not args.dry_run:
         for checkpoint in CHECKPOINTS:
             if checkpoint["opened_by"] != args.component:
+                continue
+            condition = OPENS_WHEN.get(checkpoint.get("opens_when"))
+            if code != 0 and condition is None:
+                continue
+            if condition and not condition(args.build):
                 continue
             if open_checkpoint(args.build, checkpoint, index_hash_of(args.build)):
                 print("\n-- checkpoint %s is open, and %s will not run until it is "

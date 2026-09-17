@@ -3,6 +3,37 @@
 `class-graph.json` is structural truth. Generated `.puml` files are the canonical,
 reviewable Diagram as Code presentation. SVG and HTML are derived by PlantUML and Sphinx.
 
+The block has two independent outputs: **class diagrams** describe verified static structure and
+**data-flow diagrams** describe verified call sequences. Never turn an import edge into a call arrow, and
+never draw a plausible sequence when no complete verified flow exists. An explicit absent-flow result is
+more accurate than an invented diagram.
+
+## Source layout and style
+
+Generated PlantUML follows this order: reusable palette and `skinparam` declarations; title and generated
+metadata; containers or participants; relationships or messages; notes; legend; `@enduml`. Reusable style
+files, when used, contain only palette and `skinparam` declarations. Repository-specific classes, arrows,
+notes, and legend text remain in the diagram source.
+
+- Use `package` for architectural boundaries, layers, domains, and subsystems. Keep nesting to two levels
+  where practical, give containers descriptive names, and declare a class inside its owning container.
+- Keep the canvas and class bodies white. Use restrained, consistent container colors to show ownership;
+  color is not evidence and must not create a category absent from the analyses.
+- Show only architecturally useful public members. Use a stereotype only when source establishes the role.
+- Declare cross-container relationships after all containers. Keep direction from caller or orchestrator to
+  dependency.
+- Use ordinary neutral arrows for dependencies. Reserve bold colored arrows for a major verified business or
+  data flow, and add a legend whenever color or line style carries meaning.
+- Use inheritance only for resolved specialization. Use composition only when evidence establishes lifecycle
+  ownership, and aggregation only when evidence establishes a whole–part relation with an independent child.
+  A typed attribute alone proves an association, not ownership.
+- Explain every non-obvious color or line style in a `legend right`; use the same terms as the diagram.
+
+The visual baseline is a white background, white class bodies, dark neutral borders and text, an 11-point
+readable sans-serif font, 13-point package labels, orthogonal class-diagram lines, and no decorative effects
+that obscure endpoints. A project may adapt the palette for accessibility or existing documentation style,
+but must keep contrast and semantic consistency.
+
 ## Required artifacts
 
 Every valid graph produces `diagram-manifest.json` and at least
@@ -22,14 +53,20 @@ relationship remain in detail views and carry `<<external>>`.
 | Layer | PlantUML notation | Confidence |
 | --- | --- | --- |
 | Inheritance | `--|>` | Verified resolved base |
-| Composition | `*-->` | Verified typed attribute |
-| Association | `-->` | Deterministic module relation |
+| Composition | `*-->` | Verified lifecycle ownership |
+| Aggregation | `o-->` | Verified whole–part relation; child survives independently |
+| Association | `-->` | Typed attribute or deterministic module relation |
 | Calls | `..>` | Static call evidence |
 | Inference | `..>` | Explicitly weaker evidence |
 
 Inheritance edges record the subclass in `from` and the base in `to`. Composition records
-the owner in `from` and the part in `to`. Labels are preserved when the graph supplies
+the lifecycle owner in `from` and the part in `to`; aggregation records the whole and independent part.
+Labels are preserved when the graph supplies
 them. The generator emits a legend so the rendered view is interpretable without colour.
+
+The current structural extractor proves inheritance, typed-attribute association, imports, and verified call
+claims. It does not infer lifecycle ownership from a type annotation. Therefore composition and aggregation
+must remain absent unless a future extractor records the stronger evidence explicitly.
 
 ## Presentation controls
 

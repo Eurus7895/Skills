@@ -11,11 +11,16 @@
 # Regenerate with: python3 tools/materialize.py
 
 scripts/pipeline.py                        -> skills/document-codebase/scripts/pipeline.py
+scripts/build_dir.py                       -> skills/document-codebase/scripts/build_dir.py
+scripts/draft_artifact.py                  -> skills/document-codebase/scripts/draft_artifact.py
 
 scripts/survey/scan_repo.py                -> skills/document-codebase/scripts/survey/scan_repo.py
 scripts/survey/validate_index.py           -> skills/document-codebase/scripts/survey/validate_index.py
 scripts/survey/annotate_import_usage.py    -> skills/document-codebase/scripts/survey/annotate_import_usage.py
 scripts/survey/select_units.py             -> skills/document-codebase/scripts/survey/select_units.py
+scripts/survey/extract_config.py           -> skills/document-codebase/scripts/survey/extract_config.py
+scripts/survey/validate_config.py          -> skills/document-codebase/scripts/survey/validate_config.py
+scripts/survey/scope_record.py             -> skills/document-codebase/scripts/survey/scope_record.py
 
 scripts/analyze/query_graph.py             -> skills/document-codebase/scripts/analyze/query_graph.py
 scripts/analyze/derive_claims.py           -> skills/document-codebase/scripts/analyze/derive_claims.py
@@ -38,7 +43,13 @@ scripts/publish/render_docs.py             -> skills/document-codebase/scripts/p
 scripts/publish/sphinx_support.py          -> skills/document-codebase/scripts/publish/sphinx_support.py
 scripts/publish/wire_toctree.py            -> skills/document-codebase/scripts/publish/wire_toctree.py
 scripts/publish/check_prose.py             -> skills/document-codebase/scripts/publish/check_prose.py
+scripts/publish/review_records.py          -> skills/document-codebase/scripts/publish/review_records.py
 scripts/publish/quality_docs.py            -> skills/document-codebase/scripts/publish/quality_docs.py
+scripts/render/prepare_stage.py            -> skills/document-codebase/scripts/render/prepare_stage.py
+scripts/render/snapshot_draft.py           -> skills/document-codebase/scripts/render/snapshot_draft.py
+scripts/review/seal_draft.py               -> skills/document-codebase/scripts/review/seal_draft.py
+scripts/review/validate_draft.py            -> skills/document-codebase/scripts/review/validate_draft.py
+scripts/publish/promote_docs.py             -> skills/document-codebase/scripts/publish/promote_docs.py
 
 scripts/document/manual.py -> skills/document-codebase/scripts/document/manual.py
 scripts/document/manual_questions.json -> skills/document-codebase/scripts/document/manual_questions.json

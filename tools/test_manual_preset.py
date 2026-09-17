@@ -62,7 +62,7 @@ class ManualTests(unittest.TestCase):
     def test_the_page_carries_composed_prose_not_the_questions(self):
         """The template question is the prompt. It must not reach the reader."""
         self.answers['answers']['1.1.1'].update(
-            status='confirmed', text='Raw note: normalizes input, writes cleaned output.',
+            basis='observed', completeness='complete', text='Raw note: normalizes input, writes cleaned output.',
             evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}],
             verified_ids=['claim:verified', 'stmt:observed'])
         self.compose('getting_started/introduction', 'What OrderLog is for', '1.1.1')
@@ -91,7 +91,7 @@ class ManualTests(unittest.TestCase):
 
     def test_a_heading_may_not_be_a_question(self):
         self.answers['answers']['1.1.1'].update(
-            status='inferred', text='A reading.',
+            basis='inferred', completeness='complete', text='A reading.',
             evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}])
         self.compose('getting_started/introduction',
                      'What is the product or system, and what problem does it solve?',
@@ -101,7 +101,7 @@ class ManualTests(unittest.TestCase):
     def test_composition_may_narrow_what_an_answer_rests_on_never_add(self):
         """Prose citing evidence no answer earned carries provenance nothing checked."""
         self.answers['answers']['1.1.1'].update(
-            status='confirmed', text='A note.',
+            basis='observed', completeness='complete', text='A note.',
             evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
             verified_ids=['claim:verified'])
         self.compose('getting_started/introduction', 'Purpose', '1.1.1')
@@ -114,21 +114,22 @@ class ManualTests(unittest.TestCase):
 
     def test_one_inferred_answer_makes_the_section_inferred(self):
         """Composition cannot launder a reading into a fact by surrounding it."""
-        for qid, status in (('1.1.1', 'confirmed'), ('1.1.2', 'inferred')):
+        for qid, basis in (('1.1.1', 'observed'), ('1.1.2', 'inferred')):
             self.answers['answers'][qid].update(
-                status=status, text='A note.',
+                basis=basis, completeness='complete', text='A note.',
                 evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
-                verified_ids=['claim:verified'] if status == 'confirmed' else [])
+                verified_ids=['claim:verified'] if basis == 'observed' else [])
         self.compose('getting_started/introduction', 'Purpose', '1.1.1', '1.1.2')
         doc = self.build()
         block = next(b for p in doc['pages'] for b in p['blocks'] if b.get('manual_block'))
-        self.assertEqual(block['answer_status'], 'inferred')
-        self.assertTrue(block['text'].startswith('Inferred: '))
+        self.assertEqual(block['answer_basis'], 'inferred')
+        self.assertFalse(block['text'].startswith('Inferred: '))
+        self.assertIn('Source code:', block['text'])
 
     def test_an_answered_question_no_section_uses_fails_the_gate(self):
         """Content the run paid for and then dropped is a defect, not a gap."""
         self.answers['answers']['1.1.1'].update(
-            status='inferred', text='A note nobody composed.',
+            basis='inferred', completeness='complete', text='A note nobody composed.',
             evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}])
         doc = self.build()
         self.assertEqual(doc['manual_coverage']['uncomposed'], ['1.1.1'])
@@ -149,7 +150,7 @@ class ManualTests(unittest.TestCase):
         self.answers['index_hash'] = 'old'
         with self.assertRaises(ValueError): self.build()
         self.answers['index_hash'] = 'scan'
-        self.answers['answers']['1.1.1'].update(status='confirmed', text='A factual answer.',
+        self.answers['answers']['1.1.1'].update(basis='observed', completeness='complete', text='A factual answer.',
             evidence=[{'path':'README.md','line_start':1,'line_end':99}])
         with self.assertRaises(ValueError): self.build()
         self.answers['answers']['1.1.1']['evidence'] = [{'path':'../outside','line_start':1,'line_end':1}]
@@ -158,21 +159,22 @@ class ManualTests(unittest.TestCase):
     def test_confirmed_must_borrow_standing_from_a_check(self):
         """Location is not support: `confirmed` names something that could have failed."""
         answer = self.answers['answers']['1.1.1']
-        answer.update(status='confirmed', text='A factual answer.',
+        answer.update(basis='observed', completeness='complete', text='A factual answer.',
                       evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}])
         # Evidence that resolves, and nothing that was ever checked.
         with self.assertRaises(ValueError): self.build()
         # The same answer as a reading is fine, and any section built on it says so.
-        answer['status'] = 'inferred'
+        answer['basis'] = 'inferred'
         self.compose('getting_started/introduction', 'Purpose', '1.1.1')
         doc = self.build()
         block = next(b for p in doc['pages'] for b in p['blocks'] if b.get('manual_block'))
-        self.assertTrue(block['text'].startswith('Inferred: '))
+        self.assertEqual(block['answer_basis'], 'inferred')
+        self.assertFalse(block['text'].startswith('Inferred: '))
 
     def test_unverified_ids_are_refused_not_downgraded(self):
         """A claim that did not verify is an unchecked citation, not a weaker one."""
         answer = self.answers['answers']['1.1.1']
-        answer.update(status='confirmed', text='A factual answer.',
+        answer.update(basis='observed', completeness='complete', text='A factual answer.',
                       evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}],
                       verified_ids=['claim:candidate'])
         with self.assertRaises(ValueError): self.build()
@@ -205,7 +207,7 @@ class ManualTests(unittest.TestCase):
                                     ('2.1.1', 'flow:record', 'architecture/overview'),
                                     ('2.1.2', 'component:edge', 'architecture/overview')):
             self.answers['answers'][question].update(
-                status='confirmed', text='An answer resting on a validated analysis.',
+                basis='observed', completeness='complete', text='An answer resting on a validated analysis.',
                 evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
                 verified_ids=[ref])
             self.compose(page, 'Section for ' + question, question)
@@ -227,7 +229,7 @@ class ManualTests(unittest.TestCase):
         nothing mechanically matched against the source.
         """
         answer = self.answers['answers']['2.2.1']
-        answer.update(status='confirmed', text='An answer resting on an analysis.',
+        answer.update(basis='observed', completeness='complete', text='An answer resting on an analysis.',
                       evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
                       verified_ids=['op:loose'])
         for procedure in (
@@ -244,10 +246,42 @@ class ManualTests(unittest.TestCase):
              'steps': [{'text': 'x', 'command': 'python3 -m pytest'}]}]}}
         self.assertEqual(model.validate(self.build()), [])
 
-    def test_prefill_answers_what_the_analyses_settled(self):
-        """The commands reach the page exactly as validate_operations matched them."""
-        # `status` is required by the operations schema, and is what decides whether a
-        # row may confirm: these are `declared`, as a validated analysis records them.
+    def test_an_extracted_setting_can_confirm_an_answer(self):
+        """`C006` matched the name against its lines, so the row may stand behind prose.
+
+        This is the whole point of extracting settings: a configuration question is
+        cross-cutting, so a module packet cannot serve it, and without an extracted row
+        the answer could only ever be `inferred` — the model's reading of a search it
+        did itself.
+        """
+        self.extra = {'config': {'settings': [
+            {'id': 'config:env:API_TOKEN', 'kind': 'env', 'name': 'API_TOKEN',
+             'status': 'observed',
+             'evidence': [{'path': 'README.md', 'line_start': 1, 'line_end': 1}]},
+            {'id': 'config:env:LOOSE', 'kind': 'env', 'name': 'LOOSE',
+             'status': 'observed', 'evidence': []}]}}
+        answer = self.answers['answers']['1.2.6']
+        answer.update(basis='observed', completeness='complete', text='The service reads API_TOKEN.',
+                      evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
+                      verified_ids=['config:env:API_TOKEN'])
+        self.compose('getting_started/installation', 'Environment', '1.2.6')
+        doc = self.build()
+        self.assertEqual(model.validate(doc), [])
+        self.assertEqual(doc['manual_coverage']['verified_ids_cited'],
+                         {'setting': ['config:env:API_TOKEN']})
+        # A row citing nothing had nothing matched against the source, so it cannot
+        # confirm — the same gate every other analysis row goes through.
+        answer['verified_ids'] = ['config:env:LOOSE']
+        with self.assertRaises(ValueError): self.build()
+
+    def test_the_initializer_writes_no_prose_and_no_confirmation(self):
+        """A draft is a to-do list. It used to arrive part-written and part-approved.
+
+        `prefill` turned an analysis row into a sentence and marked it answered, so the
+        manual carried text nobody wrote and nobody reviewed — and it looked decided,
+        which is worse than looking empty. What the initializer hands over now is a
+        reading list: the ids this run verified, for the model to read and write from.
+        """
         operations = {'index_hash': 'scan', 'procedures': [
             {'id': 'op:test', 'kind': 'test', 'name': 'Running the tests',
              'status': 'declared', 'steps': [
@@ -258,27 +292,83 @@ class ManualTests(unittest.TestCase):
                               'status': 'declared',
                               'evidence': [{'path': 'README.md', 'line_start': 1}]}]}
         draft = manual.scaffold(self.index, {'operations': operations})
-        self.assertEqual(draft['prefilled'], ['1.2.1', '4.2.3'])
-        commands = draft['answers']['4.2.3']
-        self.assertEqual(commands['status'], 'confirmed')
-        self.assertIn('`python3 -m pytest`', commands['text'])
-        self.assertEqual(commands['verified_ids'], ['op:test'])
-        # A citation with no line_end is one line, not a range guessed outwards.
-        self.assertEqual(commands['evidence'], [{'path': 'README.md', 'line_start': 2,
-                                                 'line_end': 2}])
-        self.assertIn('Python >=3.9', draft['answers']['1.2.1']['text'])
-        # Everything the analyses do not settle stays unknown rather than guessed.
-        self.assertEqual(draft['answers']['1.1.1']['status'], 'unknown')
-        # And the draft builds: a prefilled answer passes the rule it was written for.
-        self.answers = draft
-        self.extra = {'operations': operations}
+
+        # Every slot is unanswered, whatever the analyses hold.
+        self.assertTrue(all(a['basis'] == 'unknown' and a['completeness'] == 'unanswered'
+                            for a in draft['answers'].values()))
+        self.assertTrue(all(a['content_review'] == 'pending'
+                            for a in draft['answers'].values()))
+        # No sentence quoting an analysis reached any slot.
+        self.assertFalse(any('pytest' in a['text'] or 'Python' in a['text']
+                             for a in draft['answers'].values()))
+        # But the facts are listed, so the model knows what it may cite.
+        self.assertEqual(draft['facts'], {'procedure': ['op:test'],
+                                          'requirement': ['req:python']})
+        self.assertNotIn('prefilled', draft)
+        # And every page is seeded empty: composing is the work.
+        self.assertTrue(all(p['sections'] == [] for p in draft['pages'].values()))
+
+    def test_a_v1_draft_is_refused_rather_than_relabelled(self):
+        """A v1 `confirmed` was mechanical. Carrying it over would forge an approval."""
+        self.answers['manual_version'] = 1
+        with self.assertRaises(ValueError) as caught:
+            self.build()
+        self.assertIn('manual_version 1', str(caught.exception))
+
+    def test_a_writer_cannot_set_its_own_review_verdict(self):
+        """The verdict lives in the review channel, bound to the revision it judged."""
+        self.answers['answers']['1.1.1'].update(
+            basis='inferred', completeness='complete', text='A reading.',
+            evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
+            content_review='confirmed')
+        with self.assertRaises(ValueError) as caught:
+            self.build()
+        self.assertIn('only a bound review row may say', str(caught.exception))
+
+    def test_partial_must_name_what_is_missing(self):
+        """`partial` is a promise about the gap; an empty list makes it a label.
+
+        This is the configuration case: names and defaults answered, types and
+        constraints not. Naming a validator id cannot close the gap it does not cover.
+        """
+        answer = self.answers['answers']['3.2.2']
+        answer.update(basis='inferred', completeness='partial', text='Defaults only.',
+                      evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}])
+        with self.assertRaises(ValueError): self.build()
+        answer['facets_missing'] = ['type', 'constraints', 'precedence']
+        self.compose('usage/configuration', 'Defaults', '3.2.2')
+        doc = self.build()
+        block = next(b for p in doc['pages'] for b in p['blocks']
+                     if b.get('manual_block'))
+        # A section is as incomplete as its least complete answer, and says which facets.
+        self.assertEqual(block['answer_completeness'], 'partial')
+        self.assertEqual(block['facets_missing'], ['constraints', 'precedence', 'type'])
+
+    def test_one_sentence_repeated_is_not_a_set_of_answers(self):
+        """The reported failure: 161 questions, one generic answer, every check green.
+
+        The count was right, each citation resolved, and `A013`/`A014` are advisory and
+        never reach the manual. The only mechanical tell is that the text does not vary.
+        """
+        for qid in ('1.1.1', '1.1.2', '1.1.3', '1.1.4', '1.1.5'):
+            self.answers['answers'][qid].update(
+                basis='inferred', completeness='complete',
+                text='This project provides functionality described in the README.',
+                evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 2}])
+        with self.assertRaises(ValueError) as caught:
+            self.build()
+        self.assertIn('share one answer', str(caught.exception))
+
+        # Genuinely distinct answers at the same count are fine.
+        for n, qid in enumerate(('1.1.1', '1.1.2', '1.1.3', '1.1.4', '1.1.5')):
+            self.answers['answers'][qid]['text'] = 'A distinct answer number %d.' % n
         self.assertEqual(model.validate(self.build()), [])
 
-    def test_prefill_skips_a_kind_the_analysis_never_recorded(self):
-        """An absent procedure leaves the question open, it does not invent a heading."""
-        draft = manual.scaffold(self.index, {'operations': {'procedures': [], 'requirements': []}})
-        self.assertEqual(draft['prefilled'], [])
-        self.assertEqual(draft['answers']['3.1.1']['status'], 'unknown')
+    def test_identical_placeholders_are_not_duplicate_answers(self):
+        """A fresh draft shares one TODO in every slot. That is honest, not a template."""
+        self.assertTrue(all(a['text'].startswith('TODO')
+                            for a in self.answers['answers'].values()))
+        self.assertEqual(model.validate(self.build()), [])
 
     def test_only_two_diagram_pages(self):
         d = self.root / 'diagrams'; d.mkdir()
@@ -317,7 +407,7 @@ class ManualTests(unittest.TestCase):
         and a report with 197 unanswered questions never mentioned them.
         """
         answer = self.answers['answers']['1.1.1']
-        answer.update(status='confirmed', text='An answer no section uses.',
+        answer.update(basis='observed', completeness='complete', text='An answer no section uses.',
                       evidence=[{'path': 'README.md', 'line_start': 1, 'line_end': 1}],
                       verified_ids=['claim:verified'])
         doc = self.build()

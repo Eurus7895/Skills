@@ -58,11 +58,9 @@ invocation. Each component answers one kind of question and hands the next a fil
 | | `build_flow_diagrams.py` | Draws a validated flow as a sequence, and refuses one edited since it was validated |
 | | `validate_flow_diagrams.py` | Reads the drawing back, because a `.puml` is a text file |
 | | `build_document_model.py` | Turns verified claims and statements into pages and blocks, with no markup in them |
-| `publish` | `render_docs.py` | Renders that to RST or MyST, wires it into an existing Sphinx project, and checks the result |
-| | `sphinx_support.py` | Runs the build and says which of six things went wrong, rather than "failed" |
-| | `wire_toctree.py` | Adds the generated pages to an index someone else wrote, or refuses to touch it |
-| | `check_prose.py` | Holds a rendered sentence to the strength its sources carry |
-| | `quality_docs.py` | Says how much of the document was read and how much was copied; a derived-only run is never `passed` |
+| `render` | `prepare_stage.py`, `render_docs.py`, `snapshot_draft.py` | Copies existing docs into staging, renders/checks there, and binds the draft to `doc.json` |
+| `review` | `validate_draft.py`, `check_prose.py`, `quality_docs.py`, `seal_draft.py` | Rejects direct draft edits, requires fresh model review, runs the final gate, and seals the exact revision |
+| `publish` | `promote_docs.py` | Verifies the seal and atomically promotes only the reviewed draft |
 
 **MyST needs `myst_parser` enabled in the project it lands in.** Sphinx does not read `.md` without it, so
 `render_docs.py --format myst` refuses to write into a `conf.py` that does not enable it rather than leaving a

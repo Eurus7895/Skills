@@ -50,6 +50,11 @@ import os
 import re
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
+
+import build_dir  # noqa: E402
 from collections import Counter, defaultdict
 
 LANG_BY_EXT = {
@@ -866,7 +871,8 @@ def resolve_attribute_types(records, aliases_by_path, by_module, by_suffix, by_s
     plausible.
 
     Only attributes are resolved. A parameter type says a function is passed something;
-    an attribute type says the class holds one, which is what composition means.
+    an attribute type says the class references one. It does not establish lifecycle
+    ownership, so the class graph records an association rather than composition.
     """
     classes_by_path = {r["path"]: {c["name"] for c in r.get("classes", [])}
                        for r in records if "classes" in r}
@@ -1213,9 +1219,7 @@ def main():
         sys.stderr.write("FAIL  no source files found under %s\n" % args.root)
         return 1
 
-    directory = os.path.dirname(os.path.abspath(args.out))
-    if directory and not os.path.isdir(directory):
-        os.makedirs(directory)
+    build_dir.ensure_parent(args.out)
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, sort_keys=True)
 

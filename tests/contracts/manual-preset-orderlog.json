@@ -1,0 +1,51 @@
+{
+  "case_version": 1,
+  "fixture": "tests/contracts/layered-repo",
+  "preset": "manual",
+  "reader_tasks": [
+    "understand what OrderLog does and does not do",
+    "install and invoke the orderlog console command",
+    "understand ORDERLOG_PATH and its default",
+    "trace an order from CLI or HTTP input to Store.put",
+    "recognize the missing-sku HTTP failure"
+  ],
+  "required_source_readings": [
+    "README.md",
+    "pyproject.toml",
+    "src/app/api/cli.py",
+    "src/app/api/http.py",
+    "src/app/core/service.py",
+    "src/app/core/models.py",
+    "src/app/infra/config.py",
+    "src/app/infra/store.py"
+  ],
+  "required_prose_facts": [
+    "OrderLog records orders and reports them without requiring a database server",
+    "the orderlog console script resolves to app.api.cli:main",
+    "ORDERLOG_PATH defaults to orders.json",
+    "OrderService.record creates an Order for each SKU and passes it to Store.put",
+    "Handler.post raises ValueError when sku is absent"
+  ],
+  "forbidden_output": [
+    "template questions used as headings",
+    "generic placeholders or author instructions",
+    "pipeline execution summaries in product pages",
+    "test modules in product inventory or diagrams",
+    "Inferred:, Evidence:, or Not documented: boilerplate"
+  ],
+  "required_class_nodes": ["Record", "Order", "OrderService", "Store", "Handler"],
+  "required_class_relationships": [
+    "Order inherits Record",
+    "typed attributes are associations unless lifecycle ownership is separately proven"
+  ],
+  "required_data_flows": [
+    "CLI main -> OrderService.record -> Store.put",
+    "HTTP Handler.post -> OrderService.record -> Store.put"
+  ],
+  "acceptance": {
+    "analysis_review": "all required facts are supported or explicitly unresolved before drafting",
+    "prose_review": "every applicable reader task is answered with project-specific, actionable prose",
+    "diagram_review": "every node and arrow maps to validated source evidence and follows the diagram policy",
+    "final_review": "rendered pages are readable, contain no internal metadata labels, and have fresh confirmed reviews"
+  }
+}

@@ -17,7 +17,7 @@ import sys
 
 SUPPORTED_GRAPH_SCHEMA = {1}
 MANIFEST_SCHEMA = 3
-DEFAULT_LAYERS = ("inheritance", "composition")
+DEFAULT_LAYERS = ("inheritance", "composition", "association")
 ALL_LAYERS = ("inheritance", "composition", "association", "calls", "inference")
 DENSITY_CLASSES = 60
 DENSITY_MEMBERS = 400
@@ -162,12 +162,20 @@ def members_of(cls, detail):
 def render(graph, spec):
     detail = spec.get("detail") or ("summary" if is_dense(graph) else graph["detail"])
     layers = set(spec.get("layers", DEFAULT_LAYERS))
+    title = "Class architecture — %s" % spec["view"].replace("_", " ")
     meta = {"schema_version": 1, "source_graph_hash": graph["source_graph_hash"],
             "view_spec_hash": digest(spec), "view": spec["view"], "scope": spec["scope"],
-            "detail": detail, "layers": sorted(layers)}
+            "detail": detail, "layers": sorted(layers), "title": title}
     emphasis = set(spec.get("emphasis", ()))
     lines = ["@startuml", "' Generated from class-graph.json; do not edit by hand.",
-             "hide empty members", "skinparam classAttributeIconSize 0",
+             "skinparam backgroundColor #FFFFFF", "skinparam defaultFontName Segoe UI",
+             "skinparam defaultFontSize 11", "skinparam defaultFontColor #2C3E50",
+             "skinparam classBackgroundColor #FFFFFF", "skinparam classBorderColor #2C3E50",
+             "skinparam classArrowColor #34495E", "skinparam packageBackgroundColor #F8F9FA",
+             "skinparam packageBorderColor #2C3E50", "skinparam packageFontSize 13",
+             "skinparam linetype ortho", "skinparam shadowing false",
+             "title %s" % quote(title), "hide empty members",
+             "skinparam classAttributeIconSize 0",
              "left to right direction" if spec.get("rankdir") == "LR"
              else "top to bottom direction",
              "skinparam class {", "  BackgroundColor<<emphasis>> %s" % EMPHASIS_FILL, "}",

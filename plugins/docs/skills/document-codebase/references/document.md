@@ -4,7 +4,7 @@ The fourth component. Presets are in [`presets.md`](presets.md), diagram rules i
 [`diagram-policy.md`](diagram-policy.md), and the manual preset in [`manual.md`](manual.md).
 
 ```bash
-python3 scripts/pipeline.py document --docs docs
+python3 scripts/pipeline.py document
 ```
 
 Validates each of the three analyses that exists and skips the ones that do not, naming them; then builds the
@@ -23,8 +23,9 @@ template answers — never the template questions themselves, which are the prom
 [the manual guide](manual.md) before building it.
 
 **On the first run there is no answer artifact, so `document` writes the draft and stops**, exit `1`: a
-verdict, not breakage. It seeds `.docs-build/manual-analysis.json` from whichever of the three analyses
-exist, tells you to answer it and compose the pages, and does not overwrite a draft that is already there.
+verdict, not breakage. It writes unanswered slots and a `facts` inventory from whichever validated inputs
+exist; it writes no answer prose. It tells you to read the source, answer the slots and compose the pages,
+and does not overwrite a draft that is already there.
 Rerun `document` once it is answered.
 
 The graph-driven presets are one flag away and are still the right answer for an architecture report rather

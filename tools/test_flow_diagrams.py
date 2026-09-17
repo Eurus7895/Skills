@@ -137,6 +137,10 @@ def main():
               repr(os.listdir(diagrams)))
 
         source = read(puml)
+        check("the flow has a title, neutral readable style, and semantic legend",
+              'title "Normalising an argument"' in source
+              and "sequenceParticipantBackgroundColor #FFFFFF" in source
+              and "Verified arrows: source call sites" in source, source)
         check("every arrow is labelled with the line the call was read at",
               "%s:7" % entry in source and "%s:7" % transform in source,
               source)

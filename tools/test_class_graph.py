@@ -146,25 +146,31 @@ def main():
               any(u["from"] == "class:models.py:Failure" for u in graph["unresolved"]),
               "%r" % graph["unresolved"])
 
-        composition = {(e["from"], e["to"]): e for e in by_layer.get("composition", ())}
+        associations = {(e["from"], e["to"]): e
+                        for e in by_layer.get("association", ())}
         key = ("class:models.py:Order", "class:base.py:Engine")
-        check("a typed attribute becomes a composition edge", key in composition,
-              "%r" % sorted(composition))
+        check("a typed attribute becomes an association, not lifecycle ownership",
+              key in associations and not by_layer.get("composition"),
+              "%r" % sorted(associations))
         check("two attributes of one type are one edge carrying both names",
-              key in composition
-              and sorted(composition[key]["labels"]) == ["engine", "spare"],
-              "%r" % (composition.get(key) or {}).get("labels"))
+              key in associations
+              and sorted(associations[key]["labels"]) == ["engine", "spare"],
+              "%r" % (associations.get(key) or {}).get("labels"))
         check("an attribute whose type is not defined here makes no edge",
-              not any("str" in str(e) for e in by_layer.get("composition", ())))
+              not any("str" in str(e) for e in by_layer.get("association", ())))
 
-        association = [(e["from"], e["to"]) for e in by_layer.get("association", ())]
+        module_associations = [(e["from"], e["to"])
+                               for e in by_layer.get("association", ())
+                               if e["from"].startswith("module:")]
         # The import is between files. Saying it relates Order to Record would be
         # asserting something nobody established, and on a real repository it is a
         # cross product of every class in one file with every class in the other.
         check("an import becomes a module-to-module association, not a class one",
-              association == [("module:models.py", "module:base.py")], "%r" % association)
-        check("association edges are marked approximate",
-              all(e.get("approximate") for e in by_layer.get("association", ())))
+              module_associations == [("module:models.py", "module:base.py")],
+              "%r" % module_associations)
+        check("module import associations are marked approximate",
+              all(e.get("approximate") for e in by_layer.get("association", ())
+                  if e["from"].startswith("module:")))
 
         order = next(c for c in graph["classes"] if c["name"] == "Order")
         check("public detail keeps public methods",

@@ -1,4 +1,11 @@
-# Rendering, and writing into somebody else's project
+# Rendering an isolated draft
+
+`pipeline.py render --docs docs` first copies the existing documentation tree into
+`.docs-build/rendered-docs/`, then renders and checks the draft there. It does not change `docs/`. Existing
+authored pages and configuration are copied so generation is reviewed in the same integration context it will
+have after publication. Run `publish` only after `review` seals this exact tree.
+`render-manifest.json` binds the staged tree to `doc.json`; editing generated RST/MyST directly makes review
+fail. Repair the model or manual analysis and rerun `document` and `render` instead.
 
 `doc.json` contains no markup. **Never write RST, MyST or Sphinx directives by hand** — the
 renderer owns headings, tables, references, escaping and the toctree. Hand-written

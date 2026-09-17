@@ -173,7 +173,7 @@ def main():
         second = json.dumps(scan(root)[1], sort_keys=True)
         check("rescanning an unchanged tree is deterministic", first == second)
 
-        # Attribute types are what a composition edge is drawn from. The resolver must
+        # Attribute types are what a typed-association edge is drawn from. The resolver must
         # keep the class inside a container, drop names this repository does not define,
         # and still see a type written as a string.
         typed = tree(tmp, "typed")

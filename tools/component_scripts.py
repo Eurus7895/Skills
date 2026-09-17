@@ -17,7 +17,7 @@ import os
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO, "shared", "scripts")
-COMPONENTS = ("survey", "analyze", "check", "document", "publish")
+COMPONENTS = ("survey", "analyze", "check", "document", "render", "review", "publish")
 
 
 def script(name):

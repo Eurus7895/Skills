@@ -837,11 +837,6 @@ def requirements_table(prefix, operations):
 PROCEDURE_HOMES = {
     "getting-started": ("install", "build", "test", "run"),
     "operations": ("configure", "deploy", "release", "observe"),
-    "installation": ("install", "build"),
-    "testing": ("test",),
-    "running": ("run",),
-    "configuration": ("configure",),
-    "release": ("deploy", "release", "observe"),
 }
 
 
@@ -858,104 +853,12 @@ def procedure_page(prefix, operations, kinds, nothing_recorded):
     return blocks
 
 
-def installation_page(operations):
-    """What must be present, and what installs or builds it."""
-    blocks = procedure_page(
-        "installation", operations, PROCEDURE_HOMES["installation"],
-        "The operations analysis records nothing about installing or building this "
-        "repository.")
-    requirements = requirements_table("installation", operations)
-    if requirements is not None:
-        blocks.insert(0, requirements)
-    return blocks
-
-
-def testing_page(operations):
-    """The commands the repository declares run its tests."""
-    return procedure_page(
-        "testing", operations, PROCEDURE_HOMES["testing"],
-        "The operations analysis records no test procedure for this repository.")
-
-
-def running_page(operations):
-    """The commands the repository declares actually run it.
-
-    Its own page because a manual's reader arrives wanting this one and nothing else,
-    and because the alternative -- filing it under installation -- is how it went
-    missing.
-    """
-    return procedure_page(
-        "running", operations, PROCEDURE_HOMES["running"],
-        "The operations analysis records no procedure for running this repository. A "
-        "library invoked from other code has none to record; a program that is started "
-        "some way does, and it was not written down.")
-
-
-def release_page(operations):
-    """Deploying, releasing and watching -- what happens after the tests pass."""
-    return procedure_page(
-        "release", operations, PROCEDURE_HOMES["release"],
-        "The operations analysis records nothing about deploying, releasing or watching "
-        "this repository.")
-
-
-def configuration_page(operations):
-    """How the repository declares it is configured."""
-    return procedure_page(
-        "configuration", operations, PROCEDURE_HOMES["configuration"],
-        "The operations analysis records no configuration procedure. What a "
-        "configuration file must contain is a schema question, not a graph one.")
-
-
 def join_names(names):
     """"a", "a and b", "a, b and c" -- an Oxford-free list a sentence can hold."""
     names = list(names)
     if len(names) < 3:
         return " and ".join(names)
     return "%s and %s" % (", ".join(names[:-1]), names[-1])
-
-
-def traceability_page(index, claims, analysis, extra):
-    """Which scan this document is about, and what may be checked against what.
-
-    A reviewer's first question is not what the document says but whether they can tell
-    where any of it came from. The scan identity and the artefact list answer that, and
-    both are facts about the run rather than readings of the repository -- which is why
-    this page can be generated at all while most of an appendix cannot.
-    """
-    source = index.get("source") or {}
-    revision = source.get("revision")
-    rows = [
-        ("index hash", str(index.get("index_hash", "-"))),
-        ("revision scanned", str(revision or "not a git repository")),
-        # Outside a git repository there is no clean state to be dirty against, and the
-        # scanner's default would otherwise read as "someone had uncommitted work".
-        ("working tree dirty at scan",
-         "-" if not revision else "yes" if source.get("dirty") else "no"),
-        ("files scanned", str((index.get("coverage") or {}).get("files_scanned", 0))),
-        ("claims carried", str(len(claims))),
-        ("modules read", str(len(getattr(analysis, "rows", ()) or ()))),
-        ("statements carried", str(len(getattr(analysis, "by_id", {}) or {}))),
-    ]
-    supplied = [name for name, key in (("architecture", "architecture"),
-                                       ("flows", "flows"),
-                                       ("operations", "operations"))
-                if (extra or {}).get(key)]
-    blocks = [
-        prose("block:traceability-intro",
-              "Every structural claim in this document cites a file and a line in the "
-              "scan named below. A statement that reads rather than reports is labelled "
-              "as a reading; where the repository never said, the page says so instead "
-              "of supplying a reason."),
-        table("block:traceability-scan", ("Measure", "Value"), rows),
-        prose("block:traceability-artifacts",
-              "Generated from: the index, the derived and verified claims, the module "
-              "analyses%s, and the rendered diagrams. Each is written under the build "
-              "directory and none of it is meant to be committed."
-              % ("" if not supplied else ", the %s analys%s"
-                 % (join_names(supplied), "is" if len(supplied) == 1 else "es"))),
-    ]
-    return blocks
 
 
 def getting_started_page(operations):
@@ -1241,18 +1144,6 @@ BUILDERS = {
     "class-views": lambda ix, frags, claims, by_id, an, kinds, extra: class_views_page(ix),
     "limitations": lambda ix, frags, claims, by_id, an, kinds, extra: limitations_page(
         ix, frags, claims, an),
-    "installation": lambda ix, frags, claims, by_id, an, kinds, extra:
-        installation_page(extra.get("operations")),
-    "testing": lambda ix, frags, claims, by_id, an, kinds, extra:
-        testing_page(extra.get("operations")),
-    "running": lambda ix, frags, claims, by_id, an, kinds, extra:
-        running_page(extra.get("operations")),
-    "release": lambda ix, frags, claims, by_id, an, kinds, extra:
-        release_page(extra.get("operations")),
-    "configuration": lambda ix, frags, claims, by_id, an, kinds, extra:
-        configuration_page(extra.get("operations")),
-    "traceability": lambda ix, frags, claims, by_id, an, kinds, extra:
-        traceability_page(ix, claims, an, extra),
 }
 
 
@@ -1495,6 +1386,10 @@ def main():
     parser.add_argument("--operations", metavar="PATH",
                         help="operations-analysis.json; the getting-started and "
                              "operations pages are built from it")
+    parser.add_argument("--config", metavar="PATH",
+                        help="config-analysis.json; the settings a manual answer may "
+                             "cite and the initializer prefills the configuration "
+                             "questions from")
     parser.add_argument("--manual-analysis", help="question answers for the manual preset")
     parser.add_argument("--root", default=".", help="repository root for manual evidence")
     parser.add_argument("--preset", default="onboarding", choices=sorted(PRESETS))
@@ -1559,7 +1454,7 @@ def main():
 
     extra = {}
     for option, key in ((args.flows, "flows"), (args.architecture, "architecture"),
-                        (args.operations, "operations")):
+                        (args.operations, "operations"), (args.config, "config")):
         if not option:
             continue
         try:

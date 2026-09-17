@@ -45,7 +45,19 @@ DECLARATION = re.compile(r'^participant\s+"((?:[^"\\]|\\.)*)"\s+as\s+(p_\w+)\s*$
 # pass every check while changing what a reader sees.
 PREAMBLE = ("@startuml", "@enduml", "autonumber",
             "skinparam sequenceMessageAlign left",
+            "skinparam backgroundColor #FFFFFF",
+            "skinparam defaultFontName Segoe UI",
+            "skinparam defaultFontSize 11",
+            "skinparam defaultFontColor #2C3E50",
+            "skinparam sequenceArrowColor #34495E",
+            "skinparam sequenceLifeLineBorderColor #2C3E50",
+            "skinparam sequenceParticipantBackgroundColor #FFFFFF",
+            "skinparam sequenceParticipantBorderColor #2C3E50",
+            "skinparam shadowing false", "legend right",
+            "Verified arrows: source call sites",
+            "Notes: trigger, outcome, or unresolved boundary", "endlegend",
             "' Generated from flow-analysis.json; do not edit by hand.")
+TITLE = re.compile(r'^title\s+"((?:[^"\\]|\\.)*)"\s*$')
 PARTICIPANT_SHAPED = re.compile(r"^(?:participant|actor|boundary|control|entity|"
                                 r"collections|database|queue)\b")
 MESSAGE = re.compile(r"^(p_\w+)\s*(->|-->|->>|<-)\s*(p_\w+)\s*:\s*(.*)$")
@@ -90,7 +102,7 @@ def parse_source(path):
         return None, "must contain exactly one @startuml and @enduml"
     if text.index("@startuml") > text.index("@enduml"):
         return None, "@enduml appears before @startuml"
-    parsed = {"sequence": None, "participants": [], "messages": [], "notes": [],
+    parsed = {"sequence": None, "title": None, "participants": [], "messages": [], "notes": [],
               "declared": [], "drawn": [], "drawn_notes": [], "defects": []}
     for number, line in enumerate(text.splitlines(), 1):
         stripped = line.strip()
@@ -112,7 +124,10 @@ def parse_source(path):
                 else:
                     parsed[key].append(value)
             continue
-        if PARTICIPANT_SHAPED.match(stripped):
+        title = TITLE.match(stripped)
+        if title:
+            parsed["title"] = title.group(1)
+        elif PARTICIPANT_SHAPED.match(stripped):
             match = DECLARATION.match(stripped)
             if match is None:
                 parsed["defects"].append(
@@ -224,8 +239,10 @@ def validate_view(entry, parsed, flow, index_hash, findings):
     view = entry.get("flow")
     meta = parsed["sequence"]
     if meta != {key: entry.get(key) for key in
-                ("schema_version", "flow", "index_hash", "flow_hash", "steps")}:
+                ("schema_version", "flow", "index_hash", "flow_hash", "steps", "title")}:
         add(findings, "G002", "PlantUML metadata does not match the manifest", view)
+    if parsed["title"] != meta.get("title"):
+        add(findings, "G005", "the drawn title does not match the generated metadata", view)
     if meta.get("index_hash") != index_hash:
         add(findings, "G002", "diagram was generated against a different scan", view)
     # The flow may have been edited after the diagram was drawn. Every check below would

@@ -72,17 +72,43 @@ deterministic one's — say so rather than implying the check is tighter than it
 ## The bounded model pass
 
 What survives the two rules goes to a model pass, which `check_prose.py` does not run. It builds the queue —
-every block resting on a reading, plus every block using a rank-5 or rank-6 verb, the two places where only
-a person can tell a restatement from an upgrade — and the agent writes verdicts to a JSONL:
+every manual section, every block resting on a reading, and every block using a rank-5 or rank-6 verb. The
+agent writes version 2 review records bound to the exact content and inputs it reviewed:
 
 ```json
-{"block": "block:components-interaction-src/api.py", "verdict": "ok"}
-{"block": "block:rationale-recorded", "verdict": "overstated", "note": "the reading became the reason"}
+{"review_version": 2, "review_id": "rev-1", "target_id": "section:usage/configuration:1",
+ "draft_revision": "rev-0001", "verdict": "confirmed", "review_mode": "self_review",
+ "reviewer": "documentation-agent", "content_hash": "sha256:...",
+ "index_hash": "sha256:...", "scope_hash": "sha256:...", "analysis_hash": "sha256:...",
+ "findings": []}
 ```
 
-With `--require-review`, a queued block with **no** verdict leaves the run `review_required`. That is not a
-pass and not a defect in what was checked: the budget ran out before anything was decided, and a person has
-to look. It is the same distinction `sphinx_support.py` draws between `skipped` and `runner_failure`.
+Copy `target_id`, `draft_revision` and the hash fields from `prose-report.json`'s `review_queue`; do not
+reconstruct them from memory. The checker recomputes them from the current document when the review returns.
+
+`confirmed` only applies while the content and input hashes still match. `changes_requested` fails the prose
+gate; `unresolved`, a missing row, or a stale row leaves the run at `review_required`. Malformed and duplicate
+records are refused rather than silently treated as missing. The complete schema is in `schemas.md`.
 
 `review_required` ranks below `partial` in the quality gate and above `failed` — it can never be reported as
 a pass, and a real defect still outranks "could not tell".
+
+## Content review criteria for manual sections
+
+Before assigning `confirmed`, the model reviewer checks all of the following against the source and the
+question-to-source mapping:
+
+- **Support:** the cited code or repository documentation supports the actual claim and its certainty.
+- **Coverage:** the section answers the assigned questions, including relevant conditions, failure behavior
+  and limits. Mentioning a component or attaching a citation is insufficient.
+- **Reader usefulness:** the explanation enables the intended reader to understand a mechanism or perform
+  a task using the project's actual commands, settings, inputs and outputs where relevant.
+- **Specificity:** ask whether the paragraph could describe an unrelated repository after changing only its
+  name. If so, inspect what concrete information is missing. This is a review heuristic, not a keyword rule.
+- **Composition:** prose contains no TODOs, instructions to an author, copied schema examples or pipeline
+  progress reports standing in for product information. Necessary uncertainty identifies the specific gap.
+
+Use `changes_requested` for generic or incomplete content, with a stable finding ID and the missing detail
+in `requested`. Use `unresolved` when evidence cannot settle the reading. A sequential second pass reports
+`self_review`; do not claim independent review. Deterministic validators check format and consistency;
+semantic adequacy remains the model reviewer's responsibility.
