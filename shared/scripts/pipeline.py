@@ -7,12 +7,14 @@
     python3 scripts/pipeline.py check
     #   ... write architecture-analysis.json, flow-analysis.json, operations-analysis.json ...
     python3 scripts/pipeline.py document
+    python3 scripts/pipeline.py render --docs docs
+    python3 scripts/pipeline.py review
     python3 scripts/pipeline.py publish --docs docs
 
-Five components, and each is a directory beside this file holding the scripts that answer
-one kind of question. `survey` asks what is in the repository, `analyze` what the model
-needs in front of it, `check` whether a claim holds, `document` what the pages will say,
-`publish` what a reader gets and whether the run may be called done. This driver runs a
+Seven runtime components answer one kind of question each. `survey` asks what is in the
+repository, `analyze` what the model needs in front of it, `check` whether a claim holds,
+`document` what the pages will say, `render` what the draft looks like, `review` whether
+that exact draft may ship, and `publish` promotes it. This driver runs a
 component's scripts in order with the arguments that component fixes; nothing here decides
 anything a script was already the authority on.
 
@@ -23,7 +25,7 @@ is reachable from here.
 
 **The pauses between components are the pipeline.** `analyze` ends because a module's
 purpose is not in an index; `check` ends because what the modules add up to is not in a
-claim; `publish` ends by queueing the sentences only a person can settle. A driver that ran
+claim; `review` ends by queueing the sentences only a person can settle. A driver that ran
 straight through would be a pipeline that documents nothing.
 
 **A component stops at the first stage that fails, and says which one.** Exit codes pass
@@ -73,7 +75,7 @@ class Stage(object):
     """
 
     def __init__(self, component, script, args, needs=(), tolerate=(), skip_note=None,
-                 capture=None, label=None):
+                 capture=None, label=None, script_component=None):
         self.component = component
         self.script = script
         self.args = [str(a) for a in args]
@@ -82,6 +84,7 @@ class Stage(object):
         self.skip_note = skip_note
         self.capture = capture
         self.label = label
+        self.script_component = script_component or component
 
     @property
     def name(self):
@@ -90,7 +93,7 @@ class Stage(object):
 
     @property
     def path(self):
-        return os.path.join(HERE, self.component, self.script)
+        return os.path.join(HERE, self.script_component, self.script)
 
     def missing(self):
         return [path for path in self.needs if not os.path.exists(path)]
@@ -363,8 +366,8 @@ def preset_for(args, *analyses):
 
 def document(args):
     """What the pages will say: check the three analyses, draw, then build the model."""
-    build, docs = args.build, args.docs
-    diagrams = os.path.join(docs, "_diagrams")
+    build = args.build
+    diagrams = os.path.join(build, "diagrams")
     index = os.path.join(build, "structure.json")
     verified = os.path.join(build, "claims.verified.jsonl")
     architecture = os.path.join(build, "architecture-analysis.json")
@@ -448,24 +451,39 @@ def document(args):
     ]
 
 
-def publish(args):
-    """What a reader gets: render it, check the sentences, and report on the run."""
-    build, docs = args.build, args.docs
-    diagrams = os.path.join(docs, "_diagrams")
+def staging_of(args):
+    return args.staging or os.path.join(args.build, "rendered-docs")
+
+
+def render(args):
+    """Render a reviewable draft without changing the published documentation."""
+    build, staging = args.build, staging_of(args)
+    render_args = ["--doc", os.path.join(build, "doc.json"), "--out", staging,
+                   "--diagrams", os.path.join(build, "diagrams"),
+                   "--format", args.format, "--check"]
+    if args.write_conf:
+        render_args.append("--write-conf")
+        if args.project:
+            render_args.extend(["--project", args.project])
+    return [
+        Stage("render", "prepare_stage.py", ["--source", args.docs, "--out", staging]),
+        Stage("render", "render_docs.py", render_args, script_component="publish"),
+        Stage("render", "snapshot_draft.py",
+              ["--draft", staging, "--doc", os.path.join(build, "doc.json"),
+               "--out", os.path.join(build, "render-manifest.json")]),
+    ]
+
+
+def review(args):
+    """Review and seal the exact rendered draft; never promote it."""
+    build, staging = args.build, staging_of(args)
+    diagrams = os.path.join(staging, "_diagrams")
     doc = os.path.join(build, "doc.json")
     prose = os.path.join(build, "prose-report.json")
     architecture = os.path.join(build, "architecture-analysis.json")
     flows = os.path.join(build, "flow-analysis.json")
     operations = os.path.join(build, "operations-analysis.json")
-    config = os.path.join(build, "config-analysis.json")
     report = os.path.join(build, "flow-report.json")
-
-    render = ["--doc", doc, "--out", docs, "--diagrams", diagrams,
-              "--format", args.format, "--check"]
-    if args.write_conf:
-        render.append("--write-conf")
-        if args.project:
-            render.extend(["--project", args.project])
 
     checker = [doc, "--require-review", "--out", prose]
     gate = ["--index", os.path.join(build, "structure.json"),
@@ -485,19 +503,37 @@ def publish(args):
     if args.review:
         checker.extend(["--review", args.review])
 
+    generation = os.path.join(build, "generation-report.json")
     return [
-        Stage("publish", "render_docs.py", render),
+        Stage("review", "validate_draft.py",
+              ["--draft", staging, "--doc", doc,
+               "--manifest", os.path.join(build, "render-manifest.json")]),
         # A block queued for review is honest, not broken: quality_docs still has to run
         # so the report carries `review_required` rather than the component ending in
         # silence.
-        Stage("publish", "check_prose.py", checker, tolerate=(1,)),
-        Stage("publish", "quality_docs.py", gate),
+        Stage("review", "check_prose.py", checker, tolerate=(1,),
+              script_component="publish"),
+        Stage("review", "quality_docs.py", gate, script_component="publish"),
+        Stage("review", "seal_draft.py",
+              ["--draft", staging, "--doc", doc, "--report", generation,
+               "--render-manifest", os.path.join(build, "render-manifest.json"),
+               "--out", os.path.join(build, "publish-seal.json")]),
     ]
 
 
+def publish(args):
+    """Promote only the sealed draft; perform no generation or review."""
+    return [Stage("publish", "promote_docs.py",
+                  ["--draft", staging_of(args), "--target", args.docs,
+                   "--doc", os.path.join(args.build, "doc.json"),
+                   "--report", os.path.join(args.build, "generation-report.json"),
+                   "--seal", os.path.join(args.build, "publish-seal.json")])]
+
+
 COMPONENTS = {"survey": survey, "analyze": analyze, "check": check,
-              "document": document, "publish": publish}
-ORDER = ["survey", "analyze", "check", "document", "publish"]
+              "document": document, "render": render, "review": review,
+              "publish": publish}
+ORDER = ["survey", "analyze", "check", "document", "render", "review", "publish"]
 
 # The judgements the document rests on that no script can make, and the component each
 # one stands in front of.
@@ -528,11 +564,11 @@ CHECKPOINTS = (
      "show": "the components and their boundaries, the flows traced and the ones "
              "refused, the operations found",
      "ask": "is this the architecture, and are the boundaries where they would put them"},
-    # Opened by `publish` and blocking `publish`: the first run renders and queues, and
+    # Opened by `review` and blocking `review`: the first run queues, and
     # the second -- the one that carries `--review` and reaches the final gate -- is the
     # one held. `opens_when` keeps it quiet on a run that queued nothing, because a
     # checkpoint that opens with no question to ask teaches people to decide it blind.
-    {"id": "P4", "opened_by": "publish", "blocks": "publish", "opens_when": "prose_queued",
+    {"id": "P4", "opened_by": "review", "blocks": "review", "opens_when": "prose_queued",
      "show": "each queued block beside the evidence under it, and the verb you propose",
      "ask": "are these the intended readings"},
 )
@@ -649,6 +685,8 @@ def main():
     parser.add_argument("--root", default=".", help="the repository being documented")
     parser.add_argument("--build", default=".docs-build", help="where intermediates go")
     parser.add_argument("--docs", default="docs", help="where the document is written")
+    parser.add_argument("--staging", help="rendered draft directory; defaults to "
+                                          ".docs-build/rendered-docs")
     parser.add_argument("--top", type=int, default=25, help="survey: fan-in cutoff")
     parser.add_argument("--policy", default="optional",
                         choices=("disabled", "optional", "required"),
@@ -661,11 +699,11 @@ def main():
     parser.add_argument("--detail", default="public",
                         help="document: class-diagram detail")
     parser.add_argument("--format", default="rst", choices=("rst", "myst"),
-                        help="publish: markup the renderer emits")
-    parser.add_argument("--review", help="publish: prose-review.jsonl with your verdicts")
+                        help="render: markup the renderer emits")
+    parser.add_argument("--review", help="review: prose-review.jsonl with your verdicts")
     parser.add_argument("--write-conf", action="store_true",
-                        help="publish: generate a Sphinx conf.py if the output has none")
-    parser.add_argument("--project", help="publish: project name for --write-conf")
+                        help="render: generate a Sphinx conf.py in staging if none exists")
+    parser.add_argument("--project", help="render: project name for --write-conf")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the commands this component would run, and run nothing")
     args = parser.parse_args()

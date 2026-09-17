@@ -4,7 +4,7 @@ The fourth component. Presets are in [`presets.md`](presets.md), diagram rules i
 [`diagram-policy.md`](diagram-policy.md), and the manual preset in [`manual.md`](manual.md).
 
 ```bash
-python3 scripts/pipeline.py document --docs docs
+python3 scripts/pipeline.py document
 ```
 
 Validates each of the three analyses that exists and skips the ones that do not, naming them; then builds the

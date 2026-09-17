@@ -29,7 +29,7 @@ component lives beside it in `references/`**, so what you load is what you are a
 | [Hard rules](#hard-rules) | the nine that hold whatever else you do |
 | [Where the intermediate files go](#where-the-intermediate-files-go) | `.docs-build/`, and what may be deleted |
 | [Where the run pauses](#where-the-run-pauses-for-the-user) | P1–P4, all four enforced by the driver |
-| [The run](#the-run) | the five commands, and which reference to open at each |
+| [The run](#the-run) | the seven runtime commands, and which reference to open at each |
 | [Bundled resources](#bundled-resources) | every reference, and when to load it |
 | [Side effects](#side-effects) · [conventions](#conventions) | what this writes, and how it reports |
 
@@ -107,8 +107,9 @@ is meant to be committed.
 
 Everything except the finished document is written to **`.docs-build/`** in the working directory:
 `structure.json`, the claims, fragments and analyses with their verified counterparts, `findings.jsonl`,
-`class-graph.json`, `doc.json` and `timings.jsonl`. Say so when you finish, and offer to delete it; nothing in there is meant to
-be committed. The rendered diagrams are the exception — they belong beside the document, in `docs/_diagrams/`.
+`class-graph.json`, `doc.json`, `diagrams/`, `rendered-docs/` and `timings.jsonl`. Say so when you finish, and
+offer to delete it; nothing in there is meant to be committed. Publication copies the reviewed diagrams and
+pages into the target tree together.
 
 ## Where the run pauses for the user
 
@@ -122,7 +123,7 @@ the next component.**
 | **P1 scope** | `survey` | is this the right scope to spend the budget on |
 | **P2 roles** | `analyze` | do these module roles match what the repository is |
 | **P3 shape** | `check`, once the three analyses are written | are the boundaries where they would put them |
-| **P4 prose** | `publish` | are the queued readings the intended ones |
+| **P4 prose** | `review` | are the queued readings the intended ones |
 
 **All four are enforced by the driver**, which prints what to show and what to ask at the moment it opens
 one, and refuses to run the next component until a decision is recorded:
@@ -138,8 +139,8 @@ reopens the checkpoints, because the units may now be different.
 **P4 was once left out of this**, on the reasoning that a queued block nobody decided already holds the run
 at `review_required`. That confuses holding the *gate* with opening a *pause*: nothing printed the question
 and nothing refused to run, so a run reached a published manual with twenty blocks queued, zero reviewed,
-and the final validation never executed. `publish` now opens P4 when it queues anything, and refuses to run
-again until it is decided. A run that queued nothing opens nothing.
+and the final validation never executed. `review` now opens P4 when it queues anything; reviewed review and
+publication remain blocked until it is decided. A run that queued nothing opens nothing.
 
 A pause is a question with the material attached, not a request for permission: the user should be able to
 answer without opening a file. Summarise — a pause that pastes a whole JSONL file is not a question. Then
@@ -153,7 +154,7 @@ and put the same list in the closing report.
 
 ## The run
 
-Five components, each a directory under `scripts/` and each run by one command. **The gaps between them are
+Seven runtime components, each run by one command. **The gaps between them are
 the pipeline**: a module's purpose is not in an index, what the modules add up to is not in a claim, and a
 sentence a reader sees may not outrun the analysis behind it. What you write goes in `.docs-build/`; the next
 component reads it from there. The driver runs one component per invocation for this reason — the pauses fall
@@ -168,13 +169,15 @@ output and what to decide from it.
 | `analyze` | `pipeline.py analyze` | `module-analysis.jsonl`, `fragments.jsonl`, any `calls` claim | [references/analyze.md](references/analyze.md) |
 | `check` | `pipeline.py check` | — fix what its findings name | [references/check.md](references/check.md) |
 | — | no command | `architecture-analysis.json`, `flow-analysis.json`, `operations-analysis.json` | [references/three-analyses.md](references/three-analyses.md) |
-| `document` | `pipeline.py document --docs docs` | — fix what its findings name | [references/document.md](references/document.md) |
-| `publish` | `pipeline.py publish --docs docs` | `prose-review.jsonl`, then rerun with `--review` | [references/publish.md](references/publish.md) |
+| `document` | `pipeline.py document` | — fix what its findings name | [references/document.md](references/document.md) |
+| `render` | `pipeline.py render --docs docs` | — inspect `.docs-build/rendered-docs/` | [references/rendering.md](references/rendering.md) |
+| `review` | `pipeline.py review` | `prose-review.jsonl`, then rerun with `--review` | [references/prose-rules.md](references/prose-rules.md) |
+| `publish` | `pipeline.py publish --docs docs` | — promotes only the sealed draft | [references/publish.md](references/publish.md) |
 
 The driver times every script stage automatically. Bracket work done by the model with
 `pipeline.py measure --step <name> --state start|stop`; use `source_reading`, `architecture_synthesis`,
 `manual_authoring`, `prose_rewrite` and `model_review` as the stable step names. This is the only honest way
-to compare model work with `document` and `publish`: elapsed time between commands may include a checkpoint
+to compare model work with runtime stages: elapsed time between commands may include a checkpoint
 or time waiting for the user. Details and the record format are in [references/pipeline.md](references/pipeline.md).
 
 A component stops at the first stage that fails and names it, and exit codes pass through unchanged: `0` fine,
@@ -197,7 +200,8 @@ what the verification apparatus covers best.
 
 ## Bundled resources
 
-`scripts/` holds one directory per component — `survey/`, `analyze/`, `check/`, `document/`, `publish/` — and
+`scripts/` holds the component scripts for `survey`, `analyze`, `check`, `document`, `render`, `review` and
+`publish`; shared render/review helpers remain bundled under `publish/` for direct compatibility. The
 `pipeline.py` beside them runs each in turn with the arguments that component fixes. `analyze/query_graph.py`
 is the one script you call yourself, for a packet's parts. You do not need to read any of them.
 
@@ -211,13 +215,14 @@ is the one script you call yourself, for a packet's parts. You do not need to re
 | `references/diagram-policy.md` | `document`, before reviewing a diagram or writing a view spec |
 | `references/presets.md` | `document`, to override the preset |
 | `references/manual.md`, `references/documentation-template.md` | `--preset manual`, before choosing scope |
-| `references/rendering.md` | `publish`, before rendering into a project that already has documentation |
-| `references/prose-rules.md` | `publish`, for the verb ranks, the ceilings and the review format |
+| `references/rendering.md` | `render`, before creating the isolated draft |
+| `references/prose-rules.md` | `review`, for the verb ranks, ceilings and review format |
 | `references/prose-generation.md` | manual prose generation, after answers validate and before rendering |
 
 ## Side effects
 
-Writes `.docs-build/` in the working directory, and the rendered document under `docs/` (or a path you name).
+Writes intermediates and the rendered draft under `.docs-build/`. Only `publish` replaces `docs/` (or a path
+you name), after validating the final-review seal.
 Reads the working tree only. Uses `git ls-files` when the target is a git repository so ignored files are
 skipped, and `git rev-parse`/`git status` to record which revision was scanned. `annotate_import_usage.py`
 invokes `ruff` when enabled, read-only and with `--no-cache`, so nothing is written into the scanned

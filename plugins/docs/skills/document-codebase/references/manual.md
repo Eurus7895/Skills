@@ -46,17 +46,18 @@ as many answers as it takes.
    reader needs: a heading that says what the section is about, and prose that reads as documentation. One
    section may draw on several answers, and should where the answers overlap — three questions about
    configuration are usually one section, not three.
-6. Run `python3 scripts/pipeline.py document --preset manual`, then publish. The builder checks complete
+6. Run `python3 scripts/pipeline.py document --preset manual`, then `render`. The builder checks complete
    question IDs, scan identity, repository-relative evidence line ranges, that every answer with an
    `observed` or `declared` basis names a `verified_ids` entry some validator already passed, and that every
    composed section stays inside
    what its answers cite. It does not prove that a sentence is true or sufficient: deterministic prose
    checks examine every composed section, and **every manual section enters the model review queue**.
-7. Review the rendered RST: does it read as a manual, and does each section still say what its answers said?
+7. Review `.docs-build/rendered-docs/`: does it read as a manual, and does each section still say what its answers said?
    Correct the notes or the composition in `manual-analysis.json` and rebuild; do not patch generated RST
    because the next build replaces it. Review verdicts apply to section blocks
    `section:<page-id>:<n>`. Unknown answers and missing mandatory diagrams keep the quality report
-   incomplete; an answered question no section uses **fails** it.
+   incomplete; an answered question no section uses **fails** it. Run `review`, record P4 and fresh verdicts,
+   rerun `review --review .docs-build/prose-review.jsonl`, then run `publish` only after the draft is sealed.
 
 ## Map the template to this repository
 

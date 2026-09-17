@@ -22,8 +22,8 @@ of all. Git sees an empty spot where the build directory is.
 this default does not do, and replacing that on the next run would be the pipeline
 arguing with them once per invocation.
 
-This is only for intermediates. The rendered document is a deliverable and is meant to be
-committed, so nothing here touches the output directory.
+This is only for intermediates, including the rendered draft. The published document is a
+deliverable and is meant to be committed; `publish` promotes it out of this directory.
 
 Standard library only.
 """

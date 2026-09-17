@@ -382,9 +382,9 @@ def driver_tests(tmp, root):
           "--operations" in text, text)
     os.remove(os.path.join(build, "operations-analysis.json"))
     write(os.path.join(build, "architecture-analysis.json"), "{}")
-    code, text = run("pipeline.py", "publish", "--root", root, "--build", build,
+    code, text = run("pipeline.py", "review", "--root", root, "--build", build,
                      "--docs", os.path.join(tmp, "docs"), "--dry-run")
-    check("publish passes the analyses to the prose check and the gate",
+    check("review passes the analyses to the prose check and the gate",
           text.count("--architecture") == 2, text)
     os.remove(os.path.join(build, "architecture-analysis.json"))
 
@@ -406,7 +406,7 @@ def driver_tests(tmp, root):
     code, text = run("pipeline.py", "survey", "--root", os.path.join(tmp, "no-such-dir"),
                      "--build", build)
     check("a missing root is an input error", code == 2, text)
-    code, text = run("pipeline.py", "publish", "--root", root, "--build", build,
+    code, text = run("pipeline.py", "review", "--root", root, "--build", build,
                      "--review", os.path.join(tmp, "no-such-review.jsonl"))
     check("a missing review file is an input error", code == 2, text)
     code, text = run("pipeline.py", "audit", "--root", root, "--build", build)

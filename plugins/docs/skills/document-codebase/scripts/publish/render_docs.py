@@ -375,9 +375,8 @@ def main():
         os.makedirs(args.out)
     if args.diagrams:
         destination = os.path.join(args.out, "_diagrams")
-        # The documented invocation is `--out docs --diagrams docs/_diagrams`, where the
-        # diagrams are already where they belong. Deleting the destination first would
-        # delete the source and then copy from nothing.
+        # A direct caller may point --diagrams at the destination itself. Deleting the
+        # destination first would delete the source and then copy from nothing.
         already_there = (os.path.isdir(destination)
                          and os.path.realpath(destination)
                          == os.path.realpath(args.diagrams))
