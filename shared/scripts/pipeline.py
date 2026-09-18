@@ -394,6 +394,15 @@ def document(args):
             argv = [sys.executable, os.path.join(HERE, "document", "manual.py"),
                     "--init", answers, "--index", index,
                     "--authored", os.path.join(build, "authored.jsonl")]
+            # The two largest sources of citable ids. Left off, the reading list held only
+            # what the three optional analyses contributed -- an end-to-end run offered 2
+            # facts where 15 existed -- and an answer cannot be `observed` or `declared`
+            # without naming an id the draft never told the model was there.
+            for flag, path in (("--claims", verified),
+                               ("--analysis", os.path.join(build,
+                                                           "module-analysis.jsonl"))):
+                if os.path.exists(path):
+                    argv.extend([flag, path])
             for flag, path in (("--architecture", architecture), ("--flows", flows),
                                ("--operations", operations), ("--config", config)):
                 if os.path.exists(path):

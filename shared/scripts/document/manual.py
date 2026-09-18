@@ -698,6 +698,16 @@ if __name__ == "__main__":
     parser.add_argument("--flows", help="flow-analysis.json")
     parser.add_argument("--operations", help="operations-analysis.json")
     parser.add_argument("--config", help="config-analysis.json")
+    # Without these two the reading list is missing its two largest sources, and an
+    # end-to-end run showed exactly what that costs: 2 facts offered where 15 existed, all
+    # of them configuration settings. `observed` and `declared` each require a
+    # `verified_id`, so an answer whose evidence the draft never mentioned cannot be
+    # written at that basis at all -- the model has no way to know the id exists, and the
+    # honest answer left to it is `inferred` or `unknown`.
+    parser.add_argument("--claims", help="claims.verified.jsonl, so verified claims are "
+                                         "in the reading list")
+    parser.add_argument("--analysis", help="module-analysis.jsonl, so recorded statements "
+                                           "are in the reading list")
     parser.add_argument("--authored", help="where to write the authored-page ledger; "
                                            "an existing one is never overwritten")
     args = parser.parse_args()
@@ -715,7 +725,41 @@ if __name__ == "__main__":
             raise SystemExit("FAIL %s was written against %s, the index is %s"
                              % (path, stated, index.get("index_hash")))
         extra[key] = loaded
-    draft = scaffold(index, extra)
+
+    def _rows(path):
+        """JSONL rows carrying this scan's identity, or a refusal naming the mismatch."""
+        out = []
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row.get("index_hash") not in (None, index.get("index_hash")):
+                raise SystemExit("FAIL %s holds a row written against %s, the index is %s"
+                                 % (path, row.get("index_hash"), index.get("index_hash")))
+            out.append(row)
+        return out
+
+    class _Statements(object):
+        """Just the id map `confirmable` reads, not a second `Analysis`.
+
+        `build_document_model` imports this module, so importing its `Analysis` back would
+        be a cycle -- and the reading list needs only the mapping. The authored ledger,
+        which does want `of_kind` and `modules`, is left the `None` it had: its evidence is
+        recomputed at build time from the real `Analysis`, so nothing is lost by an init
+        that offers it less.
+        """
+
+        def __init__(self, rows=()):
+            self.by_id = {}
+            for row in rows:
+                for statement in row.get("statements", ()) or ():
+                    if isinstance(statement, dict) and statement.get("id"):
+                        self.by_id[statement["id"]] = dict(statement,
+                                                           path=row.get("path", ""))
+
+    claims = _rows(args.claims) if args.claims else ()
+    analysis = _Statements(_rows(args.analysis)) if args.analysis else None
+    draft = scaffold(index, extra, claims, analysis)
     # Exclusive creation protects an analysis the agent already wrote.
     with open(args.init, "x", encoding="utf-8") as handle:
         json.dump(draft, handle, indent=2, ensure_ascii=False)
