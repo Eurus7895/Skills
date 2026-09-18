@@ -126,13 +126,20 @@ class StatusTests(unittest.TestCase):
         (self.build / 'authored.jsonl').write_text(
             json.dumps({'page_id': 'appendix/faq', 'status': 'scaffolded'}) + "\n"
             + json.dumps({'page_id': 'appendix/compliance', 'status': 'waived'}) + "\n")
-        (self.build / 'prose-report.json').write_text(
-            json.dumps({'queue': [1, 2], 'reviewed': 1}))
+        # The shape `check_prose` actually writes: counts under `coverage`, the undecided
+        # blocks in `unreviewed`, the queue in `review_queue`. This test used to fabricate
+        # `{'queue': [...], 'reviewed': 1}` -- the same wrong shape the reader assumed --
+        # so it passed while `status` and `prose_queued` both read the wrong keys.
+        (self.build / 'prose-report.json').write_text(json.dumps(
+            {'schema_version': 1, 'status': 'review_required',
+             'review_queue': [{'block': 'b1'}, {'block': 'b2'}],
+             'unreviewed': ['b2'],
+             'coverage': {'blocks_checked': 3, 'queued': 2, 'reviewed': 1}}))
         out = run(self.root, 'status').stdout
         self.assertIn('1 of 2 question(s) answered, 1 section(s) composed', out)
         self.assertIn('1 of 2 page(s) settled', out)
         self.assertIn('appendix/faq (scaffolded)', out)
-        self.assertIn('2 block(s) queued, 1 reviewed', out)
+        self.assertIn('2 block(s) queued, 1 reviewed, 1 undecided', out)
 
     def test_a_checkpoint_from_an_earlier_scan_is_marked_stale(self):
         """A scope approved against one scan says nothing about a tree that has moved."""

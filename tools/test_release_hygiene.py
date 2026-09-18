@@ -126,6 +126,33 @@ class HygieneTests(unittest.TestCase):
         (self.docs / "usage" / "invoking.md").write_text("# Invoking\n")
         self.assertNotIn("H007", self.codes(expected_pages=["usage/invoking"]))
 
+    def test_a_waived_authored_page_is_not_expected_in_the_tree(self):
+        """`render_docs` writes no scaffold for a waived page, on purpose.
+
+        Caught on a real run: `appendix/compliance` is waived by default, so no file is
+        written for it, and H007 reported that deliberate decision as a defect. Two
+        features contradicting each other, invisible to either one's own tests.
+        """
+        self.sound()
+        model = self.root / "doc.json"
+        model.write_text(json.dumps({
+            "pages": [],
+            "authored_pages": [{"id": "appendix/compliance"},
+                               {"id": "appendix/faq"}],
+            "authored_ledger": [
+                {"page_id": "appendix/compliance", "status": "waived"},
+                {"page_id": "appendix/faq", "status": "scaffolded"}]}))
+        out = self.root / "hygiene.json"
+        subprocess.run(
+            [sys.executable, script("release_hygiene.py"), "--docs", str(self.docs),
+             "--root", str(self.root), "--doc", str(model), "--out", str(out)],
+            capture_output=True, text=True)
+        findings = json.loads(out.read_text())["findings"]
+        paths = [f["path"] for f in findings if f["code"] == "H007"]
+        self.assertNotIn("appendix/compliance", paths)
+        # The unsettled one is still owed a file.
+        self.assertIn("appendix/faq", paths)
+
     # -- the command and the gate ------------------------------------------------
 
     def test_the_command_exits_one_on_findings_and_zero_when_clean(self):

@@ -178,6 +178,12 @@ def check(docs, root=".", expected_pages=()):
 
     # A page the model produced that is not on disk is a toctree entry pointing at
     # nothing; `render_docs` writes them all, so this catches a tree edited afterwards.
+    #
+    # A settled authored page is the exception, and the caller removes it before getting
+    # here. A waived page is one somebody decided the document does not need -- notably
+    # `appendix/compliance`, which is waived by default -- and `render_docs` writes no
+    # scaffold for it on purpose. Flagging that absence reported a deliberate decision as
+    # a defect, which a real run showed immediately.
     for page in expected_pages:
         if not any(os.path.isfile(os.path.join(docs, page + ext))
                    for ext in (".rst", ".md")):
@@ -202,8 +208,13 @@ def main():
                 model = json.load(fh)
         except (OSError, ValueError) as exc:
             return fail("cannot read %s: %s" % (args.doc, exc))
+        # A waived authored page is deliberately not in the tree, so it is not expected in
+        # it. The ledger is the authority on which ones those are.
+        settled = {row.get("page_id") for row in model.get("authored_ledger", ()) or ()
+                   if row.get("status") == "waived"}
         expected = [p["id"] for p in model.get("pages", ())] + \
-                   [p["id"] for p in model.get("authored_pages", ())]
+                   [p["id"] for p in model.get("authored_pages", ())
+                    if p["id"] not in settled]
 
     try:
         findings = check(args.docs, args.root, expected)

@@ -605,12 +605,30 @@ CHECKPOINTS = (
 
 
 def prose_queued(build):
-    """Whether `check_prose` left blocks nobody has decided."""
+    """Whether `check_prose` left blocks nobody has decided.
+
+    **Read `coverage`, not the top level.** The first version of this read
+    `report["queued"]` and `report["reviewed"]`, which `check_prose` has never written
+    there -- the counts live under `coverage`, beside `blocks_checked`. So it returned
+    False on every real report and P4 never opened, which is the exact failure the
+    checkpoint was added to fix. It passed by hand at the time because the report it was
+    tried against was written to match the reader instead of the producer.
+
+    `unreviewed` is the list of blocks nobody decided, and is checked first because it is
+    the thing the question is actually about.
+    """
     try:
         with open(os.path.join(build, "prose-report.json"), encoding="utf-8") as fh:
             report = json.load(fh)
     except (OSError, ValueError):
         return False
+    # Checked ahead of the counts, and not only as a shortcut: a review file can hold as
+    # many records as there are queued blocks and still leave some undecided, when a record
+    # was written against content that has since changed. `queued == reviewed` is then true
+    # while `unreviewed` is not empty, and the blocks nobody decided are what the question
+    # is about.
+    if report.get("unreviewed"):
+        return True
     coverage = report.get("coverage") or {}
     return (coverage.get("queued") or 0) > (coverage.get("reviewed") or 0)
 
@@ -795,8 +813,12 @@ def status(args, build):
 
     report = _json(os.path.join(build, "prose-report.json"))
     if isinstance(report, dict):
-        print("review     %d block(s) queued, %d reviewed"
-              % (len(report.get("queue") or ()), report.get("reviewed") or 0))
+        # `coverage`, for the same reason `prose_queued` reads it there: the counts have
+        # never been at the top level, and the list is `review_queue`, not `queue`.
+        coverage = report.get("coverage") or {}
+        print("review     %d block(s) queued, %d reviewed, %d undecided"
+              % (coverage.get("queued") or 0, coverage.get("reviewed") or 0,
+                 len(report.get("unreviewed") or ())))
 
     print("\nnext       %s" % next_step(build, digest, remaining=touched + untouched))
     return 0
@@ -1030,6 +1052,8 @@ def main():
     if not args.dry_run:
         for checkpoint in CHECKPOINTS:
             if checkpoint["opened_by"] != args.component:
+                continue
+            if code not in checkpoint.get("opens_on", (0,)):
                 continue
             condition = OPENS_WHEN.get(checkpoint.get("opens_when"))
             if code != 0 and condition is None:
