@@ -314,6 +314,81 @@ def repeated_answers(notes):
     return sorted(repeated, key=len, reverse=True), len(answered)
 
 
+# Composition is the one step in this pipeline with no floor under it. `read_section`
+# enforces exactly one direction -- a section may not cite more than its answers -- and
+# narrowing to nothing is permitted by design. So every gate here asks "is this claim
+# supported?" and none asks "is this all you had?", which is why a run can answer all 161
+# questions honestly and ship twenty three-word pages reporting `answer_mode: answered`.
+#
+# Measured: nine answers, each with distinct text and real evidence, composed into one
+# section reading "It works." -- `validate` clean, `uncomposed` zero, top answer tier, and
+# a rendered page of nineteen words, seventeen of them citations.
+#
+# WORDS PER ANSWER IS THE ONLY BLOCKING MEASURE, and the floor is low. Two other measures
+# were tried against real sections and both failed:
+#
+#   A ratio to the answers' own length is unsound in principle. Compression is what
+#   composition IS, so good editing and discard are the same number: a well-written
+#   67-word paragraph built from 1400 words of notes retains 4.8%, and the stub that
+#   replaced nine answers with "It works." retains 4.1%. It is also gameable from the
+#   wrong end -- write terse notes and a terse section clears it -- which would reward the
+#   run that read the least. Kept as a reported figure, never a verdict.
+#
+#   Term overlap between a section and its answers is legitimate to lose: a section may
+#   paraphrase completely. Reported, never a verdict.
+#
+# Calibration, from sections measured rather than imagined:
+#   "It works." over 9 answers          0.3 words/answer   <- the failure being stopped
+#   a terse but real 2-answer section   7.5
+#   a proper 7-answer paragraph         9.6
+# A floor of 4 sits an order of magnitude above the stub and well below honest prose. It
+# will not catch forty words of filler over nine answers; nothing mechanical will, and the
+# prose review queue is where that is somebody's judgement rather than a threshold.
+MIN_WORDS_PER_ANSWER = 4
+# A term long enough to be about the subject rather than about English.
+TERM_LENGTH = 5
+
+
+def words(text):
+    return [w for w in str(text or "").split() if w]
+
+
+def terms(text):
+    """Distinctive lowercase words, for asking whether a section is about its answers."""
+    return {w.strip(".,;:()[]\"'`").lower() for w in words(text)
+            if len(w.strip(".,;:()[]\"'`")) >= TERM_LENGTH}
+
+
+def composition_health(body, cited_notes):
+    """How much of what the answers held reached the reader, as numbers and complaints.
+
+    Returns the measurements either way. A section is not refused here -- `build` still
+    produces it, because a thin draft that renders is reviewable and a build that refuses
+    leaves nothing to look at. The verdict is the gate's, on the same render-then-hold
+    pattern as P4, the prose queue and the authored ledger.
+    """
+    body_words = len(words(body))
+    answer_words = sum(len(words(n["text"])) for n in cited_notes)
+    per_answer = body_words / float(len(cited_notes)) if cited_notes else 0.0
+    retained = body_words / float(answer_words) if answer_words else 1.0
+    shared = terms(body) & set().union(*[terms(n["text"]) for n in cited_notes]) \
+        if cited_notes else set()
+    problems = []
+    if per_answer < MIN_WORDS_PER_ANSWER:
+        problems.append(
+            "covers %d question(s) in %d word(s) (%.1f per question, floor %d) -- a "
+            "section this short did not compose its answers, it replaced them"
+            % (len(cited_notes), body_words, per_answer, MIN_WORDS_PER_ANSWER))
+    return {"body_words": body_words, "answer_words": answer_words,
+            "words_per_answer": round(per_answer, 1),
+            # Both reported, neither a verdict -- see the calibration note above for why
+            # each one failed as a threshold. They are here so a reviewer can see the
+            # shape of a section without re-deriving it, and so a future floor can be set
+            # from recorded runs instead of from a guess.
+            "retained": round(retained, 3), "shared_terms": len(shared),
+            "problems": problems}
+
+
 def composable(note):
     """Whether this note may be written into prose a reader sees.
 
@@ -406,6 +481,7 @@ def read_section(page_id, order, section, notes, origins):
          "manual_block": True, "manual_answers": sorted(n["id"] for n in cited_notes),
          "answer_basis": basis, "answer_completeness": completeness,
          "content_review": "pending", "evidence": evidence,
+         "composition": composition_health(body, cited_notes),
          "facets_missing": sorted({f for n in cited_notes for f in n["facets_missing"]}),
          "claim_refs": [r for r in verified_ids if origins.get(r) == "claim"],
          "analysis_refs": [r for r in verified_ids if origins.get(r) == "statement"],
@@ -540,6 +616,15 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
     for ref in cited:
         by_source.setdefault(origins[ref], []).append(ref)
     sections_written = sum(1 for p in pages for b in p["blocks"] if b.get("manual_block"))
+    # One figure for how much of what was answered reached a reader, beside the figure for
+    # how much was answered. A manual can be complete on the second and empty on the first.
+    written = [b for p in pages for b in p["blocks"] if b.get("manual_block")]
+    thin = [{"page": p["id"], "block": b["id"],
+             "problems": b["composition"]["problems"]}
+            for p in pages for b in p["blocks"]
+            if b.get("manual_block") and b["composition"]["problems"]]
+    body_total = sum(b["composition"]["body_words"] for b in written)
+    answer_total = sum(b["composition"]["answer_words"] for b in written)
     # Named, not generated -- the way `handbook` treats the same material -- but no longer
     # only named. Each carries its ledger row, so the report can say which are still owed
     # and a scaffold can hand the writer what this run already verified for them.
@@ -567,6 +652,11 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
             "manual_coverage": {"total": len(expected), "unresolved": unresolved,
                                 "uncomposed": uncomposed, "sections": sections_written,
                                 "missing_diagrams": missing_diagrams,
+                                "prose_words": body_total,
+                                "answer_words": answer_total,
+                                "retained": round(body_total / float(answer_total), 3)
+                                if answer_total else None,
+                                "thin_sections": thin,
                                 "verified_ids_cited": {k: sorted(v)
                                                        for k, v in sorted(by_source.items())}}}
 

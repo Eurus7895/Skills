@@ -236,6 +236,44 @@ is derived from them — `evidence` and `verified_ids` default to the union of w
 section keeps the weakest basis and completeness of the answers it uses; its content review remains pending
 until a reviewer decides that exact rendered wording.
 
+### Naming an answer is not composing it
+
+**A section must give at least four words of prose per answer it names.** Below that, publication is held.
+
+Composition was the one step here with no floor under it. The rule it enforces runs in one direction only —
+a section may not cite more than its answers — and narrowing to nothing was permitted by design, so every
+gate asked *"is this claim supported?"* and none asked *"is this all you had?"*
+
+What that allowed, measured: all 161 questions answered with distinct text and real evidence, then one
+section per page reading **"It works."** `validate` clean, `uncomposed` zero, `answer_mode: answered` — the
+top tier — and a rendered page of nineteen words, seventeen of them citations.
+
+The floor is deliberately low. Calibration, from sections measured rather than imagined:
+
+| Section | Words per answer | |
+| --- | --- | --- |
+| `"It works."` over 9 answers | 0.2 | held |
+| a terse but real 2-answer section | 7.5 | passes |
+| a proper 7-answer paragraph | 9.6 | passes |
+
+It will not catch forty words of filler over nine answers. Nothing mechanical will, which is what the prose
+review queue is for.
+
+**Two other measures were tried and rejected**, and both are still reported so you can see the shape of a
+section without re-deriving it:
+
+- `retained` — prose words over the words its answers hold. Unsound as a verdict, because **compression is
+  what composition is**: a well-written 67-word paragraph built from 1400 words of notes retains 4.8%, and
+  the stub that replaced nine answers retains 4.1%. Only the prose tells them apart. It is also gameable from
+  the wrong end — write terse notes and a terse section clears it — which would reward the run that read least.
+- `shared_terms` — vocabulary the section shares with its answers. A section may paraphrase completely and
+  still be correct.
+
+The draft still renders when a section is thin. That is the point: a thin draft you can read is reviewable,
+and a build that refuses leaves nothing to look at. `manual_coverage.thin_sections` names them, and
+`quality_docs` holds publication — the same render-then-hold pattern as P4, the prose queue and the authored
+ledger.
+
 Five rules, all checked before `doc.json` is written:
 
 - **A heading is not a question.** A trailing `?` is refused outright. The question asked what to find out;

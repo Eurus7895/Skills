@@ -708,6 +708,22 @@ def main():
                 reasons.append("manual is missing required diagram(s): %s"
                                % ", ".join(missing_diagrams))
 
+            # How much of what was answered reached a reader, beside how much was
+            # answered. Every other check here passes on a manual whose sections replaced
+            # their answers with three words: the citations resolve, composition stayed
+            # inside what the answers cite, and `uncomposed` is zero because each answer
+            # was named. Naming an answer is not composing it.
+            thin = coverage.get("thin_sections") or []
+            report["manual"]["prose_words"] = coverage.get("prose_words")
+            report["manual"]["retained"] = coverage.get("retained")
+            report["manual"]["thin_sections"] = [t["block"] for t in thin]
+            if thin:
+                status = FAILED
+                worst = thin[0]
+                reasons.append(
+                    "manual has %d section(s) that discard the answers they name; %s %s"
+                    % (len(thin), worst["block"], worst["problems"][0]))
+
             # The authored pages, reported in their own right rather than folded into
             # `answer_mode`. The run was never asked to answer them, so they must not
             # count against what it did answer -- and must not be excused by it either.
