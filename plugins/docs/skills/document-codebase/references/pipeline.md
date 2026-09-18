@@ -116,6 +116,42 @@ reopens them — the scope approved against the old tree says nothing about the 
 file bypasses it, in the same way deleting `claims.jsonl` bypasses the claims: the mechanism is against
 forgetting, not against intent.
 
+## `status` — where the run is
+
+```bash
+python3 scripts/pipeline.py status
+```
+
+**Read-only, and never blocked by anything.** It runs no stage, writes nothing — not even the build directory
+it would report as absent — and answers the same whether the last component passed, failed, or was never
+reached.
+
+That last part is the reason it exists. A checkpoint refuses to let the next component run, and a failing
+stage stops the ones behind it; both are correct, and between them they meant the state of a run was only ever
+reported by something that might decline to report it. A session whose context was reset halfway through the
+modules had no way to ask what was left: `quality_docs.py` names the unread modules, but that runs in
+`publish`, and a partial analysis fails `check` first.
+
+It prints the scan identity and revision, each checkpoint's state, the module budget, the manual's answered
+and composed counts, the authored ledger, and the review queue — then one line naming the next action.
+
+**Modules are reported in three states, not two:**
+
+| | Means |
+| --- | --- |
+| read | at least two of `responsibility`, `state`, `interface`, `failure` — the same floor the gate applies |
+| partly written | a statement or two and no more; there is work in it already |
+| not started | nothing under this path at all |
+
+A module with one statement is *touched*, not read. Reporting it beside the untouched ones is what invites a
+resumed session to write it a second time.
+
+A checkpoint opened or decided against an earlier `index_hash` is marked as such rather than counted, for the
+same reason `decision_for` refuses it: the units may now be different.
+
+**Run it first in any session that did not start the run.** Nothing else reports state without the power to
+withhold it.
+
 **The driver decides nothing.** Every stage is a script that was already the authority on its own question,
 invoked with the paths its component fixes. Where a genuine choice exists — the fan-in cutoff, the preset,
 whether Ruff runs — it is a flag with a default, not a rule hidden in the driver.

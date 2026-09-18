@@ -194,6 +194,10 @@ The driver times every script stage automatically. Bracket work done by the mode
 to compare model work with runtime stages: elapsed time between commands may include a checkpoint
 or time waiting for the user. Details and the record format are in [references/pipeline.md](references/pipeline.md).
 
+**Did not start this run yourself?** `pipeline.py status` says where it is — the scan, each checkpoint, which
+modules are read, partly written or not started, and what to do next. It runs no stage and writes nothing, so
+it answers while a checkpoint is open or a stage is failing, which is exactly when nothing else will.
+
 A component stops at the first stage that fails and names it, and exit codes pass through unchanged: `0` fine,
 `1` a policy the stage enforces was not met, `2` bad input or a missing dependency, `3` internal. **`1` is a
 verdict and `2`/`3` are breakage** — the first says the repository or the claims need work, the second that

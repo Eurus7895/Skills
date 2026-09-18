@@ -644,6 +644,168 @@ def open_checkpoint(build, checkpoint, digest):
     return True
 
 
+# What `status` reads. Every one of these is an artifact some component already writes;
+# nothing here is computed a second way. The point is only that one command can read them
+# all without running a stage, because the session that needs them most is the one that
+# cannot run a stage.
+READ_KINDS = ("responsibility", "state", "interface", "failure")
+READ_KINDS_FLOOR = 2                      # the same bar quality_docs applies
+
+
+def _json(path, default=None):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return default
+
+
+def _lines(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return [line for line in (l.strip() for l in fh) if line]
+    except OSError:
+        return []
+
+
+def analysis_progress(build):
+    """(in scope, read, remaining) module paths, from units.txt and module-analysis.jsonl.
+
+    **This is the number a resumed session actually needs, and it was the one it could not
+    get.** `quality_docs.py` computes it and names the remainder, but that runs in
+    `publish` -- and a partial analysis fails `check` first, so a run interrupted halfway
+    through the modules could not reach the report that would say which half. Nothing was
+    missing from the pipeline except a way to ask without running it.
+
+    `read` uses the same floor as the gate: at least `READ_KINDS_FLOOR` of the four module
+    kinds. A module named once and left there is not a module that was read.
+    """
+    scope = _lines(os.path.join(build, "units.txt"))
+    kinds = {}
+    for line in _lines(os.path.join(build, "module-analysis.jsonl")):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue                       # validate_analysis owns the verdict on this
+        path = row.get("path")
+        if not path:
+            continue
+        kinds.setdefault(path, set()).update(
+            s.get("kind") for s in row.get("statements", ()) if isinstance(s, dict))
+    read = [p for p in scope
+            if len(kinds.get(p, set()) & set(READ_KINDS)) >= READ_KINDS_FLOOR]
+    # Touched but not read is its own state, and the one a resumed session most needs
+    # told apart: a module with a single statement has work already in it, and reporting
+    # it beside the untouched ones invites someone to write it a second time.
+    touched = [p for p in scope if p in kinds and p not in set(read)]
+    untouched = [p for p in scope if p not in kinds]
+    return scope, read, touched, untouched
+
+
+def status(args, build):
+    """Where the run is, read-only, and never blocked by anything.
+
+    A checkpoint refuses to let the next component run, and a failing stage stops the ones
+    behind it -- both correct, and between them they mean the state of a run is only ever
+    reported by something that might decline to report it. This declines nothing: it runs
+    no stage, writes nothing, and answers the same whether the last component passed,
+    failed, or was never reached.
+    """
+    digest = index_hash_of(build)
+    if not digest:
+        print("no scan yet in %s. Start with: python3 %s survey --root %s"
+              % (build, os.path.basename(__file__), args.root))
+        return 0
+    index = _json(os.path.join(build, "structure.json"), {}) or {}
+    source = index.get("source") or {}
+    print("scan       %s" % digest)
+    print("           revision %s%s"
+          % (source.get("revision") or "untracked",
+             " (uncommitted changes when scanned)" if source.get("dirty") else ""))
+
+    print("\ncheckpoints")
+    for checkpoint in CHECKPOINTS:
+        path = checkpoint_path(build, checkpoint["id"])
+        decided = decision_for(build, checkpoint["id"], digest)
+        if decided:
+            state = "decided -- %s" % (decided.get("note") or "no note recorded")
+        elif os.path.isfile(path):
+            # Stale means opened against an earlier scan: the units may now be different,
+            # so the question has to be asked again rather than inherited.
+            stale = (_json(path, {}) or {}).get("index_hash") != digest
+            state = "OPEN (from an earlier scan)" if stale else "OPEN"
+            state += " -- blocks %s" % checkpoint["blocks"]
+        else:
+            state = "not opened yet (%s opens it)" % checkpoint["opened_by"]
+        print("  %-3s %s" % (checkpoint["id"], state))
+
+    scope, read, touched, untouched = analysis_progress(build)
+    if scope:
+        print("\nmodules    %d in scope, %d read, %d partly written, %d not started"
+              % (len(scope), len(read), len(touched), len(untouched)))
+        for label, paths in (("finish", touched), ("start", untouched)):
+            for path in paths[:10]:
+                print("           %-6s %s" % (label, path))
+            if len(paths) > 10:
+                print("           %-6s ... and %d more" % ("", len(paths) - 10))
+
+    manual = _json(os.path.join(build, "manual-analysis.json"))
+    if isinstance(manual, dict):
+        answers = manual.get("answers") or {}
+        answered = sum(1 for a in answers.values()
+                       if isinstance(a, dict)
+                       and a.get("completeness") not in (None, "unanswered"))
+        composed = sum(len((p or {}).get("sections") or [])
+                       for p in (manual.get("pages") or {}).values())
+        print("\nmanual     %d of %d question(s) answered, %d section(s) composed"
+              % (answered, len(answers), composed))
+
+    ledger = [json.loads(l) for l in _lines(os.path.join(build, "authored.jsonl"))]
+    if ledger:
+        settled = [r for r in ledger if r.get("status") in ("complete", "waived")]
+        print("authored   %d of %d page(s) settled" % (len(settled), len(ledger)))
+        for row in ledger:
+            if row.get("status") not in ("complete", "waived"):
+                print("           - %s (%s)" % (row.get("page_id"), row.get("status")))
+
+    report = _json(os.path.join(build, "prose-report.json"))
+    if isinstance(report, dict):
+        print("review     %d block(s) queued, %d reviewed"
+              % (len(report.get("queue") or ()), report.get("reviewed") or 0))
+
+    print("\nnext       %s" % next_step(build, digest, remaining=touched + untouched))
+    return 0
+
+
+def next_step(build, digest, remaining):
+    """One line naming the next action, in the order the run would hit them.
+
+    A checkpoint first, because nothing downstream of an unanswered question runs anyway.
+    Then work that is the model's rather than a component's -- an unread module, an
+    unanswered question -- because those are what a resumed session is most likely to
+    think is already done.
+    """
+    for component in ORDER:
+        blocking = blocking_checkpoint(build, component, digest)
+        if blocking:
+            return "decide %s (%s) -- it blocks %s" % (
+                blocking["id"], blocking["ask"], blocking["blocks"])
+    if remaining:
+        return ("write the analysis for %d remaining module(s), appending one scope at a "
+                "time, then run check" % len(remaining))
+    manual = _json(os.path.join(build, "manual-analysis.json"))
+    if isinstance(manual, dict):
+        answers = manual.get("answers") or {}
+        open_questions = [q for q, a in answers.items() if isinstance(a, dict)
+                          and a.get("completeness") in (None, "unanswered")]
+        if open_questions:
+            return "answer %d remaining question(s) in manual-analysis.json" % \
+                len(open_questions)
+        if not any((p or {}).get("sections") for p in (manual.get("pages") or {}).values()):
+            return "compose each page's sections from the answers"
+    return "run the next component: it has the inputs it needs"
+
+
 def blocking_checkpoint(build, component, digest):
     """The open checkpoint standing in front of this component, if there is one.
 
@@ -676,9 +838,9 @@ def blocking_checkpoint(build, component, digest):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("component", choices=ORDER + ["decide", "measure"],
+    parser.add_argument("component", choices=ORDER + ["decide", "measure", "status"],
                         metavar="COMPONENT",
-                        help="one of: %s, decide, or measure" % ", ".join(ORDER))
+                        help="one of: %s, decide, measure, or status" % ", ".join(ORDER))
     parser.add_argument("--checkpoint", help="decide: which checkpoint (P1, P2, P3, P4)")
     parser.add_argument("--note", help="decide: what was decided, and by whom -- this is "
                                        "what the closing report carries")
@@ -719,6 +881,13 @@ def main():
         return fail("--top must not be negative")
     if args.review and not os.path.isfile(args.review):
         return fail("no such review file: %s" % args.review)
+
+    # Ahead of `build_dir.ensure`, deliberately. `status` answers questions about a run and
+    # must not start one: creating the build directory to report that there is no build
+    # directory would be the command changing the thing it was asked to describe.
+    if args.component == "status":
+        return status(args, args.build)
+
     build_dir.ensure(args.build)
     digest = index_hash_of(args.build)
 
