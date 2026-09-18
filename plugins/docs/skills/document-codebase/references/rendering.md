@@ -80,6 +80,29 @@ Both are off by default, for that reason.
   only multi-toctree index was somebody else's and nothing said which one was meant. A
   grouped index is now what this pipeline itself writes, so refusing them all would mean a
   second run could not wire into the index the first run produced.
+- **`--write-conf`** also writes `Makefile`, `make.bat` and `_static/README.md`, under the
+  same never-overwrite rule as the `conf.py` itself — each one only where no file is, and a
+  dangling symlink counts as a file. A `conf.py` makes the pages buildable by somebody who
+  already knows the `sphinx-build` invocation; these make them buildable by somebody who
+  does not, which is most readers of a repository they did not set up.
+
+  | Target | |
+  | --- | --- |
+  | `make html` | build it |
+  | `make strict` | build with `-W`, so a warning fails |
+  | `make clean` | remove the build directory |
+  | `make linkcheck` | report every link that does not resolve |
+  | `make spelling`, `make livehtml` | optional; each names the package to install |
+
+  **`make strict` is the one worth knowing about.** A page in no toctree, a broken
+  reference and a missing image are all warnings by default, and all three mean a reader
+  hits something that is not there.
+
+  The optional targets are written with their install line in a comment rather than left
+  out: an absent target tells a reader nothing, and one that names its dependency tells them
+  what to install. Nothing is enabled in `conf.py`, so an uninstalled target costs a failed
+  `make` and never a failed build.
+
 - **`--assume-parser`** writes MyST into a project whose `conf.py` does not visibly enable
   `myst_parser`. `conf.py` is read as text, never imported — running a stranger's
   configuration to find out what it configures is not a check, it is execution.

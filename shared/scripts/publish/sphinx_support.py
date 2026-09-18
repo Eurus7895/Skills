@@ -347,6 +347,152 @@ def write_conf(out_dir, extensions=(), project="Documentation", author=""):
     return "written", path
 
 
+# A `conf.py` makes the pages buildable by someone who already knows the sphinx-build
+# invocation. These make them buildable by someone who does not, which is most readers of a
+# repository they did not set up. `make html` is the convention; `make.bat` is the same
+# targets for a shell that has no make.
+#
+# `SPHINXBUILD ?=` and `%SPHINXBUILD%` are the stock sphinx-quickstart spellings, kept so a
+# project that later runs quickstart itself finds what it expects.
+MAKEFILE_TEMPLATE = '''\
+# Documentation build targets. Generated once; edit freely.
+SPHINXOPTS    ?=
+SPHINXBUILD   ?= sphinx-build
+SOURCEDIR     = %(source)s
+BUILDDIR      = %(build)s
+
+.PHONY: help html clean linkcheck%(optional_phony)s
+
+help:
+\t@echo "html       build the HTML documentation"
+\t@echo "clean      remove everything under $(BUILDDIR)"
+\t@echo "linkcheck  report every link that does not resolve"%(optional_help)s
+
+html:
+\t@$(SPHINXBUILD) -b html "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS)
+
+# -W turns a warning into an error. A page in no toctree, a broken reference and a missing
+# image are all warnings by default, and all three mean a reader hits something that is not
+# there -- so the strict build is the one worth having a target for.
+strict:
+\t@$(SPHINXBUILD) -b html -W "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS)
+
+clean:
+\trm -rf "$(BUILDDIR)"
+
+linkcheck:
+\t@$(SPHINXBUILD) -b linkcheck "$(SOURCEDIR)" "$(BUILDDIR)/linkcheck" $(SPHINXOPTS)
+%(optional_targets)s'''
+
+BATCH_TEMPLATE = '''\
+@ECHO OFF
+REM Documentation build targets. Generated once; edit freely.
+if "%%SPHINXBUILD%%" == "" (set SPHINXBUILD=sphinx-build)
+set SOURCEDIR=%(source)s
+set BUILDDIR=%(build)s
+
+if "%%1" == "" goto help
+if "%%1" == "help" goto help
+if "%%1" == "clean" goto clean
+
+%%SPHINXBUILD%% -b %%1 %%SOURCEDIR%% %%BUILDDIR%%\\%%1 %%SPHINXOPTS%%
+goto end
+
+:help
+echo.  html       build the HTML documentation
+echo.  clean      remove everything under %%BUILDDIR%%
+echo.  linkcheck  report every link that does not resolve
+goto end
+
+:clean
+if exist %%BUILDDIR%% rmdir /S /Q %%BUILDDIR%%
+goto end
+
+:end
+'''
+
+SPELLING_TARGET = '''
+# Needs `pip install sphinxcontrib-spelling`.
+spelling:
+\t@$(SPHINXBUILD) -b spelling "$(SOURCEDIR)" "$(BUILDDIR)/spelling" $(SPHINXOPTS)
+'''
+
+LIVE_TARGET = '''
+# Needs `pip install sphinx-autobuild`.
+livehtml:
+\t@sphinx-autobuild "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS)
+'''
+
+STATIC_README = '''\
+Files placed here are copied into the built documentation and can be referenced from a
+page as `_static/<name>`. Sphinx reads this directory because `html_static_path` in
+`conf.py` names it.
+
+Put a `custom.css` here to restyle the theme, and add this to `conf.py`:
+
+    html_css_files = ["custom.css"]
+'''
+
+
+def _write_once(path, body, executable=False):
+    """Write `path` only if nothing is there. Returns `written`, `exists` or a failure.
+
+    Same rules as `write_conf`, and for the same reason: these are a project's build files
+    once they exist, and a generator that rewrites them destroys work no rerun restores.
+    `lexists` and `O_NOFOLLOW` because a dangling symlink is not a file, and writing
+    through one would create its target outside the only directory this writes to.
+    """
+    if os.path.lexists(path):
+        return "exists", path
+    try:
+        directory = os.path.dirname(path)
+        if directory and not os.path.isdir(directory):
+            os.makedirs(directory)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        mode = 0o755 if executable else 0o644
+        with os.fdopen(os.open(path, flags, mode), "w", encoding="utf-8") as fh:
+            fh.write(body)
+    except FileExistsError:
+        return "exists", path
+    except OSError as exc:
+        return "failed", "cannot write %s: %s" % (path, exc)
+    return "written", path
+
+
+def write_build_files(out_dir, source=".", build="_build", optional=()):
+    """Create `Makefile`, `make.bat` and `_static/` beside the pages, where absent.
+
+    A `conf.py` makes the pages buildable by somebody who already knows the sphinx-build
+    invocation; these make them buildable by somebody who does not, which is most readers
+    of a repository they did not set up.
+
+    `optional` names targets whose tooling may not be installed -- `spelling`, `livehtml`.
+    They are written with the install line in a comment above them rather than left out,
+    because a target that is absent tells a reader nothing and one that names its
+    dependency tells them what to install. Nothing here is enabled in `conf.py`, so an
+    uninstalled target costs a failed make and not a failed build.
+
+    Returns [(name, outcome, detail)], one per file, in the order written.
+    """
+    phony = "".join(" " + t for t in optional)
+    helps = {"spelling": '\n\t@echo "spelling   check spelling (needs '
+                         'sphinxcontrib-spelling)"',
+             "livehtml": '\n\t@echo "livehtml   rebuild and serve on change (needs '
+                         'sphinx-autobuild)"'}
+    bodies = {"spelling": SPELLING_TARGET, "livehtml": LIVE_TARGET}
+    fill = {"source": source, "build": build, "optional_phony": phony,
+            "optional_help": "".join(helps.get(t, "") for t in optional),
+            "optional_targets": "".join(bodies.get(t, "") for t in optional)}
+    results = []
+    for name, body, executable in (
+            ("Makefile", MAKEFILE_TEMPLATE % fill, False),
+            ("make.bat", BATCH_TEMPLATE % fill, False),
+            (os.path.join("_static", "README.md"), STATIC_README, False)):
+        outcome, detail = _write_once(os.path.join(out_dir, name), body, executable)
+        results.append((name, outcome, detail))
+    return results
+
+
 def _note(detail, stubbed):
     if not stubbed:
         return detail

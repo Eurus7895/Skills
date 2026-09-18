@@ -555,6 +555,16 @@ def main():
                   % detail)
         else:
             sys.stderr.write("WARN  %s\n" % detail)
+        # Beside the conf, and only with it: build files for a directory nothing can build
+        # would name an invocation that does not work.
+        for name, state, where in sphinx_support.write_build_files(
+                args.out, optional=("spelling", "livehtml")):
+            if state == "written":
+                print("wrote %s" % where)
+            elif state == "failed":
+                sys.stderr.write("WARN  %s\n" % where)
+        print("`make html` builds them; `make strict` fails on a warning, which is what "
+              "an unreachable page or a broken reference is")
     elif not sphinx_support.project_at(args.out):
         # Pages with nothing to build them are not yet a document, and the reader has no
         # way to know that from the files alone.
