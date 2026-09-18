@@ -110,3 +110,31 @@ and one picture is missing. So a project that has not enabled it still gets its
 documentation, with a warning naming what to enable, and the build check accepts the
 `uml` directive without drawing it rather than failing the page over a renderer nobody
 installed. The `.puml` is the artifact either way — reading it needs no runtime at all.
+
+### What a build establishes, and what it does not
+
+**`passed` is about markup. It is not a diagram verdict**, and the two are reported
+separately so a run on a machine with no renderer cannot read as full diagram validation.
+`result.diagrams` carries one of four states:
+
+| State | Means |
+| --- | --- |
+| `drawn` | the real renderer loaded the source and produced an image |
+| `accepted` | the markup parsed and a stub swallowed it. The source could say anything |
+| `none` | the document asks for no diagram renderer, so there is nothing to report |
+| `unknown` | the check never ran — no builder installed, or it failed to run |
+
+`unknown` is separate from `none` deliberately. A skipped check that reported `none` would
+be *claiming* the document holds no diagrams, and that claim is wrong on any document that
+does. Nothing looked, so nothing is said.
+
+A renderer that is installed but still produced no picture — `plantuml command … cannot be
+run` — is `accepted`, not `drawn`. The extension being absent and the tool behind it being
+absent are the same outcome for a reader: the source parsed, no image exists.
+
+**There is no state for "visually reviewed", and that is not an omission.** A drawn diagram
+with unreadable labels, ambiguous relationships, or a shape that contradicts the prose
+beside it is still a drawn diagram. No build settles those, so the report says the question
+belongs to review rather than implying it has been answered. `G001`–`G007` check that the
+source matches the graph; whether the picture *communicates* is a person's judgement and
+goes through the review channel like any other reading.

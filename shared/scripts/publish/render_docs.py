@@ -575,6 +575,15 @@ def main():
         return 0
     result = sphinx_support.check(args.out, extensions=required_extensions)
     print("build check: %s -- %s" % (result.status, result.detail))
+    # Said separately from the status, because a build that passes says nothing about
+    # whether a picture exists. `accepted` means the source parsed and was not drawn.
+    if result.diagrams == sphinx_support.ACCEPTED:
+        print("diagrams: accepted as markup, not drawn. No image was produced, so "
+              "nothing here shows whether a diagram is readable or says what the prose "
+              "beside it says.")
+    elif result.diagrams == sphinx_support.DRAWN:
+        print("diagrams: drawn. Whether each one is readable and matches its prose is a "
+              "review question, not a build one.")
     # `unwired` and `skipped` are outcomes, not failures: one means an integration step
     # has not run, the other that no builder was installed. Both are reported.
     return 1 if result.failed else 0

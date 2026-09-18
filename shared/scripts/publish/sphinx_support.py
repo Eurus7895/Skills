@@ -92,13 +92,35 @@ REFERENCE_MARKERS = (
 )
 
 
+# What a build actually establishes about a diagram, which is less than "it built". These
+# are separate states because collapsing them is how a run reports full diagram validation
+# on a machine where nothing could draw a diagram at all.
+#
+#   accepted   the markup parsed. A stub directive swallowed it, and that is all that is
+#              known: the source could say anything
+#   drawn      the real renderer loaded the source and produced an image
+#   none       the document asks for no diagram renderer, so there is nothing to report
+#   unknown    the check never ran. `none` here would be a claim, and the claim would be
+#              wrong on any document that does hold a diagram
+#
+# A further state -- visually reviewed -- is a person's, and belongs in the review channel
+# rather than here. A drawn diagram with unreadable labels is still a drawn diagram, so the
+# report says the question is a review one instead of implying a build settled it.
+ACCEPTED, DRAWN, NO_DIAGRAMS, UNKNOWN = "accepted", "drawn", "none", "unknown"
+
+
 class Result(object):
     """One outcome, its explanation, and the warning lines behind it."""
 
-    def __init__(self, status, detail, warnings=()):
+    def __init__(self, status, detail, warnings=(), diagrams=UNKNOWN, stubbed=()):
         self.status = status
         self.detail = detail
         self.warnings = list(warnings)
+        # Reported beside `status`, never folded into it. A build whose markup is sound is
+        # `passed`, and that stays true; whether a picture was drawn is a different
+        # question and a reader of the report is owed both answers separately.
+        self.diagrams = diagrams
+        self.stubbed = list(stubbed)
 
     @property
     def failed(self):
@@ -502,6 +524,19 @@ def _note(detail, stubbed):
                ", ".join(sorted(OPTIONAL_DIRECTIVES))))
 
 
+def _diagram_state(extensions, stubbed):
+    """`drawn`, `accepted` or `none` -- what this build establishes about the pictures.
+
+    A document that asks for no diagram renderer has no diagrams to report on, and saying
+    `accepted` there would invent a caveat. One that asks and got a stub had its source
+    checked as markup and nothing more.
+    """
+    wanted = [e for e in extensions if e in OPTIONAL_DIRECTIVES]
+    if not wanted:
+        return NO_DIAGRAMS
+    return ACCEPTED if stubbed else DRAWN
+
+
 def _with_sphinx(out_dir, extensions):
     work = tempfile.mkdtemp(prefix="sphinx-support-")
     try:
@@ -519,7 +554,9 @@ def _with_sphinx(out_dir, extensions):
 
         output = (proc.stderr or proc.stdout).strip()
         if proc.returncode == 0:
-            return Result(PASSED, _note("sphinx-build -W reported no warnings", stubbed))
+            return Result(PASSED, _note("sphinx-build -W reported no warnings", stubbed),
+                          diagrams=_diagram_state(extensions, stubbed),
+                          stubbed=stubbed)
         warnings = warning_lines(output)
         if any(marker in output.lower() for marker in FATAL_FRAMING):
             return Result(RUNNER_FAILURE,
@@ -527,8 +564,11 @@ def _with_sphinx(out_dir, extensions):
         advisories = [line for line in warnings if renderer_advisory(line)]
         warnings = [line for line in warnings if not renderer_advisory(line)]
         if advisories and not warnings:
+            # The renderer was there and still did not produce a picture, so this is
+            # `accepted` whatever is installed: the source parsed and nothing was drawn.
             return Result(PASSED, _note("sphinx-build -W reported no defect", stubbed)
-                          + ". A diagram was not drawn: %s" % advisories[0])
+                          + ". A diagram was not drawn: %s" % advisories[0],
+                          diagrams=ACCEPTED, stubbed=stubbed)
         if not warnings:
             # Non-zero with nothing to read is the builder itself failing, not the
             # document. Reporting it as bad markup sends the reader to the wrong file.
@@ -536,7 +576,8 @@ def _with_sphinx(out_dir, extensions):
                           "sphinx-build exited %d without reporting a warning: %s"
                           % (proc.returncode, output[:400] or "no output"))
         status = classify(warnings)
-        return Result(status, _explain(status, warnings), warnings)
+        return Result(status, _explain(status, warnings), warnings,
+                      diagrams=_diagram_state(extensions, stubbed), stubbed=stubbed)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -590,6 +631,20 @@ def _teach_docutils_about_sphinx():
         roles.register_local_role(role, reference)
 
 
+def _has_diagram(pages):
+    """Whether any page holds a directive only an optional renderer can draw."""
+    names = tuple(name for names in OPTIONAL_DIRECTIVES.values() for name in names)
+    for path in pages:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        if any(".. %s::" % name in text or "{%s}" % name in text for name in names):
+            return True
+    return False
+
+
 def _with_docutils(out_dir):
     from docutils.core import publish_doctree                # noqa: PLC0415
     from docutils.utils import SystemMessage                 # noqa: PLC0415
@@ -630,9 +685,12 @@ def _with_docutils(out_dir):
                       "docutils parsed %d reStructuredText page(s) and cannot read the "
                       "%d Markdown one(s) beside them, so this is not a check of the "
                       "tree. Install sphinx-build." % (len(pages), len(markdown)))
+    # docutils has never heard of `uml`, so every diagram here was swallowed by the same
+    # stub that keeps `toctree` from failing. Nothing was drawn, and nothing could be.
     return Result(PASSED, "docutils parsed %d page(s) with no warnings. This is not a "
                           "Sphinx build: cross-page references were not resolved, so a "
-                          "broken one would not have been seen." % len(pages))
+                          "broken one would not have been seen." % len(pages),
+                  diagrams=ACCEPTED if _has_diagram(pages) else NO_DIAGRAMS)
 
 
 def check(out_dir, extensions=(), policy="optional"):
