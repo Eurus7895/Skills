@@ -507,6 +507,9 @@ def main():
     parser.add_argument("--diagrams", help="directory holding diagram-manifest.json")
     parser.add_argument("--prose", help="the report from check_prose.py, so a document "
                                         "whose sentences outrun their sources cannot pass")
+    parser.add_argument("--hygiene", help="the report from release_hygiene.py, so a tree "
+                                          "with two indexes or committed build output "
+                                          "cannot pass on the strength of its pages")
     parser.add_argument("--require", default=STATUS_PARTIAL,
                         choices=(PASSED, STATUS_PARTIAL, REVIEW_REQUIRED, FAILED),
                         help="lowest status that still exits 0 (default: partial)")
@@ -822,6 +825,25 @@ def main():
                 report[key].get("flows") or report[key].get("procedures")):
             status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
             reasons.append("the %s names nothing and does not say why" % label)
+
+    if args.hygiene and os.path.exists(args.hygiene):
+        # Every other check here is about content. This one is about the tree, and a tree
+        # can be wrong while every page in it is right: two indexes, so half the document
+        # is unreachable from wherever a reader starts; two configurations, so a fix to
+        # one silently does nothing; build output committed, or sitting in the source the
+        # next build reads.
+        hygiene, error = load_json(args.hygiene, "hygiene report")
+        if error:
+            return fail(error)
+        findings = hygiene.get("findings") or []
+        report["hygiene"] = {"passed": hygiene.get("passed"),
+                             "findings": [f.get("code") for f in findings]}
+        if findings:
+            status = FAILED
+            reasons.append("the documentation tree has %d hygiene problem(s): %s"
+                           % (len(findings),
+                              "; ".join("%s %s" % (f.get("code"), f.get("message"))
+                                        for f in findings[:2])))
 
     if args.prose:
         prose, error = load_json(args.prose, "prose report")

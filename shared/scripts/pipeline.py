@@ -494,6 +494,7 @@ def review(args):
             "--claims", os.path.join(build, "claims.verified.jsonl"),
             "--doc", doc, "--diagrams", diagrams, "--prose", prose,
             "--checkpoints", os.path.join(build, "checkpoints"),
+            "--hygiene", os.path.join(build, "hygiene-report.json"),
             "--out", os.path.join(build, "generation-report.json")]
     for flag, path in (("--architecture", architecture), ("--flows", flows),
                        ("--operations", operations)):
@@ -515,6 +516,21 @@ def review(args):
         # silence.
         Stage("review", "check_prose.py", checker, tolerate=(1,),
               script_component="publish"),
+        # Between the prose check and the gate, and tolerated, so the gate reads the
+        # findings and decides. A tree finding is a real defect and not one that should
+        # stop the report that names it.
+        #
+        # Pointed at the staging draft rather than at `docs`: the shape problems this
+        # catches -- two indexes, two configurations, a page the model named and the tree
+        # does not hold -- must block publication, and after `publish` has promoted the
+        # tree atomically it is too late to say so. `H004`/`H005`, which ask git about
+        # committed build output, do not fire on a staging directory that is ignored in
+        # its entirety; those are about a published tree and are not what holds a seal.
+        Stage("review", "release_hygiene.py",
+              ["--docs", staging, "--root", args.root,
+               "--doc", os.path.join(build, "doc.json"),
+               "--out", os.path.join(build, "hygiene-report.json")],
+              tolerate=(1,), script_component="publish"),
         Stage("review", "quality_docs.py", gate, script_component="publish"),
         Stage("review", "seal_draft.py",
               ["--draft", staging, "--doc", doc, "--report", generation,

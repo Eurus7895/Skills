@@ -44,6 +44,7 @@ scripts/publish/sphinx_support.py          -> skills/document-codebase/scripts/p
 scripts/publish/wire_toctree.py            -> skills/document-codebase/scripts/publish/wire_toctree.py
 scripts/publish/check_prose.py             -> skills/document-codebase/scripts/publish/check_prose.py
 scripts/publish/review_records.py          -> skills/document-codebase/scripts/publish/review_records.py
+scripts/publish/release_hygiene.py         -> skills/document-codebase/scripts/publish/release_hygiene.py
 scripts/publish/quality_docs.py            -> skills/document-codebase/scripts/publish/quality_docs.py
 scripts/render/prepare_stage.py            -> skills/document-codebase/scripts/render/prepare_stage.py
 scripts/render/snapshot_draft.py           -> skills/document-codebase/scripts/render/snapshot_draft.py

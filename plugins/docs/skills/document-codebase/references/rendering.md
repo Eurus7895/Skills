@@ -11,6 +11,35 @@ fail. Repair the model or manual analysis and rerun `document` and `render` inst
 renderer owns headings, tables, references, escaping and the toctree. Hand-written
 directives are how a build starts failing on markup nobody remembers adding.
 
+## Release hygiene — what is wrong with a tree whose pages are all right
+
+`release_hygiene.py` runs in `review`, between the prose check and the gate, and reports `H0xx` findings about
+the **tree** rather than its content. Every other check here asks whether a claim is
+supported, whether markup parses, whether a reference resolves. None of them notices that:
+
+| | |
+| --- | --- |
+| `H001` | no index: no entry point for a reader, no root document for Sphinx |
+| `H002` | two indexes — a reader lands on one, the pipeline maintains the other |
+| `H003` | two `conf.py` — a build uses whichever it is pointed at, so fixing the other does nothing |
+| `H004` | build output committed — every later diff carries generated lines, and a stale page outlives its source |
+| `H005` | build output neither committed nor ignored, so the first `git add -A` commits it |
+| `H006` | generated HTML in the source tree, which the next build reads as more source |
+| `H007` | `doc.json` names a page that is not on disk — a toctree entry pointing at nothing |
+
+Each is a fact about the filesystem, checkable in seconds, and none is a judgement about
+anybody's prose. A build directory is found **by name or by marker**: `_build` is output
+whatever is in it, and a directory holding `environment.pickle` is output whatever it is
+called. Nesting does not hide one.
+
+Findings **fail** the quality gate, so a bad tree never reaches a seal. The stage itself tolerates exit 1 so
+the gate still runs and the report names the problem rather than the component ending in silence.
+
+It is pointed at the **staging draft**, not at `docs/`. The shape problems above have to block publication, and
+once `publish` has promoted the tree atomically it is too late to say so. `H004` and `H005` ask git about
+committed build output and do not fire on a staging directory that is ignored in its entirety — those are
+questions about a published tree, not about whether this draft may ship.
+
 ## Navigation is grouped by reader purpose
 
 The generated index carries one toctree per group rather than a single `Contents`:
