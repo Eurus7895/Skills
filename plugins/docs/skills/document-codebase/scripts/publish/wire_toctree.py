@@ -97,8 +97,38 @@ def _blocks(lines):
     return found
 
 
-def wire(path, entries):
-    """Add `entries` to the single toctree in `path`. Returns (changed, note)."""
+CAPTION = re.compile(r"^\s*:caption:\s*(.+?)\s*$")
+
+
+def _caption(lines, start, body_end):
+    """The `:caption:` of the toctree opened at `start`, or None.
+
+    Scanned across the whole span, not up to `body_start`: a span begins at the line after
+    the directive, so the options are inside it, ahead of the entries. Stops at the first
+    line that is not an option, so a page id that happens to read like one cannot be
+    mistaken for the caption of a later directive.
+    """
+    for position in range(start + 1, body_end):
+        line = lines[position].strip()
+        if not line:
+            continue
+        if not line.startswith(":"):
+            break
+        match = CAPTION.match(lines[position])
+        if match:
+            return match.group(1)
+    return None
+
+
+def wire(path, entries, caption=None):
+    """Add `entries` to a toctree in `path`. Returns (changed, note).
+
+    With one toctree, that one. With several, only the one whose `:caption:` is `caption`
+    -- because a grouped index is now what this pipeline itself generates, and refusing
+    every one of them would mean a second run could not wire into the index the first run
+    wrote. The refusal below stands for the case it was written for: several toctrees and
+    nothing saying which is meant.
+    """
     if not os.path.isfile(path):
         raise Refused("no such index: %s" % path)
     # Read without newline translation. Reading universally and writing "\n" would
@@ -117,9 +147,15 @@ def wire(path, entries):
             "belongs, which is the author's decision; add the directive and rerun"
             % os.path.basename(path))
     if len(blocks) > 1:
-        raise Refused(
-            "%s has %d toctrees and nothing says which one these pages belong in; "
-            "add them by hand" % (os.path.basename(path), len(blocks)))
+        named = [b for b in blocks
+                 if caption and _caption(lines, b[0], b[2]) == caption]
+        if len(named) != 1:
+            raise Refused(
+                "%s has %d toctrees and nothing says which one these pages belong in%s; "
+                "add them by hand"
+                % (os.path.basename(path), len(blocks),
+                   " (no toctree is captioned %r)" % caption if caption else ""))
+        blocks = named
 
     _, body_start, body_end, indent = blocks[0]
     body = lines[body_start:body_end]

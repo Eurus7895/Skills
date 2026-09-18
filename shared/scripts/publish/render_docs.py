@@ -117,8 +117,8 @@ class Rst(object):
     def ref(self, title, target):
         return "Next: :doc:`%s <%s>`\n" % (self.escape(title), absolute(target))
 
-    def toctree(self, entries):
-        return (".. toctree::\n   :maxdepth: 2\n   :caption: Contents\n\n"
+    def toctree(self, entries, caption="Contents"):
+        return (".. toctree::\n   :maxdepth: 2\n   :caption: %s\n\n" % caption
                 + "\n".join("   %s" % entry for entry in entries) + "\n")
 
 
@@ -183,8 +183,8 @@ class Myst(object):
     def ref(self, title, target):
         return "Next: {doc}`%s <%s>`\n" % (self.escape(title), absolute(target))
 
-    def toctree(self, entries):
-        return ("```{toctree}\n:maxdepth: 2\n:caption: Contents\n\n"
+    def toctree(self, entries, caption="Contents"):
+        return ("```{toctree}\n:maxdepth: 2\n:caption: %s\n\n" % caption
                 + "\n".join(entries) + "\n```\n")
 
 
@@ -306,6 +306,35 @@ def scaffolds(doc, out, emitter):
     return out_pages
 
 
+# A reader arrives with a purpose, not with a table of contents. These are the groups the
+# manual template already organises its page ids by, so the navigation can say which route
+# is whose without anyone declaring it a second time.
+GROUPS = (("getting_started/", "Getting Started"),
+          ("architecture/", "Architecture"),
+          ("usage/", "Usage"),
+          ("development/", "Development"),
+          ("appendix/", "Appendix"))
+
+
+def grouped(entries):
+    """(caption, ids) per navigation group, in `GROUPS` order, then whatever is left.
+
+    Derived from the page id prefix rather than from a new field: the template already
+    encodes the group in the id, and a second declaration of the same fact is one that can
+    disagree with the first. A preset whose ids carry no prefix falls through to a single
+    unnamed group, which is what every non-manual preset does today.
+    """
+    remaining, out = list(entries), []
+    for prefix, caption in GROUPS:
+        holds = [e for e in remaining if e.startswith(prefix)]
+        if holds:
+            out.append((caption, holds))
+            remaining = [e for e in remaining if not e.startswith(prefix)]
+    if remaining:
+        out.append(("Contents", remaining))
+    return out
+
+
 def render_index(doc, pages, emitter, authored=()):
     revision = doc.get("source_revision")
     parts = [emitter.heading("Documentation"),
@@ -313,13 +342,14 @@ def render_index(doc, pages, emitter, authored=()):
                  "Generated from the %s preset at revision %s%s."
                  % (doc["preset"], revision or "an untracked tree",
                     " (working tree had uncommitted changes)"
-                    if doc.get("source_dirty") else "")),
-             # Every page, in the preset's order -- generated and authored together.
-             # This is the check a renderer can actually make: a page that exists but is
-             # not listed here is unreachable.
-             emitter.toctree([page["id"] for page in
-                              sorted(list(pages) + list(authored),
-                                     key=lambda p: p.get("order", 0))])]
+                    if doc.get("source_dirty") else ""))]
+    # Every page, in the preset's order -- generated and authored together. This is the
+    # check a renderer can actually make: a page that exists but is not listed here is
+    # unreachable. Grouping changes how they are presented, never which ones appear.
+    ordered = [page["id"] for page in sorted(list(pages) + list(authored),
+                                             key=lambda p: p.get("order", 0))]
+    for caption, entries in grouped(ordered):
+        parts.append(emitter.toctree(entries, caption))
     return "\n".join(parts)
 
 
@@ -488,9 +518,17 @@ def main():
     if kept_index:
         entries = [page["id"] for page in pages]
         if args.wire_toctree:
+            # One group per call, so a grouped index -- including one an earlier run of
+            # this script wrote -- has a caption to match rather than an ambiguity to
+            # refuse. Pages outside every group keep the old single-toctree behaviour.
             try:
-                changed, note = wire_toctree.wire(os.path.join(args.out, index_name),
-                                                  entries)
+                notes, changed = [], False
+                for caption, group in grouped(entries):
+                    one, note = wire_toctree.wire(
+                        os.path.join(args.out, index_name), group, caption)
+                    changed = changed or one
+                    notes.append(note)
+                note = "; ".join(notes)
             except wire_toctree.Refused as exc:
                 # The index is the author's, so a refusal leaves it untouched and the
                 # pages stand unwired rather than the file being guessed at.

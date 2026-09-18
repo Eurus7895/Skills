@@ -11,6 +11,26 @@ fail. Repair the model or manual analysis and rerun `document` and `render` inst
 renderer owns headings, tables, references, escaping and the toctree. Hand-written
 directives are how a build starts failing on markup nobody remembers adding.
 
+## Navigation is grouped by reader purpose
+
+The generated index carries one toctree per group rather than a single `Contents`:
+
+| Group | Prefix |
+| --- | --- |
+| Getting Started | `getting_started/` |
+| Architecture | `architecture/` |
+| Usage | `usage/` |
+| Development | `development/` |
+| Appendix | `appendix/` |
+
+**The group comes from the page id, not from a new field.** The manual template already
+encodes it there, and a second declaration of the same fact is one that can disagree with
+the first. Pages whose ids carry no group prefix — which is every non-manual preset — fall
+through to a single `Contents` toctree, exactly as before.
+
+Grouping changes how pages are presented, never which ones appear: a page that exists and
+is in no toctree is unreachable, and that is still the check the renderer makes.
+
 ## Formats
 
 `--format` chooses the markup: `rst` (the default) or `myst`. The same `doc.json` renders
@@ -50,10 +70,16 @@ Both are off by default, for that reason.
 
 - **`--wire-toctree`** adds the generated pages to an index that already exists. It is
   idempotent, keeps every entry and every line of prose that was there, and **refuses** an
-  index with no toctree, with more than one, or that it cannot parse — leaving the file
-  untouched and naming the pages to add by hand. Without the flag the pages are written and
-  the run prints what is missing; the build check then reports `unwired`, and wiring is what
-  turns that into `passed`.
+  index with no toctree, or that it cannot parse — leaving the file untouched and naming the
+  pages to add by hand. Without the flag the pages are written and the run prints what is
+  missing; the build check then reports `unwired`, and wiring is what turns that into
+  `passed`.
+
+  With **more than one** toctree it wires by `:caption:`, one group at a time, and refuses
+  only when no caption matches. That case used to be refused outright — correctly, when the
+  only multi-toctree index was somebody else's and nothing said which one was meant. A
+  grouped index is now what this pipeline itself writes, so refusing them all would mean a
+  second run could not wire into the index the first run produced.
 - **`--assume-parser`** writes MyST into a project whose `conf.py` does not visibly enable
   `myst_parser`. `conf.py` is read as text, never imported — running a stranger's
   configuration to find out what it configures is not a check, it is execution.
