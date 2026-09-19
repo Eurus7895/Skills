@@ -122,11 +122,17 @@ separately so a run on a machine with no renderer cannot read as full diagram va
 | `drawn` | the real renderer loaded the source and produced an image |
 | `accepted` | the markup parsed and a stub swallowed it. The source could say anything |
 | `none` | the document asks for no diagram renderer, so there is nothing to report |
-| `unknown` | the check never ran — no builder installed, or it failed to run |
+| `unknown` | nothing was established — no builder installed, the build failed to run, or it stopped before finishing |
 
 `unknown` is separate from `none` deliberately. A skipped check that reported `none` would
 be *claiming* the document holds no diagrams, and that claim is wrong on any document that
 does. Nothing looked, so nothing is said.
+
+**A build that stopped is `unknown`, not a measurement.** `-W` aborts on the first warning
+it turns into an error, so on `invalid_markup` or `broken_reference` the renderer may never
+have been reached and `drawn` would be a number nobody took. `unwired` is the one failing-
+looking outcome that keeps its measured state: the build completed and the pages are sound,
+with one integration step still to run.
 
 A renderer that is installed but still produced no picture — `plantuml command … cannot be
 run` — is `accepted`, not `drawn`. The extension being absent and the tool behind it being

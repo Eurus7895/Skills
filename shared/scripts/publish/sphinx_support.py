@@ -581,8 +581,19 @@ def _with_sphinx(out_dir, extensions):
                           "sphinx-build exited %d without reporting a warning: %s"
                           % (proc.returncode, output[:400] or "no output"))
         status = classify(warnings)
+        # A build that stopped drew nothing. `-W` aborts on the first warning it turns
+        # into an error, so on `invalid_markup` or `broken_reference` the renderer may
+        # never have been reached, and `drawn` would be a measurement nobody took. Only
+        # `unwired` is a build that completed -- its pages are sound and one integration
+        # step has not run -- so that one keeps its measured state.
+        #
+        # This is version-visible rather than theoretical: a missing `.puml` is reported
+        # by Sphinx 9 with its own fatal framing, which lands on `runner_failure` and
+        # `unknown`, and by Sphinx 7 as a plain warning, which landed here and claimed
+        # `drawn` off the same aborted build.
+        measured = _diagram_state(extensions, stubbed) if status == UNWIRED else UNKNOWN
         return Result(status, _explain(status, warnings), warnings,
-                      diagrams=_diagram_state(extensions, stubbed), stubbed=stubbed)
+                      diagrams=measured, stubbed=stubbed)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

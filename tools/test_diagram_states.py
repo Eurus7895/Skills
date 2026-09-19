@@ -38,10 +38,14 @@ class StateTests(unittest.TestCase):
         An earlier version of this branched on the environment -- `SKIPPED` means
         `unknown`, anything else means a real measurement -- and CI failed it, because a
         builder being installed does not mean the build succeeded. Here the referenced
-        `.puml` is deliberately absent, so `sphinx-build -W` reports `runner_failure` where
-        Sphinx exists and `skipped` where it does not. Both establish nothing, both are
-        `unknown`, and neither may say `none`: that would be a claim, and false on a
-        document that plainly holds a `uml` directive.
+        `.puml` is deliberately absent, so nothing can be established about the picture.
+
+        The rewrite then failed CI too, and on a real defect rather than on itself: the two
+        Sphinx majors in the matrix report the missing file differently -- 9 with its own
+        fatal framing, which lands on `runner_failure`, and 7 as a plain warning, which
+        landed on `invalid_markup` and reported `drawn` off a build that had aborted. The
+        assertion below held on the machine it was written on and named the bug on the
+        other one.
         """
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "docs"
@@ -50,6 +54,56 @@ class StateTests(unittest.TestCase):
             result = support.check(str(out), extensions=("sphinxcontrib.plantuml",))
             self.assertNotEqual(result.diagrams, support.NO_DIAGRAMS)
             self.assertEqual(result.diagrams, support.UNKNOWN)
+
+    def test_a_failed_build_reports_no_diagram_measurement(self):
+        """`-W` stops at the first error, so the renderer may never have been reached.
+
+        Unlike the case above, this document fails on markup no version of Sphinx accepts,
+        so it exercises the `invalid_markup` leg wherever a builder exists rather than
+        depending on which major reports what. `drawn` here would be a measurement nobody
+        took -- the build that would have taken it never finished.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "docs"
+            out.mkdir()
+            (out / "index.rst").write_text(
+                "Docs\n====\n\n.. toctree::\n\n   page\n")
+            (out / "page.rst").write_text(
+                "Page\n====\n\n.. uml:: shape.puml\n\n.. no-such-directive::\n\n   x\n")
+            (out / "shape.puml").write_text("@startuml\nclass A\n@enduml\n")
+            result = support.check(str(out), extensions=("sphinxcontrib.plantuml",))
+            if result.status == support.SKIPPED:
+                self.skipTest("no builder installed: %s" % result.detail[:120])
+            self.assertTrue(result.failed, "%s: %s" % (result.status, result.detail[:200]))
+            self.assertEqual(result.diagrams, support.UNKNOWN,
+                             "%s: %s" % (result.status, result.detail[:200]))
+
+    def test_the_invariant_holds_with_no_builder_at_all(self):
+        """The one leg that needs no Sphinx, so it is pinned on every machine.
+
+        A check that could not run reports `unknown`. Asserting this through `check` rather
+        than through a bare `Result` covers the path a reader's machine actually takes.
+        """
+        original = support._tool
+        support._tool = lambda: None
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / "docs"
+                out.mkdir()
+                (out / "page.rst").write_text("Page\n====\n\n.. uml:: shape.puml\n")
+                result = support.check(str(out),
+                                       extensions=("sphinxcontrib.plantuml",))
+        finally:
+            support._tool = original
+        self.assertEqual(result.status, support.SKIPPED)
+        self.assertEqual(result.diagrams, support.UNKNOWN)
+
+    def test_a_directory_that_is_not_there_reports_unknown_too(self):
+        """A runner failure is not evidence that a project has no diagrams."""
+        result = support.check("/nonexistent/docs/tree",
+                              extensions=("sphinxcontrib.plantuml",))
+        self.assertEqual(result.status, support.RUNNER_FAILURE)
+        self.assertEqual(result.diagrams, support.UNKNOWN)
 
     def test_a_build_that_succeeds_reports_a_real_state(self):
         """A complete tree, so the measurement paths are exercised where tooling exists.
