@@ -1395,6 +1395,7 @@ def main():
                              "questions from")
     parser.add_argument("--manual-analysis", help="question answers for the manual preset")
     parser.add_argument("--root", default=".", help="repository root for manual evidence")
+    parser.add_argument("--authored", help="authored-page ledger, JSONL")
     parser.add_argument("--preset", default="onboarding", choices=sorted(PRESETS))
     parser.add_argument("--diagrams", metavar="DIR",
                         help="rendered diagram directory; pages reference what is there "
@@ -1490,6 +1491,15 @@ def main():
             return 2
         extra["root"] = args.root
         extra["diagram_directory"] = args.diagrams
+        # The ledger's absence is not an error: a first run has none, and the build
+        # scaffolds every page fresh. A malformed one is an error, and says which row.
+        if args.authored and os.path.exists(args.authored):
+            try:
+                with open(args.authored, encoding="utf-8") as fh:
+                    extra["authored"] = [json.loads(line) for line in fh if line.strip()]
+            except (OSError, ValueError) as exc:
+                sys.stderr.write("FAIL cannot read authored ledger: %s\n" % exc)
+                return 2
 
     diagrams = find_diagrams(args.diagrams,
                              [page_id for page_id, _, _, _ in PRESETS[args.preset]])

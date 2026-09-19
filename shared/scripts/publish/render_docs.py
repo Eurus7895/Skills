@@ -117,8 +117,8 @@ class Rst(object):
     def ref(self, title, target):
         return "Next: :doc:`%s <%s>`\n" % (self.escape(title), absolute(target))
 
-    def toctree(self, entries):
-        return (".. toctree::\n   :maxdepth: 2\n   :caption: Contents\n\n"
+    def toctree(self, entries, caption="Contents"):
+        return (".. toctree::\n   :maxdepth: 2\n   :caption: %s\n\n" % caption
                 + "\n".join("   %s" % entry for entry in entries) + "\n")
 
 
@@ -183,8 +183,8 @@ class Myst(object):
     def ref(self, title, target):
         return "Next: {doc}`%s <%s>`\n" % (self.escape(title), absolute(target))
 
-    def toctree(self, entries):
-        return ("```{toctree}\n:maxdepth: 2\n:caption: Contents\n\n"
+    def toctree(self, entries, caption="Contents"):
+        return ("```{toctree}\n:maxdepth: 2\n:caption: %s\n\n" % caption
                 + "\n".join(entries) + "\n```\n")
 
 
@@ -241,6 +241,100 @@ def authored_on_disk(doc, out, emitter):
     return found
 
 
+SETTLED_AUTHORED = ("complete", "waived")
+
+
+def render_scaffold(row, emitter):
+    """A page for a person to fill, carrying what this run verified on its behalf.
+
+    Not a draft of the page: a brief for writing one. It states who the page is for, hands
+    over the evidence the pipeline already checked, says plainly what it looked for and
+    did not find, and lists the questions. What it never does is compose a sentence --
+    a troubleshooting table nobody wrote, built from the model's guess at what usually
+    goes wrong, is the failure mode this whole skill is arranged against, and it would
+    arrive looking finished.
+    """
+    parts = [emitter.heading(row["title"]),
+             emitter.prose("DRAFT — this page is written by a person, not generated. "
+                           "Status: %s. Replace everything below before publishing."
+                           % row["status"])]
+    if row.get("purpose"):
+        parts.append(emitter.subheading("Who this page is for"))
+        parts.append(emitter.prose("%s %s" % (row["purpose"], row["audience"])))
+    offered = row.get("evidence_offered") or ()
+    parts.append(emitter.subheading("Evidence this run verified"))
+    if offered:
+        parts.append(emitter.prose(
+            "Each row was checked by the pipeline and is cited elsewhere in this "
+            "document. Cite these rather than re-deriving them."))
+        parts.append(emitter.table(
+            ["Reference", "Source", "Location", "What it says"],
+            [[r.get("ref", ""), r.get("source", ""), r.get("cite") or "",
+              r.get("text", "")] for r in offered]))
+    else:
+        parts.append(emitter.prose("Nothing this run verified bears on this page."))
+    absent = row.get("evidence_absent") or ()
+    if absent:
+        parts.append(emitter.subheading("What the run looked for and did not find"))
+        parts.append(emitter.prose(" ".join(s[0].upper() + s[1:] + "." for s in absent)))
+    questions = row.get("questions") or ()
+    if questions:
+        parts.append(emitter.subheading("Questions this page answers"))
+        parts.append(emitter.table(
+            ["ID", "Question", "Answered"],
+            [[q.get("id", ""), q.get("text", ""),
+              "yes" if q.get("answered") else "no"] for q in questions]))
+    return "\n".join(parts).rstrip() + "\n"
+
+
+def scaffolds(doc, out, emitter):
+    """Scaffolds for unsettled authored pages that have no file yet, as {name: text}.
+
+    **Never overwrites.** A page on disk is somebody's work, whatever the ledger says
+    about it, and the ledger is the thing that can be out of date. Returned rather than
+    written so these land with everything else, in the one pass that has already resolved
+    -- a half-written docs/ directory is worse than none, scaffolds included.
+    """
+    out_pages = {}
+    for row in doc.get("authored_ledger", ()) or ():
+        if row.get("status") in SETTLED_AUTHORED:
+            continue
+        name = row["page_id"] + emitter.extension
+        if os.path.exists(os.path.join(out, name)):
+            continue
+        out_pages[name] = render_scaffold(row, emitter)
+    return out_pages
+
+
+# A reader arrives with a purpose, not with a table of contents. These are the groups the
+# manual template already organises its page ids by, so the navigation can say which route
+# is whose without anyone declaring it a second time.
+GROUPS = (("getting_started/", "Getting Started"),
+          ("architecture/", "Architecture"),
+          ("usage/", "Usage"),
+          ("development/", "Development"),
+          ("appendix/", "Appendix"))
+
+
+def grouped(entries):
+    """(caption, ids) per navigation group, in `GROUPS` order, then whatever is left.
+
+    Derived from the page id prefix rather than from a new field: the template already
+    encodes the group in the id, and a second declaration of the same fact is one that can
+    disagree with the first. A preset whose ids carry no prefix falls through to a single
+    unnamed group, which is what every non-manual preset does today.
+    """
+    remaining, out = list(entries), []
+    for prefix, caption in GROUPS:
+        holds = [e for e in remaining if e.startswith(prefix)]
+        if holds:
+            out.append((caption, holds))
+            remaining = [e for e in remaining if not e.startswith(prefix)]
+    if remaining:
+        out.append(("Contents", remaining))
+    return out
+
+
 def render_index(doc, pages, emitter, authored=()):
     revision = doc.get("source_revision")
     parts = [emitter.heading("Documentation"),
@@ -248,13 +342,14 @@ def render_index(doc, pages, emitter, authored=()):
                  "Generated from the %s preset at revision %s%s."
                  % (doc["preset"], revision or "an untracked tree",
                     " (working tree had uncommitted changes)"
-                    if doc.get("source_dirty") else "")),
-             # Every page, in the preset's order -- generated and authored together.
-             # This is the check a renderer can actually make: a page that exists but is
-             # not listed here is unreachable.
-             emitter.toctree([page["id"] for page in
-                              sorted(list(pages) + list(authored),
-                                     key=lambda p: p.get("order", 0))])]
+                    if doc.get("source_dirty") else ""))]
+    # Every page, in the preset's order -- generated and authored together. This is the
+    # check a renderer can actually make: a page that exists but is not listed here is
+    # unreachable. Grouping changes how they are presented, never which ones appear.
+    ordered = [page["id"] for page in sorted(list(pages) + list(authored),
+                                             key=lambda p: p.get("order", 0))]
+    for caption, entries in grouped(ordered):
+        parts.append(emitter.toctree(entries, caption))
     return "\n".join(parts)
 
 
@@ -262,6 +357,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--doc", default=".docs-build/doc.json", help="the document model")
     parser.add_argument("--out", default="docs", help="directory to write pages into")
+    parser.add_argument("--source-docs",
+                        help="the durable documentation tree, when --out is a staging "
+                             "directory that is rebuilt from it. Authored-page scaffolds "
+                             "are written here so an author's work survives the next "
+                             "render; defaults to --out")
     parser.add_argument("--format", default="rst", choices=tuple(sorted(EMITTERS)),
                         help="output markup. `myst` needs the target project to enable "
                              "myst_parser; see references/presets.md")
@@ -322,7 +422,39 @@ def main():
     except ValueError as exc:
         sys.stderr.write("FAIL  %s\n" % exc)
         return 2
-    carried = authored_on_disk(doc, args.out, emitter)
+    # Scaffolds first: an authored page this run is about to create is as real as one
+    # already on disk, and leaving it out of the toctree would publish a page Sphinx
+    # warns is included nowhere and no reader can reach.
+    #
+    # **They are written to the source tree, not to `--out`.** Under the render/review
+    # split `--out` is a staging directory that `prepare_stage.py` deletes and recreates
+    # from the source on every render -- so a scaffold written there, and everything an
+    # author had filled into it, was destroyed by the next `document`/`render` cycle the
+    # ledger update requires. An authored page is source: a person writes it, it is meant
+    # to be committed, and `prepare_stage` exists precisely to carry it into the stage.
+    # `--source-docs` names that tree; without it the two are the same directory and the
+    # standalone behaviour is unchanged.
+    source_docs = args.source_docs or args.out
+    fresh = scaffolds(doc, source_docs, emitter)
+    for name, body in sorted(fresh.items()):
+        path = os.path.join(source_docs, name)
+        directory = os.path.dirname(path)
+        if directory and not os.path.isdir(directory):
+            os.makedirs(directory)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(body)
+        print("wrote %s for an author to fill; it survives the next render" % path)
+    if os.path.realpath(source_docs) != os.path.realpath(args.out):
+        # The staged copy was taken before these existed, so put them in it too rather
+        # than leaving this render's index pointing at pages the stage does not hold.
+        rendered.update(fresh)
+    carried = authored_on_disk(doc, source_docs, emitter)
+    carried_ids = {page["id"] for page in carried}
+    by_id = {page["id"]: page for page in doc.get("authored_pages", ())}
+    for name in sorted(fresh):
+        page_id = name[:-len(emitter.extension)]
+        if page_id not in carried_ids and page_id in by_id:
+            carried.append(by_id[page_id])
     rendered[index_name] = render_index(doc, pages, emitter, carried)
 
     # A figure pointing at a file that is not there renders as a broken image and
@@ -412,15 +544,47 @@ def main():
     if kept_index:
         entries = [page["id"] for page in pages]
         if args.wire_toctree:
+            # One group per call, so a grouped index -- including one an earlier run of
+            # this script wrote -- has a caption to match rather than an ambiguity to
+            # refuse. Pages outside every group keep the old single-toctree behaviour.
+            #
+            # **All or none.** Each `wire` writes the index as it succeeds, so a later
+            # group with no matching caption used to leave the file half wired while the
+            # refusal below said it was untouched -- and `unwired` does not fail a build,
+            # so that incomplete navigation could reach review and publication on the
+            # strength of a message that was false. The original bytes are kept and put
+            # back, so the promise the refusal makes is one the code keeps.
+            index_path = os.path.join(args.out, index_name)
             try:
-                changed, note = wire_toctree.wire(os.path.join(args.out, index_name),
-                                                  entries)
+                with open(index_path, "rb") as handle:
+                    original = handle.read()
+            except OSError as exc:
+                sys.stderr.write("FAIL  cannot read %s: %s\n" % (index_name, exc))
+                return 2
+            try:
+                notes, changed = [], False
+                for caption, group in grouped(entries):
+                    one, note = wire_toctree.wire(index_path, group, caption)
+                    changed = changed or one
+                    notes.append(note)
+                note = "; ".join(notes)
             except wire_toctree.Refused as exc:
-                # The index is the author's, so a refusal leaves it untouched and the
-                # pages stand unwired rather than the file being guessed at.
+                # The index is the author's, so a refusal leaves it exactly as it was and
+                # the pages stand unwired rather than the file being guessed at.
+                restored = ""
+                try:
+                    with open(index_path, "rb") as handle:
+                        if handle.read() != original:
+                            with open(index_path, "wb") as writing:
+                                writing.write(original)
+                            restored = " (earlier groups were rolled back)"
+                except OSError as failure:
+                    # Say so rather than claiming a rollback that did not happen.
+                    restored = (" -- and %s could not be restored: %s. Check it by hand"
+                                % (index_name, failure))
                 sys.stderr.write("REFUSED  %s\n" % exc)
-                print("kept the existing %s unchanged; wire these in by hand: %s"
-                      % (index_name, ", ".join(entries)))
+                print("kept the existing %s unchanged%s; wire these in by hand: %s"
+                      % (index_name, restored, ", ".join(entries)))
             else:
                 print(note)
         else:
@@ -441,6 +605,16 @@ def main():
                   % detail)
         else:
             sys.stderr.write("WARN  %s\n" % detail)
+        # Beside the conf, and only with it: build files for a directory nothing can build
+        # would name an invocation that does not work.
+        for name, state, where in sphinx_support.write_build_files(
+                args.out, optional=("spelling", "livehtml")):
+            if state == "written":
+                print("wrote %s" % where)
+            elif state == "failed":
+                sys.stderr.write("WARN  %s\n" % where)
+        print("`make html` builds them; `make strict` fails on a warning, which is what "
+              "an unreachable page or a broken reference is")
     elif not sphinx_support.project_at(args.out):
         # Pages with nothing to build them are not yet a document, and the reader has no
         # way to know that from the files alone.
@@ -451,6 +625,15 @@ def main():
         return 0
     result = sphinx_support.check(args.out, extensions=required_extensions)
     print("build check: %s -- %s" % (result.status, result.detail))
+    # Said separately from the status, because a build that passes says nothing about
+    # whether a picture exists. `accepted` means the source parsed and was not drawn.
+    if result.diagrams == sphinx_support.ACCEPTED:
+        print("diagrams: accepted as markup, not drawn. No image was produced, so "
+              "nothing here shows whether a diagram is readable or says what the prose "
+              "beside it says.")
+    elif result.diagrams == sphinx_support.DRAWN:
+        print("diagrams: drawn. Whether each one is readable and matches its prose is a "
+              "review question, not a build one.")
     # `unwired` and `skipped` are outcomes, not failures: one means an integration step
     # has not run, the other that no builder was installed. Both are reported.
     return 1 if result.failed else 0

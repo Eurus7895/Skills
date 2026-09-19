@@ -395,7 +395,17 @@ def document(args):
             # the draft here rather than failing with a command to go and type -- `--init`
             # refuses to overwrite, so this can never eat answers that already exist.
             argv = [sys.executable, os.path.join(HERE, "document", "manual.py"),
-                    "--init", answers, "--index", index]
+                    "--init", answers, "--index", index,
+                    "--authored", os.path.join(build, "authored.jsonl")]
+            # The two largest sources of citable ids. Left off, the reading list held only
+            # what the three optional analyses contributed -- an end-to-end run offered 2
+            # facts where 15 existed -- and an answer cannot be `observed` or `declared`
+            # without naming an id the draft never told the model was there.
+            for flag, path in (("--claims", verified),
+                               ("--analysis", os.path.join(build,
+                                                           "module-analysis.jsonl"))):
+                if os.path.exists(path):
+                    argv.extend([flag, path])
             for flag, path in (("--architecture", architecture), ("--flows", flows),
                                ("--operations", operations), ("--config", config)):
                 if os.path.exists(path):
@@ -417,7 +427,8 @@ def document(args):
              "--out", os.path.join(build, "doc.json")]
     if preset == "manual":
         model.extend(["--manual-analysis", os.path.join(build, "manual-analysis.json"),
-                      "--root", args.root])
+                      "--root", args.root,
+                      "--authored", os.path.join(build, "authored.jsonl")])
     for flag, path in (("--architecture", architecture), ("--flows", flows),
                        ("--operations", operations), ("--config", config)):
         if os.path.exists(path):
@@ -462,6 +473,12 @@ def render(args):
     """Render a reviewable draft without changing the published documentation."""
     build, staging = args.build, staging_of(args)
     render_args = ["--doc", os.path.join(build, "doc.json"), "--out", staging,
+                   # `prepare_stage` rebuilds the stage from this tree on every render, so
+                   # an authored-page scaffold written into the stage -- and whatever an
+                   # author had filled into it -- would not survive the cycle the ledger
+                   # update requires. Scaffolds go here instead, and the stage inherits
+                   # them the way it inherits every other authored page.
+                   "--source-docs", args.docs,
                    "--diagrams", os.path.join(build, "diagrams"),
                    "--format", args.format, "--check"]
     if args.write_conf:
@@ -495,6 +512,7 @@ def review(args):
             "--claims", os.path.join(build, "claims.verified.jsonl"),
             "--doc", doc, "--diagrams", diagrams, "--prose", prose,
             "--checkpoints", os.path.join(build, "checkpoints"),
+            "--hygiene", os.path.join(build, "hygiene-report.json"),
             "--out", os.path.join(build, "generation-report.json")]
     for flag, path in (("--architecture", architecture), ("--flows", flows),
                        ("--operations", operations)):
@@ -516,6 +534,21 @@ def review(args):
         # silence.
         Stage("review", "check_prose.py", checker, tolerate=(1,),
               script_component="publish"),
+        # Between the prose check and the gate, and tolerated, so the gate reads the
+        # findings and decides. A tree finding is a real defect and not one that should
+        # stop the report that names it.
+        #
+        # Pointed at the staging draft rather than at `docs`: the shape problems this
+        # catches -- two indexes, two configurations, a page the model named and the tree
+        # does not hold -- must block publication, and after `publish` has promoted the
+        # tree atomically it is too late to say so. `H004`/`H005`, which ask git about
+        # committed build output, do not fire on a staging directory that is ignored in
+        # its entirety; those are about a published tree and are not what holds a seal.
+        Stage("review", "release_hygiene.py",
+              ["--docs", staging, "--root", args.root,
+               "--doc", os.path.join(build, "doc.json"),
+               "--out", os.path.join(build, "hygiene-report.json")],
+              tolerate=(1,), script_component="publish"),
         Stage("review", "quality_docs.py", gate, script_component="publish"),
         Stage("review", "seal_draft.py",
               ["--draft", staging, "--doc", doc, "--report", generation,
@@ -578,12 +611,30 @@ CHECKPOINTS = (
 
 
 def prose_queued(build):
-    """Whether `check_prose` left blocks nobody has decided."""
+    """Whether `check_prose` left blocks nobody has decided.
+
+    **Read `coverage`, not the top level.** The first version of this read
+    `report["queued"]` and `report["reviewed"]`, which `check_prose` has never written
+    there -- the counts live under `coverage`, beside `blocks_checked`. So it returned
+    False on every real report and P4 never opened, which is the exact failure the
+    checkpoint was added to fix. It passed by hand at the time because the report it was
+    tried against was written to match the reader instead of the producer.
+
+    `unreviewed` is the list of blocks nobody decided, and is checked first because it is
+    the thing the question is actually about.
+    """
     try:
         with open(os.path.join(build, "prose-report.json"), encoding="utf-8") as fh:
             report = json.load(fh)
     except (OSError, ValueError):
         return False
+    # Checked ahead of the counts, and not only as a shortcut: a review file can hold as
+    # many records as there are queued blocks and still leave some undecided, when a record
+    # was written against content that has since changed. `queued == reviewed` is then true
+    # while `unreviewed` is not empty, and the blocks nobody decided are what the question
+    # is about.
+    if report.get("unreviewed"):
+        return True
     coverage = report.get("coverage") or {}
     return (coverage.get("queued") or 0) > (coverage.get("reviewed") or 0)
 
@@ -642,6 +693,211 @@ def open_checkpoint(build, checkpoint, digest):
     return True
 
 
+# What `status` reads. Every one of these is an artifact some component already writes;
+# nothing here is computed a second way. The point is only that one command can read them
+# all without running a stage, because the session that needs them most is the one that
+# cannot run a stage.
+READ_KINDS = ("responsibility", "state", "interface", "failure")
+READ_KINDS_FLOOR = 2                      # the same bar quality_docs applies
+
+
+def _json(path, default=None):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return default
+
+
+def _lines(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return [line for line in (l.strip() for l in fh) if line]
+    except OSError:
+        return []
+
+
+def analysis_progress(build):
+    """(in scope, read, remaining) module paths, from units.txt and module-analysis.jsonl.
+
+    **This is the number a resumed session actually needs, and it was the one it could not
+    get.** `quality_docs.py` computes it and names the remainder, but that runs in
+    `publish` -- and a partial analysis fails `check` first, so a run interrupted halfway
+    through the modules could not reach the report that would say which half. Nothing was
+    missing from the pipeline except a way to ask without running it.
+
+    `read` uses the same floor as the gate: at least `READ_KINDS_FLOOR` of the four module
+    kinds. A module named once and left there is not a module that was read.
+    """
+    scope = _lines(os.path.join(build, "units.txt"))
+    kinds = {}
+    for line in _lines(os.path.join(build, "module-analysis.jsonl")):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue                       # validate_analysis owns the verdict on this
+        path = row.get("path")
+        if not path:
+            continue
+        kinds.setdefault(path, set()).update(
+            s.get("kind") for s in row.get("statements", ()) if isinstance(s, dict))
+    read = [p for p in scope
+            if len(kinds.get(p, set()) & set(READ_KINDS)) >= READ_KINDS_FLOOR]
+    # Touched but not read is its own state, and the one a resumed session most needs
+    # told apart: a module with a single statement has work already in it, and reporting
+    # it beside the untouched ones invites someone to write it a second time.
+    touched = [p for p in scope if p in kinds and p not in set(read)]
+    untouched = [p for p in scope if p not in kinds]
+    return scope, read, touched, untouched
+
+
+def status(args, build):
+    """Where the run is, read-only, and never blocked by anything.
+
+    A checkpoint refuses to let the next component run, and a failing stage stops the ones
+    behind it -- both correct, and between them they mean the state of a run is only ever
+    reported by something that might decline to report it. This declines nothing: it runs
+    no stage, writes nothing, and answers the same whether the last component passed,
+    failed, or was never reached.
+    """
+    digest = index_hash_of(build)
+    if not digest:
+        print("no scan yet in %s. Start with: python3 %s survey --root %s"
+              % (build, os.path.basename(__file__), args.root))
+        return 0
+    index = _json(os.path.join(build, "structure.json"), {}) or {}
+    source = index.get("source") or {}
+    print("scan       %s" % digest)
+    print("           revision %s%s"
+          % (source.get("revision") or "untracked",
+             " (uncommitted changes when scanned)" if source.get("dirty") else ""))
+
+    print("\ncheckpoints")
+    for checkpoint in CHECKPOINTS:
+        path = checkpoint_path(build, checkpoint["id"])
+        decided = decision_for(build, checkpoint["id"], digest)
+        if decided:
+            state = "decided -- %s" % (decided.get("note") or "no note recorded")
+        elif os.path.isfile(path):
+            # Stale means opened against an earlier scan: the units may now be different,
+            # so the question has to be asked again rather than inherited.
+            stale = (_json(path, {}) or {}).get("index_hash") != digest
+            state = "OPEN (from an earlier scan)" if stale else "OPEN"
+            state += " -- blocks %s" % checkpoint["blocks"]
+        else:
+            state = "not opened yet (%s opens it)" % checkpoint["opened_by"]
+        print("  %-3s %s" % (checkpoint["id"], state))
+
+    scope, read, touched, untouched = analysis_progress(build)
+    if scope:
+        print("\nmodules    %d in scope, %d read, %d partly written, %d not started"
+              % (len(scope), len(read), len(touched), len(untouched)))
+        for label, paths in (("finish", touched), ("start", untouched)):
+            for path in paths[:10]:
+                print("           %-6s %s" % (label, path))
+            if len(paths) > 10:
+                print("           %-6s ... and %d more" % ("", len(paths) - 10))
+
+    manual = _json(os.path.join(build, "manual-analysis.json"))
+    if isinstance(manual, dict):
+        answers = manual.get("answers") or {}
+        answered = sum(1 for a in answers.values()
+                       if isinstance(a, dict)
+                       and a.get("completeness") not in (None, "unanswered"))
+        composed = sum(len((p or {}).get("sections") or [])
+                       for p in (manual.get("pages") or {}).values())
+        print("\nmanual     %d of %d question(s) answered, %d section(s) composed"
+              % (answered, len(answers), composed))
+
+    # Parsed defensively, like `analysis_progress` already does. The ledger is edited by a
+    # person, so a half-written line is an ordinary state to find it in -- and `status`
+    # crashing on one would defeat the single thing it exists for, which is answering while
+    # something else is broken.
+    ledger, unreadable = [], 0
+    for line in _lines(os.path.join(build, "authored.jsonl")):
+        try:
+            ledger.append(json.loads(line))
+        except ValueError:
+            unreadable += 1
+    if ledger or unreadable:
+        settled = [r for r in ledger if r.get("status") in ("complete", "waived")]
+        print("authored   %d of %d page(s) settled" % (len(settled), len(ledger)))
+        for row in ledger:
+            if not isinstance(row, dict):
+                unreadable += 1
+            elif row.get("status") not in ("complete", "waived"):
+                print("           - %s (%s)" % (row.get("page_id"), row.get("status")))
+        if unreadable:
+            # Named rather than skipped silently: an unreadable row is a page whose state
+            # nobody knows, which is worse than an unsettled one.
+            print("           %d row(s) could not be read -- the ledger needs repair"
+                  % unreadable)
+
+    report = _json(os.path.join(build, "prose-report.json"))
+    if isinstance(report, dict):
+        # `coverage`, for the same reason `prose_queued` reads it there: the counts have
+        # never been at the top level, and the list is `review_queue`, not `queue`.
+        coverage = report.get("coverage") or {}
+        print("review     %d block(s) queued, %d reviewed, %d undecided"
+              % (coverage.get("queued") or 0, coverage.get("reviewed") or 0,
+                 len(report.get("unreviewed") or ())))
+
+    print("\nnext       %s" % next_step(build, digest, remaining=touched + untouched))
+    return 0
+
+
+def next_step(build, digest, remaining):
+    """One line naming the next action, in the order the run would hit them.
+
+    **A checkpoint first, except the one whose material is not written yet.** `analyze`
+    opens `P2` the moment it finishes, but the roles `P2` asks about are written by hand
+    into `module-analysis.jsonl` afterwards -- so a resumed session with modules still
+    unread was told to decide whether the module roles were right before any role existed.
+
+    The exception is only `P2`, and the distinction is which side of the component the work
+    falls on. `P1` blocks `analyze` itself: while it is open no packet can be produced and
+    no module can be read, so naming the module work there would advise something that
+    cannot be done. `P2` blocks `check`, and the module analysis is written between the two.
+    """
+    open_checkpoints = {}
+    for component in ORDER:
+        blocking = blocking_checkpoint(build, component, digest)
+        if blocking:
+            open_checkpoints[blocking["id"]] = blocking
+            break
+    if remaining and set(open_checkpoints) <= {"P2"}:
+        return ("write the analysis for %d remaining module(s), appending one scope at a "
+                "time, then run check" % len(remaining))
+    for blocking in open_checkpoints.values():
+        return "decide %s (%s) -- it blocks %s" % (
+            blocking["id"], blocking["ask"], blocking["blocks"])
+    if remaining:
+        return ("write the analysis for %d remaining module(s), appending one scope at a "
+                "time, then run check" % len(remaining))
+    manual = _json(os.path.join(build, "manual-analysis.json"))
+    if isinstance(manual, dict):
+        answers = manual.get("answers") or {}
+        open_questions = [q for q, a in answers.items() if isinstance(a, dict)
+                          and a.get("completeness") in (None, "unanswered")]
+        if open_questions:
+            return "answer %d remaining question(s) in manual-analysis.json" % \
+                len(open_questions)
+        # Every page, not any page. `any(...)` reported the run finished as soon as one
+        # page had a section, with nineteen still uncomposed and a `document` step that
+        # would reject them.
+        pages = manual.get("pages") or {}
+        if not pages:
+            # No map at all means nothing is composed, not that nothing needs composing.
+            return "compose each page's sections from the answers"
+        bare = [page for page, held in sorted(pages.items())
+                if not (held or {}).get("sections")]
+        if bare:
+            return ("compose the sections for %d remaining page(s) from the answers: %s%s"
+                    % (len(bare), ", ".join(bare[:3]),
+                       ", ..." if len(bare) > 3 else ""))
+    return "run the next component: it has the inputs it needs"
+
+
 def blocking_checkpoint(build, component, digest):
     """The open checkpoint standing in front of this component, if there is one.
 
@@ -674,9 +930,9 @@ def blocking_checkpoint(build, component, digest):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("component", choices=ORDER + ["decide", "measure"],
+    parser.add_argument("component", choices=ORDER + ["decide", "measure", "status"],
                         metavar="COMPONENT",
-                        help="one of: %s, decide, or measure" % ", ".join(ORDER))
+                        help="one of: %s, decide, measure, or status" % ", ".join(ORDER))
     parser.add_argument("--checkpoint", help="decide: which checkpoint (P1, P2, P3, P4)")
     parser.add_argument("--note", help="decide: what was decided, and by whom -- this is "
                                        "what the closing report carries")
@@ -717,6 +973,13 @@ def main():
         return fail("--top must not be negative")
     if args.review and not os.path.isfile(args.review):
         return fail("no such review file: %s" % args.review)
+
+    # Ahead of `build_dir.ensure`, deliberately. `status` answers questions about a run and
+    # must not start one: creating the build directory to report that there is no build
+    # directory would be the command changing the thing it was asked to describe.
+    if args.component == "status":
+        return status(args, args.build)
+
     build_dir.ensure(args.build)
     digest = index_hash_of(args.build)
 
@@ -834,6 +1097,8 @@ def main():
     if not args.dry_run:
         for checkpoint in CHECKPOINTS:
             if checkpoint["opened_by"] != args.component:
+                continue
+            if code not in checkpoint.get("opens_on", (0,)):
                 continue
             condition = OPENS_WHEN.get(checkpoint.get("opens_when"))
             if code != 0 and condition is None:

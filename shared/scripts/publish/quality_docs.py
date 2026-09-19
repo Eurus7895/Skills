@@ -443,13 +443,36 @@ def operations_report(operations):
     }
 
 
+SETTLED_AUTHORED = ("complete", "waived")
+
+
 def page_report(doc):
+    """Which mandatory pages the run owes, separating the two ways of owing one.
+
+    A generated page the builder did not produce is the run's failure. An authored page
+    is a different debt: nothing generates it, and it is owed by a person. Counting the
+    second as the first is what made the manual preset report six missing pages on every
+    run it ever made -- an unconditional failure nobody could clear, because the pages it
+    named live in `authored_pages` and could never appear in `pages`.
+
+    So an authored page is discharged by its ledger row being settled, and until then it
+    is reported as what it is: unwritten, and whose.
+    """
     preset = doc.get("preset")
     pages = {page["id"] for page in doc.get("pages", ())}
+    ledger = doc.get("authored_ledger", ()) or ()
+    known = {row.get("page_id") for row in ledger}
+    unsettled = sorted(row.get("page_id") for row in ledger
+                       if row.get("status") not in SETTLED_AUTHORED)
     required = [page_id for page_id, _, mandatory, _ in PRESETS.get(preset, ())
                 if mandatory]
+    # Every ledger page leaves `missing`, settled or not. An unsettled one is still owed,
+    # but it is owed by a person and reported as such -- listing it here too said the
+    # builder had failed to generate a page that was never the builder's to generate, and
+    # put the same five names under two headings with two different remedies.
     return {"preset": preset, "generated": len(pages), "mandatory": len(required),
-            "missing": sorted(set(required) - pages)}
+            "missing": sorted(set(required) - pages - known),
+            "authored_unsettled": unsettled}
 
 
 def diagram_report(directory):
@@ -481,6 +504,9 @@ def main():
     parser.add_argument("--diagrams", help="directory holding diagram-manifest.json")
     parser.add_argument("--prose", help="the report from check_prose.py, so a document "
                                         "whose sentences outrun their sources cannot pass")
+    parser.add_argument("--hygiene", help="the report from release_hygiene.py, so a tree "
+                                          "with two indexes or committed build output "
+                                          "cannot pass on the strength of its pages")
     parser.add_argument("--require", default=STATUS_PARTIAL,
                         choices=(PASSED, STATUS_PARTIAL, REVIEW_REQUIRED, FAILED),
                         help="lowest status that still exits 0 (default: partial)")
@@ -684,6 +710,65 @@ def main():
                 status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
                 reasons.append("manual is missing required diagram(s): %s"
                                % ", ".join(missing_diagrams))
+
+            # How much of what was answered reached a reader, beside how much was
+            # answered. Every other check here passes on a manual whose sections replaced
+            # their answers with three words: the citations resolve, composition stayed
+            # inside what the answers cite, and `uncomposed` is zero because each answer
+            # was named. Naming an answer is not composing it.
+            thin = coverage.get("thin_sections") or []
+            report["manual"]["prose_words"] = coverage.get("prose_words")
+            report["manual"]["retained"] = coverage.get("retained")
+            report["manual"]["thin_sections"] = [t["block"] for t in thin]
+
+            # Two things the builder already refused an excess of, reported anyway. A
+            # manual under both ceilings passed, and whoever reads this is owed the
+            # numbers rather than the silence that means "it was under a threshold".
+            asserted = coverage.get("asserted") or []
+            answered = coverage.get("answered") or 0
+            excused = coverage.get("brevity_exceptions") or []
+            report["manual"]["asserted"] = len(asserted)
+            report["manual"]["brevity_exceptions"] = [e["block"] for e in excused]
+            if asserted:
+                # Not a failure: the ceiling is the verdict and this is under it. But an
+                # unbacked paragraph is the one a reader cannot check, so the count does
+                # not get to be invisible.
+                reasons.append(
+                    "manual rests on %d asserted answer(s) of %d answered -- carrying no "
+                    "repository evidence, only the name of whoever stated them: %s"
+                    % (len(asserted), answered,
+                       ", ".join(sorted(asserted)[:5])))
+            if excused:
+                reasons.append(
+                    "manual has %d section(s) published under a brevity exception rather "
+                    "than meeting the retention floor: %s"
+                    % (len(excused), ", ".join(e["block"] for e in excused[:3])))
+            if thin:
+                status = FAILED
+                worst = thin[0]
+                reasons.append(
+                    "manual has %d section(s) that discard the answers they name; %s %s"
+                    % (len(thin), worst["block"], worst["problems"][0]))
+
+            # The authored pages, reported in their own right rather than folded into
+            # `answer_mode`. The run was never asked to answer them, so they must not
+            # count against what it did answer -- and must not be excused by it either.
+            authored = doc.get("authored_coverage") or {}
+            if authored:
+                report["manual"]["authored_mode"] = authored.get("mode")
+                report["manual"]["authored_settled"] = authored.get("settled")
+                report["manual"]["authored_total"] = authored.get("total")
+                owed = [pid for pid, _ in authored.get("unsettled") or ()]
+                if owed:
+                    # Not `partial`: a manual published with an empty troubleshooting
+                    # page is a manual that promised a reader something and shipped the
+                    # promise. Clearing it needs a page or a waiver, and either is a
+                    # minute's work -- which is the point of holding here.
+                    status = FAILED
+                    reasons.append(
+                        "manual has %d authored page(s) nobody has written or waived: "
+                        "%s. Fill the scaffold, or waive it with an owner and a reason"
+                        % (len(owed), ", ".join(owed)))
         if report["pages"]["missing"]:
             status = FAILED
             reasons.append("the %s preset requires pages that were not generated: %s"
@@ -760,6 +845,25 @@ def main():
                 report[key].get("flows") or report[key].get("procedures")):
             status = min(status, STATUS_PARTIAL, key=lambda s: RANK[s])
             reasons.append("the %s names nothing and does not say why" % label)
+
+    if args.hygiene and os.path.exists(args.hygiene):
+        # Every other check here is about content. This one is about the tree, and a tree
+        # can be wrong while every page in it is right: two indexes, so half the document
+        # is unreachable from wherever a reader starts; two configurations, so a fix to
+        # one silently does nothing; build output committed, or sitting in the source the
+        # next build reads.
+        hygiene, error = load_json(args.hygiene, "hygiene report")
+        if error:
+            return fail(error)
+        findings = hygiene.get("findings") or []
+        report["hygiene"] = {"passed": hygiene.get("passed"),
+                             "findings": [f.get("code") for f in findings]}
+        if findings:
+            status = FAILED
+            reasons.append("the documentation tree has %d hygiene problem(s): %s"
+                           % (len(findings),
+                              "; ".join("%s %s" % (f.get("code"), f.get("message"))
+                                        for f in findings[:2])))
 
     if args.prose:
         prose, error = load_json(args.prose, "prose report")
