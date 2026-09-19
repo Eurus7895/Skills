@@ -32,17 +32,47 @@ class StateTests(unittest.TestCase):
         exists. That conflation is the whole defect being fixed."""
         self.assertEqual(support.Result(support.PASSED, "x").diagrams, support.UNKNOWN)
 
-    def test_a_skipped_check_does_not_claim_there_are_no_diagrams(self):
+    def test_a_check_that_established_nothing_does_not_claim_there_are_no_diagrams(self):
+        """The invariant, on a document that holds a diagram and a build that cannot run.
+
+        An earlier version of this branched on the environment -- `SKIPPED` means
+        `unknown`, anything else means a real measurement -- and CI failed it, because a
+        builder being installed does not mean the build succeeded. Here the referenced
+        `.puml` is deliberately absent, so `sphinx-build -W` reports `runner_failure` where
+        Sphinx exists and `skipped` where it does not. Both establish nothing, both are
+        `unknown`, and neither may say `none`: that would be a claim, and false on a
+        document that plainly holds a `uml` directive.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "docs"
             out.mkdir()
-            (out / "page.rst").write_text("Page\n====\n\n.. uml:: x.puml\n")
+            (out / "page.rst").write_text("Page\n====\n\n.. uml:: absent.puml\n")
+            result = support.check(str(out), extensions=("sphinxcontrib.plantuml",))
+            self.assertNotEqual(result.diagrams, support.NO_DIAGRAMS)
+            self.assertEqual(result.diagrams, support.UNKNOWN)
+
+    def test_a_build_that_succeeds_reports_a_real_state(self):
+        """A complete tree, so the measurement paths are exercised where tooling exists.
+
+        `drawn` with the PlantUML command installed, `accepted` with only the extension or
+        neither, `unknown` with no builder at all. What matters is that a successful build
+        never leaves this at `unknown`, and never invents `none`.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "docs"
+            out.mkdir()
+            (out / "index.rst").write_text(
+                "Docs\n====\n\n.. toctree::\n   :maxdepth: 2\n\n   page\n")
+            (out / "page.rst").write_text(
+                "Page\n====\n\nProse about the system.\n\n.. uml:: shape.puml\n")
+            (out / "shape.puml").write_text("@startuml\nclass A\n@enduml\n")
             result = support.check(str(out), extensions=("sphinxcontrib.plantuml",))
             if result.status == support.SKIPPED:
                 self.assertEqual(result.diagrams, support.UNKNOWN)
             else:
-                # A builder is installed here, so the state is a real measurement.
-                self.assertIn(result.diagrams, (support.ACCEPTED, support.DRAWN))
+                self.assertIn(result.diagrams, (support.ACCEPTED, support.DRAWN),
+                              "%s: %s" % (result.status, result.detail[:200]))
+            self.assertNotEqual(result.diagrams, support.NO_DIAGRAMS)
 
     def test_the_status_is_unchanged_by_the_diagram_state(self):
         """A build whose markup is sound is `passed`, and stays `passed`. Whether a
