@@ -686,3 +686,63 @@ nor be excused by it.
 
 A run with no ledger file scaffolds every page fresh, so a first run needs nothing on disk. A malformed row
 is an error naming the page; there is no v0 to migrate.
+
+## `asserted` and `brevity` — the two bounded exceptions
+
+Both exist because a rule that admitted no exception was pushing real content out of the document rather than
+making it evidenced. Both are bounded, because an unbounded exception is the rule deleted.
+
+### `basis: asserted`
+
+The fifth basis, and the only one that cites nothing:
+
+```json
+{"basis": "asserted", "completeness": "complete",
+ "text": "An RTE option is a compiler switch passed to the RTE generator.",
+ "evidence": [], "verified_ids": [], "reviewer": "docs@example.com"}
+```
+
+| | |
+| --- | --- |
+| requires | `reviewer` — it is the one answer a reader cannot check, so it may not be anonymous |
+| refuses | `verified_ids` — an id a validator passed is evidence, and an answer holding one is not an assertion |
+| renders as | the body, then *"Not documented in the source; stated by …"* |
+| section effect | one asserted answer makes the whole section `asserted`, outranking `inferred` |
+| ceiling | `ASSERTED_LIMIT`, 20% of the answered set. Past it the build stops |
+
+It is **not** exempt from anything else. `completeness`, `facets_missing`, the repeated-answer detector and the
+retention floor all apply unchanged.
+
+The provenance line is deliberately not the `Inferred:` prefix that was removed from reader-facing prose. That
+was a pipeline label on text a reader could already check against its citations; here there are no citations,
+so naming the person is the only provenance there is, and withholding it would leave an unbacked paragraph
+indistinguishable from the evidenced ones beside it.
+
+### `brevity` on a composed section
+
+```json
+{"brevity": {"reason": "This tool has one entry point and no arguments beyond the input path.",
+             "reviewer": "docs@example.com"}}
+```
+
+Excuses the retention floor for that section and nothing else. `reason` needs at least
+`BREVITY_REASON_WORDS` (5) words; a shorter one is refused as a label. `reviewer` is required.
+
+What it excused is preserved under the block's `composition.excused` and listed in
+`manual_coverage.brevity_exceptions` with its reason and reviewer. The reported figures — `body_words`,
+`words_per_answer`, `retained` — are untouched: the exception changes the verdict, never the measurement.
+
+Capped by `BREVITY_LIMIT` at 25% of the sections written.
+
+### `manual_coverage` additions
+
+```json
+{"asserted": ["5.2.1", "5.2.2"], "answered": 161,
+ "brevity_exceptions": [{"page": "usage/invoking", "block": "section:usage/invoking:1",
+                         "reviewer": "docs@example.com", "reason": "…",
+                         "excused": ["covers 3 question(s) in 2 word(s) …"]}]}
+```
+
+Both are reported even when under their ceiling, and the gate names them without failing on them. A manual at
+fifteen per cent asserted passed; whoever reads the report is owed the number rather than the silence that
+means it was under a threshold.

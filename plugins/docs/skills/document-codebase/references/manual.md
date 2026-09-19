@@ -205,6 +205,10 @@ answer, the build stops — questions asking different things cannot honestly sh
 - `basis: observed` or `declared`: the repository settles it — evidence **and at least one `verified_ids`
   entry**, something a validator could have rejected.
 - `basis: inferred`: supported interpretation with evidence, visibly labelled Inferred. Explain its limits.
+- `basis: asserted`: **the one basis with no repository evidence.** For what a reader needs and the source
+  cannot settle — what a domain term means, what people actually ask, what to check first when something
+  fails. It requires `reviewer`, refuses `verified_ids`, and the rendered paragraph says *"Not documented in
+  the source; stated by …"*. Capped at 20% of the answered set; past that the build stops.
 - `unknown`: only once you have looked and the repository is silent. Give a concrete `next_check` naming what
   to inspect or whom to ask — a real next step, not the question restated. Keep the question; do not silently
   omit it or call the manual finished.
@@ -259,6 +263,24 @@ The floor is deliberately low. Calibration, from sections measured rather than i
 It will not catch forty words of filler over nine answers. Nothing mechanical will, which is what the prose
 review queue is for.
 
+**A section may say it really is that short**, with a `brevity` object naming a reason and a reviewer:
+
+```json
+{"heading": "Invoking", "body": "…", "answers": ["3.1.1", "3.1.2"],
+ "brevity": {"reason": "This tool has one entry point and no arguments beyond the input path.",
+             "reviewer": "docs@example.com"}}
+```
+
+The reason needs at least five words: `"Short."` is a label, not a reason. What the exception excused is kept
+beside it in `manual_coverage.brevity_exceptions` and named in the report — an exception nobody can see
+afterwards is indistinguishable from a check that was never there. Only the blocking problem is excused;
+`retained` and `words_per_answer` still say what happened.
+
+**Capped at a quarter of the sections.** Unbounded, the exception does not soften the retention floor — it
+deletes it, one section at a time. The floor was calibrated so that nothing honest came within twice it, so a
+manual needing the exception on more than a quarter of its sections is telling you something other than that
+its sections are short.
+
 **Two other measures were tried and rejected**, and both are still reported so you can see the shape of a
 section without re-deriving it:
 
@@ -280,13 +302,17 @@ Five rules, all checked before `doc.json` is written:
   the heading says what the section is about.
 - **A section names at least one answer, and only answers on its own page.** Prose attached to nothing is
   prose nothing checked.
-- **Only substantive answers can be composed:** their basis is `observed`, `declared` or `inferred`, and
+- **Only substantive answers can be composed:** their basis is `observed`, `declared`, `inferred` or
+  `asserted`, and
   completeness is `partial` or `complete`. An `unknown` is a gap and a `not_applicable` is an exclusion;
   both are reported on the page, neither is written up as content.
 - **Composition may narrow what an answer rests on, never add to it.** A section may cite fewer locations
   than its answers do — that is editing. Citing one they do not is provenance nothing checked, and is the
   failure this whole contract exists to prevent.
 - **One `inferred` answer makes the section `inferred`**, however many observed or declared ones sit beside it.
+- **One `asserted` answer outranks even that**, and the section carries the provenance line naming who
+  stated it. It is the only basis with nothing cited underneath, so a section holding one cannot honestly
+  be presented as observed or inferred.
   Surrounding a reading with facts does not turn it into one.
 
 **Every composable answer must reach some section on its page.** An answer the run paid for and then dropped

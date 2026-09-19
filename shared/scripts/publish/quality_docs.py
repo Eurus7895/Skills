@@ -720,6 +720,29 @@ def main():
             report["manual"]["prose_words"] = coverage.get("prose_words")
             report["manual"]["retained"] = coverage.get("retained")
             report["manual"]["thin_sections"] = [t["block"] for t in thin]
+
+            # Two things the builder already refused an excess of, reported anyway. A
+            # manual under both ceilings passed, and whoever reads this is owed the
+            # numbers rather than the silence that means "it was under a threshold".
+            asserted = coverage.get("asserted") or []
+            answered = coverage.get("answered") or 0
+            excused = coverage.get("brevity_exceptions") or []
+            report["manual"]["asserted"] = len(asserted)
+            report["manual"]["brevity_exceptions"] = [e["block"] for e in excused]
+            if asserted:
+                # Not a failure: the ceiling is the verdict and this is under it. But an
+                # unbacked paragraph is the one a reader cannot check, so the count does
+                # not get to be invisible.
+                reasons.append(
+                    "manual rests on %d asserted answer(s) of %d answered -- carrying no "
+                    "repository evidence, only the name of whoever stated them: %s"
+                    % (len(asserted), answered,
+                       ", ".join(sorted(asserted)[:5])))
+            if excused:
+                reasons.append(
+                    "manual has %d section(s) published under a brevity exception rather "
+                    "than meeting the retention floor: %s"
+                    % (len(excused), ", ".join(e["block"] for e in excused[:3])))
             if thin:
                 status = FAILED
                 worst = thin[0]
