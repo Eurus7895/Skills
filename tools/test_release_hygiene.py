@@ -52,12 +52,23 @@ class HygieneTests(unittest.TestCase):
         (self.docs / "conf.py").write_text("project = 'x'\n")
         self.assertIn("H001", self.codes())
 
-    def test_two_indexes_are_reported(self):
-        """A reader lands on one and the pipeline maintains the other."""
+    def test_two_root_indexes_are_reported(self):
+        """Nothing says which one the build reads, and a reader lands on one of them."""
         self.sound()
-        (self.docs / "nested").mkdir()
-        (self.docs / "nested" / "index.rst").write_text("Other\n=====\n")
+        (self.docs / "index.md").write_text("# Other\n")
         self.assertIn("H002", self.codes())
+
+    def test_a_nested_section_index_is_not_a_competing_root(self):
+        """`guide/index.rst` is the commonest Sphinx layout there is.
+
+        Counting it reported H002 on an ordinary project, and because a hygiene finding
+        fails the gate, such a project could never seal or publish. Sphinx resolves one
+        root document; a section page called `index` is referenced from it like any other.
+        """
+        self.sound()
+        (self.docs / "guide").mkdir()
+        (self.docs / "guide" / "index.rst").write_text("Guide\n=====\n")
+        self.assertNotIn("H002", self.codes())
 
     def test_two_configurations_are_reported(self):
         self.sound()
@@ -92,6 +103,18 @@ class HygieneTests(unittest.TestCase):
         self.sound()
         (self.docs / "leaked.html").write_text("<html></html>")
         self.assertIn("H006", self.codes())
+
+    def test_an_authored_theme_template_is_not_generated_output(self):
+        """`_templates/layout.html` is the documented way to override a theme.
+
+        The suffix-only check called it build output and failed the mandatory gate on any
+        project that had customised its theme.
+        """
+        self.sound()
+        for directory in ("_templates", "_static"):
+            (self.docs / directory).mkdir()
+            (self.docs / directory / "layout.html").write_text("{% extends '!layout' %}")
+        self.assertNotIn("H006", self.codes())
 
     def test_output_inside_the_build_tree_is_not_reported_as_leaked(self):
         """That is where output belongs."""

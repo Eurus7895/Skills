@@ -390,7 +390,7 @@ BUILDDIR      = %(build)s
 
 help:
 \t@echo "html       build the HTML documentation"
-\t@echo "clean      remove everything under $(BUILDDIR)"
+\t@echo "clean      remove what Sphinx built under $(BUILDDIR)"
 \t@echo "linkcheck  report every link that does not resolve"%(optional_help)s
 
 html:
@@ -402,8 +402,12 @@ html:
 strict:
 \t@$(SPHINXBUILD) -b html -W "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS)
 
+# `sphinx-build -M clean` rather than `rm -rf "$(BUILDDIR)"`. This file is published into
+# somebody's repository and edited there, and a recursive delete of whatever BUILDDIR has
+# come to mean -- the source directory, the repository root -- is not a risk a generated
+# build file gets to carry. Sphinx removes what it built, inside its own output tree.
 clean:
-\trm -rf "$(BUILDDIR)"
+\t@$(SPHINXBUILD) -M clean "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS)
 
 linkcheck:
 \t@$(SPHINXBUILD) -b linkcheck "$(SOURCEDIR)" "$(BUILDDIR)/linkcheck" $(SPHINXOPTS)
@@ -425,12 +429,13 @@ goto end
 
 :help
 echo.  html       build the HTML documentation
-echo.  clean      remove everything under %%BUILDDIR%%
+echo.  clean      remove what Sphinx built under %%BUILDDIR%%
 echo.  linkcheck  report every link that does not resolve
 goto end
 
 :clean
-if exist %%BUILDDIR%% rmdir /S /Q %%BUILDDIR%%
+REM Deliberately not `rmdir /S /Q %%BUILDDIR%%`: see the note on the Makefile's clean.
+%%SPHINXBUILD%% -M clean %%SOURCEDIR%% %%BUILDDIR%% %%SPHINXOPTS%%
 goto end
 
 :end

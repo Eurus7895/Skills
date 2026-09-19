@@ -203,7 +203,20 @@ def read_row(row, known):
         raise ValueError("%s: status must be one of %s" % (page_id, ", ".join(STATUSES)))
     owner = str(row.get("owner") or "").strip()
     reason = str(row.get("waiver_reason") or "").strip()
-    if status == WAIVED and not row.get("default_waiver"):
+    # **Which pages may carry a default waiver is settled here, not by the row.** Trusting
+    # the row's own boolean made the exemption forgeable: `default_waiver: true` with
+    # `status: waived` on any page skipped both the owner and the reason check, so a
+    # hand-edited FAQ or troubleshooting row could clear the publication gate while the
+    # page stayed unwritten. Only `DEFAULT_WAIVED` decides, and a row claiming it
+    # elsewhere is refused rather than quietly downgraded -- somebody wrote that, and it
+    # asks for an exemption the page does not have.
+    claims_default = bool(row.get("default_waiver"))
+    if claims_default and page_id not in DEFAULT_WAIVED:
+        raise ValueError(
+            "%s: only %s may carry `default_waiver`. Every other page is waived by a "
+            "person, with an owner and a reason"
+            % (page_id, ", ".join(DEFAULT_WAIVED)))
+    if status == WAIVED and not claims_default:
         # A waiver is an answer -- "we looked, and this page is not needed here" -- and an
         # answer has someone behind it. The default waiver is the one exception, and it
         # says in its own text that nobody has looked.
@@ -212,7 +225,7 @@ def read_row(row, known):
         if not reason:
             raise ValueError("%s: a waived page records why, or it is `scaffolded` "
                              "wearing a verdict" % page_id)
-    if row.get("default_waiver") and status not in (WAIVED, COMPLETE, DRAFTED):
+    if claims_default and status not in (WAIVED, COMPLETE, DRAFTED):
         raise ValueError("%s: a default-waived page is waived, drafted or complete"
                          % page_id)
     return dict(row, owner=owner or None, waiver_reason=reason or None)

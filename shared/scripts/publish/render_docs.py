@@ -357,6 +357,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--doc", default=".docs-build/doc.json", help="the document model")
     parser.add_argument("--out", default="docs", help="directory to write pages into")
+    parser.add_argument("--source-docs",
+                        help="the durable documentation tree, when --out is a staging "
+                             "directory that is rebuilt from it. Authored-page scaffolds "
+                             "are written here so an author's work survives the next "
+                             "render; defaults to --out")
     parser.add_argument("--format", default="rst", choices=tuple(sorted(EMITTERS)),
                         help="output markup. `myst` needs the target project to enable "
                              "myst_parser; see references/presets.md")
@@ -420,9 +425,30 @@ def main():
     # Scaffolds first: an authored page this run is about to create is as real as one
     # already on disk, and leaving it out of the toctree would publish a page Sphinx
     # warns is included nowhere and no reader can reach.
-    fresh = scaffolds(doc, args.out, emitter)
-    rendered.update(fresh)
-    carried = authored_on_disk(doc, args.out, emitter)
+    #
+    # **They are written to the source tree, not to `--out`.** Under the render/review
+    # split `--out` is a staging directory that `prepare_stage.py` deletes and recreates
+    # from the source on every render -- so a scaffold written there, and everything an
+    # author had filled into it, was destroyed by the next `document`/`render` cycle the
+    # ledger update requires. An authored page is source: a person writes it, it is meant
+    # to be committed, and `prepare_stage` exists precisely to carry it into the stage.
+    # `--source-docs` names that tree; without it the two are the same directory and the
+    # standalone behaviour is unchanged.
+    source_docs = args.source_docs or args.out
+    fresh = scaffolds(doc, source_docs, emitter)
+    for name, body in sorted(fresh.items()):
+        path = os.path.join(source_docs, name)
+        directory = os.path.dirname(path)
+        if directory and not os.path.isdir(directory):
+            os.makedirs(directory)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(body)
+        print("wrote %s for an author to fill; it survives the next render" % path)
+    if os.path.realpath(source_docs) != os.path.realpath(args.out):
+        # The staged copy was taken before these existed, so put them in it too rather
+        # than leaving this render's index pointing at pages the stage does not hold.
+        rendered.update(fresh)
+    carried = authored_on_disk(doc, source_docs, emitter)
     carried_ids = {page["id"] for page in carried}
     by_id = {page["id"]: page for page in doc.get("authored_pages", ())}
     for name in sorted(fresh):
@@ -521,20 +547,44 @@ def main():
             # One group per call, so a grouped index -- including one an earlier run of
             # this script wrote -- has a caption to match rather than an ambiguity to
             # refuse. Pages outside every group keep the old single-toctree behaviour.
+            #
+            # **All or none.** Each `wire` writes the index as it succeeds, so a later
+            # group with no matching caption used to leave the file half wired while the
+            # refusal below said it was untouched -- and `unwired` does not fail a build,
+            # so that incomplete navigation could reach review and publication on the
+            # strength of a message that was false. The original bytes are kept and put
+            # back, so the promise the refusal makes is one the code keeps.
+            index_path = os.path.join(args.out, index_name)
+            try:
+                with open(index_path, "rb") as handle:
+                    original = handle.read()
+            except OSError as exc:
+                sys.stderr.write("FAIL  cannot read %s: %s\n" % (index_name, exc))
+                return 2
             try:
                 notes, changed = [], False
                 for caption, group in grouped(entries):
-                    one, note = wire_toctree.wire(
-                        os.path.join(args.out, index_name), group, caption)
+                    one, note = wire_toctree.wire(index_path, group, caption)
                     changed = changed or one
                     notes.append(note)
                 note = "; ".join(notes)
             except wire_toctree.Refused as exc:
-                # The index is the author's, so a refusal leaves it untouched and the
-                # pages stand unwired rather than the file being guessed at.
+                # The index is the author's, so a refusal leaves it exactly as it was and
+                # the pages stand unwired rather than the file being guessed at.
+                restored = ""
+                try:
+                    with open(index_path, "rb") as handle:
+                        if handle.read() != original:
+                            with open(index_path, "wb") as writing:
+                                writing.write(original)
+                            restored = " (earlier groups were rolled back)"
+                except OSError as failure:
+                    # Say so rather than claiming a rollback that did not happen.
+                    restored = (" -- and %s could not be restored: %s. Check it by hand"
+                                % (index_name, failure))
                 sys.stderr.write("REFUSED  %s\n" % exc)
-                print("kept the existing %s unchanged; wire these in by hand: %s"
-                      % (index_name, ", ".join(entries)))
+                print("kept the existing %s unchanged%s; wire these in by hand: %s"
+                      % (index_name, restored, ", ".join(entries)))
             else:
                 print(note)
         else:

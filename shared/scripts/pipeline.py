@@ -470,6 +470,12 @@ def render(args):
     """Render a reviewable draft without changing the published documentation."""
     build, staging = args.build, staging_of(args)
     render_args = ["--doc", os.path.join(build, "doc.json"), "--out", staging,
+                   # `prepare_stage` rebuilds the stage from this tree on every render, so
+                   # an authored-page scaffold written into the stage -- and whatever an
+                   # author had filled into it -- would not survive the cycle the ledger
+                   # update requires. Scaffolds go here instead, and the stage inherits
+                   # them the way it inherits every other authored page.
+                   "--source-docs", args.docs,
                    "--diagrams", os.path.join(build, "diagrams"),
                    "--format", args.format, "--check"]
     if args.write_conf:
@@ -800,13 +806,29 @@ def status(args, build):
         print("\nmanual     %d of %d question(s) answered, %d section(s) composed"
               % (answered, len(answers), composed))
 
-    ledger = [json.loads(l) for l in _lines(os.path.join(build, "authored.jsonl"))]
-    if ledger:
+    # Parsed defensively, like `analysis_progress` already does. The ledger is edited by a
+    # person, so a half-written line is an ordinary state to find it in -- and `status`
+    # crashing on one would defeat the single thing it exists for, which is answering while
+    # something else is broken.
+    ledger, unreadable = [], 0
+    for line in _lines(os.path.join(build, "authored.jsonl")):
+        try:
+            ledger.append(json.loads(line))
+        except ValueError:
+            unreadable += 1
+    if ledger or unreadable:
         settled = [r for r in ledger if r.get("status") in ("complete", "waived")]
         print("authored   %d of %d page(s) settled" % (len(settled), len(ledger)))
         for row in ledger:
-            if row.get("status") not in ("complete", "waived"):
+            if not isinstance(row, dict):
+                unreadable += 1
+            elif row.get("status") not in ("complete", "waived"):
                 print("           - %s (%s)" % (row.get("page_id"), row.get("status")))
+        if unreadable:
+            # Named rather than skipped silently: an unreadable row is a page whose state
+            # nobody knows, which is worse than an unsettled one.
+            print("           %d row(s) could not be read -- the ledger needs repair"
+                  % unreadable)
 
     report = _json(os.path.join(build, "prose-report.json"))
     if isinstance(report, dict):
@@ -824,16 +846,28 @@ def status(args, build):
 def next_step(build, digest, remaining):
     """One line naming the next action, in the order the run would hit them.
 
-    A checkpoint first, because nothing downstream of an unanswered question runs anyway.
-    Then work that is the model's rather than a component's -- an unread module, an
-    unanswered question -- because those are what a resumed session is most likely to
-    think is already done.
+    **A checkpoint first, except the one whose material is not written yet.** `analyze`
+    opens `P2` the moment it finishes, but the roles `P2` asks about are written by hand
+    into `module-analysis.jsonl` afterwards -- so a resumed session with modules still
+    unread was told to decide whether the module roles were right before any role existed.
+
+    The exception is only `P2`, and the distinction is which side of the component the work
+    falls on. `P1` blocks `analyze` itself: while it is open no packet can be produced and
+    no module can be read, so naming the module work there would advise something that
+    cannot be done. `P2` blocks `check`, and the module analysis is written between the two.
     """
+    open_checkpoints = {}
     for component in ORDER:
         blocking = blocking_checkpoint(build, component, digest)
         if blocking:
-            return "decide %s (%s) -- it blocks %s" % (
-                blocking["id"], blocking["ask"], blocking["blocks"])
+            open_checkpoints[blocking["id"]] = blocking
+            break
+    if remaining and set(open_checkpoints) <= {"P2"}:
+        return ("write the analysis for %d remaining module(s), appending one scope at a "
+                "time, then run check" % len(remaining))
+    for blocking in open_checkpoints.values():
+        return "decide %s (%s) -- it blocks %s" % (
+            blocking["id"], blocking["ask"], blocking["blocks"])
     if remaining:
         return ("write the analysis for %d remaining module(s), appending one scope at a "
                 "time, then run check" % len(remaining))
@@ -845,8 +879,19 @@ def next_step(build, digest, remaining):
         if open_questions:
             return "answer %d remaining question(s) in manual-analysis.json" % \
                 len(open_questions)
-        if not any((p or {}).get("sections") for p in (manual.get("pages") or {}).values()):
+        # Every page, not any page. `any(...)` reported the run finished as soon as one
+        # page had a section, with nineteen still uncomposed and a `document` step that
+        # would reject them.
+        pages = manual.get("pages") or {}
+        if not pages:
+            # No map at all means nothing is composed, not that nothing needs composing.
             return "compose each page's sections from the answers"
+        bare = [page for page, held in sorted(pages.items())
+                if not (held or {}).get("sections")]
+        if bare:
+            return ("compose the sections for %d remaining page(s) from the answers: %s%s"
+                    % (len(bare), ", ".join(bare[:3]),
+                       ", ..." if len(bare) > 3 else ""))
     return "run the next component: it has the inputs it needs"
 
 

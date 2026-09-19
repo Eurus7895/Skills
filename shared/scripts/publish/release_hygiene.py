@@ -35,6 +35,11 @@ CONFIG_NAME = "conf.py"
 # directory named like this inside the source tree is output, whatever it holds.
 BUILD_NAMES = ("_build", "build", ".build", "html", "_site")
 GENERATED_SUFFIXES = (".html", ".doctree", ".js.map")
+# Sphinx source directories that legitimately hold HTML. `_templates/layout.html` is the
+# documented way to override a theme, and `_static/` is where a project puts its own assets
+# -- both are inputs a person wrote, and flagging them as build output failed the gate on
+# an ordinary customised project.
+SOURCE_DIRS = ("_templates", "_static", "_ext", "_themes")
 # Sphinx writes these into a build directory and nowhere else, so finding one says the
 # directory holding it is output rather than source.
 BUILD_MARKERS = ("environment.pickle", ".buildinfo", "objects.inv", "searchindex.js")
@@ -88,13 +93,23 @@ def build_dirs(docs):
 
 
 def indexes(docs):
-    """Every index page in the tree, nearest the root first."""
-    found = []
-    for base, names in _walk(docs):
-        for name in names:
-            if name in INDEX_NAMES:
-                found.append(os.path.relpath(os.path.join(base, name), docs))
-    return sorted(found, key=lambda p: (p.count(os.sep), p))
+    """Index pages competing to be the root document -- the top level ones only.
+
+    **A nested `guide/index.rst` is an ordinary page, not a rival root.** Sphinx resolves
+    exactly one root document, `root_doc` in `conf.py` and `index` by default; a section
+    page that happens to be called `index` is referenced from that root like any other.
+    Counting every one of them reported `H002` on the commonest Sphinx layout there is, and
+    because a hygiene finding fails the gate, such a project could never seal or publish.
+
+    Two at the top level is a real ambiguity -- `index.rst` beside `index.md`, and nothing
+    saying which the build reads -- so that is what this returns.
+    """
+    try:
+        names = sorted(os.listdir(docs))
+    except OSError:
+        return []
+    return [name for name in names
+            if name in INDEX_NAMES and os.path.isfile(os.path.join(docs, name))]
 
 
 def configs(docs):
@@ -139,7 +154,7 @@ def check(docs, root=".", expected_pages=()):
         # Not a warning. A reader lands on one of them and the pipeline maintains the
         # other; which one wins is decided by whoever typed the URL.
         add(findings, "H002",
-            "%d index pages, and nothing says which one a reader starts from: %s"
+            "%d root index pages, and nothing says which one the build reads: %s"
             % (len(found_indexes), ", ".join(found_indexes)), docs)
 
     found_configs = configs(docs)
@@ -169,6 +184,9 @@ def check(docs, root=".", expected_pages=()):
         if base in inside_build or any(base.startswith(seen + os.sep)
                                        for seen in inside_build):
             continue                     # inside the build tree, where output belongs
+        relative = os.path.relpath(base, docs)
+        if relative != "." and relative.split(os.sep)[0] in SOURCE_DIRS:
+            continue                     # a Sphinx source directory; its HTML is an input
         for name in names:
             if name.endswith(GENERATED_SUFFIXES):
                 add(findings, "H006",

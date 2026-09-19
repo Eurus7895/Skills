@@ -117,6 +117,29 @@ class LedgerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             authored.read_row(row, known)
 
+    def test_a_forged_default_waiver_is_refused(self):
+        """It bypassed both the owner and the reason check on any page.
+
+        `read_row` trusted the row's own boolean, so `default_waiver: true` with
+        `status: waived` on a hand-edited FAQ row cleared the publication gate while the
+        page stayed unwritten. Only `DEFAULT_WAIVED` decides which page may carry it.
+        """
+        known = {p['id']: p for p in manual.AUTHORED}
+        for page_id in ('appendix/faq', 'appendix/troubleshooting', 'appendix/changelog'):
+            row = {'authored_version': 1, 'page_id': page_id, 'status': 'waived',
+                   'default_waiver': True}
+            with self.assertRaises(ValueError) as caught:
+                authored.read_row(row, known)
+            self.assertIn('default_waiver', str(caught.exception), page_id)
+
+    def test_the_designated_page_may_still_carry_it(self):
+        known = {p['id']: p for p in manual.AUTHORED}
+        for page_id in authored.DEFAULT_WAIVED:
+            row = authored.read_row(
+                {'authored_version': 1, 'page_id': page_id, 'status': 'waived',
+                 'default_waiver': True}, known)
+            self.assertEqual(row['status'], 'waived')
+
     def test_a_complete_waiver_is_accepted(self):
         known = {p['id']: p for p in manual.AUTHORED}
         row = authored.read_row(

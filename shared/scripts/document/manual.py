@@ -45,6 +45,26 @@ QUESTIONS = json.loads(Path(__file__).with_name("manual_questions.json").read_te
 # evidence this run already verified for them, and what it found nothing for.
 GENERATED = [page for page in QUESTIONS if not page.get("authored")]
 AUTHORED = [page for page in QUESTIONS if page.get("authored")]
+
+# The documentation-wide review is first in the template and belongs last in the document.
+# Named once here rather than implied by a `pages[1:] + pages[:1]` slice, because the
+# authored pages need the same answer and a slice cannot give it to them.
+REVIEW_PAGE = GENERATED[0]["id"]
+
+
+def template_order():
+    """Every page id to its place in the delivered document, generated and authored alike.
+
+    **One order over the whole template, not one per kind.** Generated pages were rotated
+    so the review came last, and authored pages were then given positions after every
+    generated one -- which put compliance, glossary, troubleshooting, FAQ, references and
+    changelog *after* the review, so the final review was no longer final. The template
+    already interleaves them (`appendix/output_structure` sits between `references` and
+    `changelog`), and that interleaving is the intended reading order.
+    """
+    ordered = [page["id"] for page in QUESTIONS if page["id"] != REVIEW_PAGE]
+    ordered.append(REVIEW_PAGE)
+    return {page_id: position for position, page_id in enumerate(ordered, 1)}
 DIAGRAMS = {"architecture/class_diagram": "diagram-manifest.json",
             "architecture/data_flow": "flow-diagram-manifest.json"}
 
@@ -742,10 +762,12 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
                                "text": "Unknown — evidence required. Required diagram is missing."})
         pages.append({"id": spec["id"], "title": spec["title"], "mandatory": True,
                       "order": order, "blocks": blocks, "covers": [], "analysis_ids": []})
-    # The review belongs at the end of the appendix, not ahead of Getting Started.
-    pages = pages[1:] + pages[:1]
-    for order, page in enumerate(pages, 1):
-        page["order"] = order
+    # The review belongs at the end of the appendix, not ahead of Getting Started -- and
+    # the authored pages belong where the template puts them, which is before it.
+    places = template_order()
+    pages.sort(key=lambda page: places[page["id"]])
+    for page in pages:
+        page["order"] = places[page["id"]]
     # Carry the cited rows, not every row: a reference has to resolve inside the
     # document it is written in, and shipping the whole claim set would put material on
     # the page that no answer stands on.
@@ -788,13 +810,13 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
     authored_by_page = {row["page_id"]: row for row in authored_rows}
     mode, settled, authored_total = authored.authored_mode(authored_rows)
     return {"preset": "manual", "pages": pages,
-            # `order` continues past the generated pages: the renderer sorts generated
-            # and authored together into one toctree, and a page without it sorts to
-            # zero -- which would put the glossary ahead of the introduction.
+            # `order` comes from the same template map the generated pages use, so the
+            # renderer's single sort puts every page where the template says -- the
+            # appendix interleaved as written, and the review last of all.
             "authored_pages": [{"id": page["id"], "title": page["title"],
-                                "order": len(pages) + position,
+                                "order": places[page["id"]],
                                 "status": authored_by_page[page["id"]]["status"]}
-                               for position, page in enumerate(AUTHORED, 1)],
+                               for page in AUTHORED],
             "authored_ledger": authored_rows,
             "authored_coverage": {"mode": mode, "settled": settled,
                                   "total": authored_total,
@@ -841,7 +863,11 @@ def validate_document(doc):
                 problems.append("manual contains a section without evidence")
             if not block.get("manual_answers"):
                 problems.append("manual contains a section naming no answer")
-    if [p.get("id") for p in pages] != [p["id"] for p in GENERATED[1:] + GENERATED[:1]]:
+    # The generated pages in template order, which is the same map `build` sorts by rather
+    # than a second statement of the same rule that could disagree with it.
+    places = template_order()
+    expected_order = sorted((p["id"] for p in GENERATED), key=lambda i: places[i])
+    if [p.get("id") for p in pages] != expected_order:
         problems.append("manual pages must follow the complete template order")
     # Every page still has to say something, but what it says is now composed rather
     # than one block per question -- so the check is that nothing is blank, not that the
