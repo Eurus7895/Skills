@@ -96,12 +96,17 @@ REFERENCE_MARKERS = (
 # are separate states because collapsing them is how a run reports full diagram validation
 # on a machine where nothing could draw a diagram at all.
 #
-#   accepted   the markup parsed. A stub directive swallowed it, and that is all that is
-#              known: the source could say anything
-#   drawn      the real renderer loaded the source and produced an image
-#   none       the document asks for no diagram renderer, so there is nothing to report
-#   unknown    the check never ran. `none` here would be a claim, and the claim would be
-#              wrong on any document that does hold a diagram
+#   accepted   the build ran to the end, the markup parsed, and no picture came of it. A
+#              stub directive swallowing the source is one way to land here: all that is
+#              known is that it parsed, and the source could say anything
+#   drawn      an image the renderer writes was found in the build tree. Established by
+#              finding the file, never by reasoning that the extension was installed and
+#              must therefore have worked
+#   none       there is no diagram here to report on -- no renderer was asked for, or no
+#              page holds a directive one would draw
+#   unknown    nothing was established: no builder, or a build that produced no picture
+#              and cannot be shown to have finished. `none` here would be a claim, and the
+#              claim would be wrong on any document that does hold a diagram
 #
 # A further state -- visually reviewed -- is a person's, and belongs in the review channel
 # rather than here. A drawn diagram with unreadable labels is still a drawn diagram, so the
@@ -197,6 +202,14 @@ def classify(warnings):
 # `uml` is an unknown directive, `-W` turns that into an error, and every page fails over
 # a renderer that was optional all along.
 OPTIONAL_DIRECTIVES = {"sphinxcontrib.plantuml": ("uml",)}
+
+# What each renderer leaves behind when it actually draws something, as a filename prefix
+# inside the build tree's image directory. This is how `drawn` is established: by finding
+# the picture, not by reasoning that the extension was installed and therefore must have
+# worked. An extension can load and still draw nothing -- a renderer binary that is absent,
+# a `.puml` that is unreadable, a build that stopped before the writing phase -- and each of
+# those reads as `drawn` to anything that only checks what was requested.
+RENDERER_ARTIFACTS = {"sphinxcontrib.plantuml": ("plantuml-",)}
 
 STUB_MODULE = "_optional_directives"
 STUB_SOURCE = '''"""Written by sphinx_support for one check. Never part of a project."""
@@ -529,17 +542,62 @@ def _note(detail, stubbed):
                ", ".join(sorted(OPTIONAL_DIRECTIVES))))
 
 
-def _diagram_state(extensions, stubbed):
-    """`drawn`, `accepted` or `none` -- what this build establishes about the pictures.
+def _drawn_images(build_dir, extensions):
+    """How many pictures an optional renderer actually left in the build tree.
 
-    A document that asks for no diagram renderer has no diagrams to report on, and saying
-    `accepted` there would invent a caveat. One that asks and got a stub had its source
-    checked as markup and nothing more.
+    Counted rather than inferred. A theme ships its own images, so only the prefixes the
+    renderers themselves write are matched.
+    """
+    prefixes = tuple(prefix for extension in extensions
+                     for prefix in RENDERER_ARTIFACTS.get(extension, ()))
+    if not prefixes:
+        return 0
+    found = 0
+    for base, _, names in os.walk(build_dir):
+        del base
+        found += sum(1 for name in names if name.startswith(prefixes))
+    return found
+
+
+def _diagram_state(extensions, images=0, complete=False, has_diagram=True):
+    """`drawn`, `accepted`, `none` or `unknown` -- what this build establishes.
+
+    `images` is how many pictures were found, `complete` whether the build ran to the end,
+    and `has_diagram` whether any page actually holds a directive an optional renderer would
+    draw. The order of the tests is the point:
+
+    * A tree with no diagram in it has nothing to report on, and saying `accepted` there
+      would invent a caveat about pictures that do not exist. Both halves of this matter:
+      the renderer not being requested, and it being requested over a document with no
+      diagram in it. The second is the commoner case by far -- `render_docs` asks for the
+      extension on every run -- and it used to report `drawn` on a document holding no
+      diagram at all, since nothing consulted the pages. Neither half needs a build: they
+      are facts about the configuration and the source.
+    * A picture that is on disk was drawn. That is an observation, so it holds whatever the
+      exit code was: a build can report bad markup on one page and still have drawn the
+      diagram on another.
+    * Otherwise, with no picture found, the answer depends on whether the build finished. A
+      build that ran to the end and drew nothing establishes `accepted` -- the source
+      parsed and no image came of it. A build that stopped establishes nothing, and
+      `accepted` would be a claim about markup that may never have been read.
+
+    That last distinction is why `stubbed` is not a parameter. A stub draws nothing, which
+    a picture count already says; it is one reason for `accepted` rather than a separate
+    state. Nor is the build `status` a parameter, and that was a defect: `-W` aborts at the
+    first error on Sphinx 7 and runs to the end on Sphinx 9, so the same failing status
+    means nothing was drawn on one leg of the matrix and everything was on the other.
+    Status is not evidence about pictures. The pictures are.
     """
     wanted = [e for e in extensions if e in OPTIONAL_DIRECTIVES]
     if not wanted:
         return NO_DIAGRAMS
-    return ACCEPTED if stubbed else DRAWN
+    if images:
+        return DRAWN
+    if not has_diagram:
+        return NO_DIAGRAMS
+    if not complete:
+        return UNKNOWN
+    return ACCEPTED
 
 
 def _with_sphinx(out_dir, extensions):
@@ -558,9 +616,16 @@ def _with_sphinx(out_dir, extensions):
             return Result(RUNNER_FAILURE, "sphinx-build could not be run: %s" % exc)
 
         output = (proc.stderr or proc.stdout).strip()
+        # Counted once, from the tree the build just wrote, and before the `finally` below
+        # removes it. A picture on disk is the only thing that establishes `drawn`.
+        images = _drawn_images(build, extensions)
+        # Read from the source the caller handed in, not from the staged copy: the answer is
+        # about the project's pages.
+        drawable = _has_diagram(_source_pages(out_dir))
         if proc.returncode == 0:
             return Result(PASSED, _note("sphinx-build -W reported no warnings", stubbed),
-                          diagrams=_diagram_state(extensions, stubbed),
+                          diagrams=_diagram_state(extensions, images, complete=True,
+                                                  has_diagram=drawable),
                           stubbed=stubbed)
         warnings = warning_lines(output)
         if any(marker in output.lower() for marker in FATAL_FRAMING):
@@ -569,11 +634,15 @@ def _with_sphinx(out_dir, extensions):
         advisories = [line for line in warnings if renderer_advisory(line)]
         warnings = [line for line in warnings if not renderer_advisory(line)]
         if advisories and not warnings:
-            # The renderer was there and still did not produce a picture, so this is
-            # `accepted` whatever is installed: the source parsed and nothing was drawn.
+            # The renderer said so itself, so the build's own report is what is read here
+            # rather than the picture count: this build got as far as trying to draw, which
+            # is `accepted` whatever is installed. A count is still consulted, because one
+            # `.puml` failing does not mean its neighbours did.
             return Result(PASSED, _note("sphinx-build -W reported no defect", stubbed)
                           + ". A diagram was not drawn: %s" % advisories[0],
-                          diagrams=ACCEPTED, stubbed=stubbed)
+                          diagrams=_diagram_state(extensions, images, complete=True,
+                                                  has_diagram=drawable),
+                          stubbed=stubbed)
         if not warnings:
             # Non-zero with nothing to read is the builder itself failing, not the
             # document. Reporting it as bad markup sends the reader to the wrong file.
@@ -581,19 +650,14 @@ def _with_sphinx(out_dir, extensions):
                           "sphinx-build exited %d without reporting a warning: %s"
                           % (proc.returncode, output[:400] or "no output"))
         status = classify(warnings)
-        # A build that stopped drew nothing. `-W` aborts on the first warning it turns
-        # into an error, so on `invalid_markup` or `broken_reference` the renderer may
-        # never have been reached, and `drawn` would be a measurement nobody took. Only
-        # `unwired` is a build that completed -- its pages are sound and one integration
-        # step has not run -- so that one keeps its measured state.
-        #
-        # This is version-visible rather than theoretical: a missing `.puml` is reported
-        # by Sphinx 9 with its own fatal framing, which lands on `runner_failure` and
-        # `unknown`, and by Sphinx 7 as a plain warning, which landed here and claimed
-        # `drawn` off the same aborted build.
-        measured = _diagram_state(extensions, stubbed) if status == UNWIRED else UNKNOWN
+        # `complete=False`: a non-zero `-W` build may have stopped at the first error or run
+        # to the end, and which one it did is the Sphinx version's business, not something
+        # `status` reveals. So no picture found means nothing established, and a picture
+        # found still means `drawn` -- that half is an observation and needs no completion.
         return Result(status, _explain(status, warnings), warnings,
-                      diagrams=measured, stubbed=stubbed)
+                      diagrams=_diagram_state(extensions, images,
+                                              has_diagram=drawable),
+                      stubbed=stubbed)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -645,6 +709,15 @@ def _teach_docutils_about_sphinx():
         directives.register_directive(name, Ignored)
     for role in ("doc", "ref", "any", "download"):
         roles.register_local_role(role, reference)
+
+
+def _source_pages(out_dir):
+    """Every page in the tree, recursively -- a preset writes into subdirectories."""
+    pages = []
+    for base, _, names in os.walk(out_dir):
+        pages.extend(os.path.join(base, name) for name in names
+                     if name.endswith(".rst") or name.endswith(".md"))
+    return pages
 
 
 def _has_diagram(pages):

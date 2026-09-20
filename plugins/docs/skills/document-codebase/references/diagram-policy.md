@@ -119,20 +119,27 @@ separately so a run on a machine with no renderer cannot read as full diagram va
 
 | State | Means |
 | --- | --- |
-| `drawn` | the real renderer loaded the source and produced an image |
-| `accepted` | the markup parsed and a stub swallowed it. The source could say anything |
-| `none` | the document asks for no diagram renderer, so there is nothing to report |
-| `unknown` | nothing was established — no builder installed, the build failed to run, or it stopped before finishing |
+| `drawn` | an image the renderer writes was found in the build tree |
+| `accepted` | the build finished, the markup parsed, and no picture came of it. A stub swallowing the source is one way here: it parsed, and the source could say anything |
+| `none` | there is no diagram here to report on — no renderer was asked for, or no page holds a directive one would draw |
+| `unknown` | nothing was established — no builder installed, or a build that produced no picture and cannot be shown to have finished |
 
 `unknown` is separate from `none` deliberately. A skipped check that reported `none` would
 be *claiming* the document holds no diagrams, and that claim is wrong on any document that
 does. Nothing looked, so nothing is said.
 
-**A build that stopped is `unknown`, not a measurement.** `-W` aborts on the first warning
-it turns into an error, so on `invalid_markup` or `broken_reference` the renderer may never
-have been reached and `drawn` would be a number nobody took. `unwired` is the one failing-
-looking outcome that keeps its measured state: the build completed and the pages are sound,
-with one integration step still to run.
+**`drawn` is found, not inferred.** The state is decided by looking in the build tree for
+the files the renderer writes. Deciding it from the extension being installed is the
+mistake this check exists to catch, one level up: an extension loads and still draws
+nothing when the renderer binary is absent, when a `.puml` is unreadable, or when the build
+stops before the writing phase — and every one of those reads as success to anything that
+only checks what was *requested*.
+
+**A failing status is not a verdict on the pictures, in either direction.** `-W` aborts at
+the first error on Sphinx 7 and runs to the end on Sphinx 9, so the same `invalid_markup`
+build draws nothing on one and everything on the other. The status cannot tell you which,
+so it is not consulted: a picture that exists is `drawn` whatever the exit code, and no
+picture on a build that cannot be shown to have finished is `unknown`.
 
 A renderer that is installed but still produced no picture — `plantuml command … cannot be
 run` — is `accepted`, not `drawn`. The extension being absent and the tool behind it being

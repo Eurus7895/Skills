@@ -11,21 +11,74 @@ import sphinx_support as support
 
 
 class StateTests(unittest.TestCase):
-    def test_a_stubbed_directive_is_accepted_not_drawn(self):
-        """The stub swallowed the source. All that is known is that it parsed."""
+    def test_a_finished_build_that_drew_nothing_is_accepted_not_drawn(self):
+        """The source parsed and no image came of it. A stub is one way to land here."""
         self.assertEqual(
-            support._diagram_state(("sphinxcontrib.plantuml",), ["uml"]),
+            support._diagram_state(("sphinxcontrib.plantuml",), 0, complete=True),
             support.ACCEPTED)
 
-    def test_the_real_renderer_means_drawn(self):
+    def test_a_picture_on_disk_is_what_makes_it_drawn(self):
+        """Not the extension being installed, which is what this used to read.
+
+        `drawn` is documented as the renderer having produced an image, and the old rule
+        never looked for one: an extension that loaded and drew nothing -- an absent
+        renderer binary, an unreadable `.puml` -- reported `drawn` all the same.
+        """
         self.assertEqual(
-            support._diagram_state(("sphinxcontrib.plantuml",), []), support.DRAWN)
+            support._diagram_state(("sphinxcontrib.plantuml",), 1, complete=True),
+            support.DRAWN)
+
+    def test_a_picture_is_drawn_even_off_an_unfinished_build(self):
+        """An observation needs no completion. The file is either there or it is not."""
+        self.assertEqual(
+            support._diagram_state(("sphinxcontrib.plantuml",), 2, complete=False),
+            support.DRAWN)
+
+    def test_no_picture_and_no_completion_establishes_nothing(self):
+        """`accepted` here would claim the markup parsed, and it may never have been read."""
+        self.assertEqual(
+            support._diagram_state(("sphinxcontrib.plantuml",), 0, complete=False),
+            support.UNKNOWN)
 
     def test_a_document_wanting_no_renderer_reports_none(self):
         """Saying `accepted` here would invent a caveat about pictures that do not exist."""
-        self.assertEqual(support._diagram_state(("myst_parser",), []),
+        self.assertEqual(support._diagram_state(("myst_parser",), 0, complete=True),
                          support.NO_DIAGRAMS)
-        self.assertEqual(support._diagram_state((), []), support.NO_DIAGRAMS)
+        self.assertEqual(support._diagram_state((), 0, complete=True),
+                         support.NO_DIAGRAMS)
+
+    def test_a_tree_with_no_diagram_in_it_reports_none_though_the_renderer_was_asked_for(
+            self):
+        """`render_docs` asks for the extension on every run, diagram or not.
+
+        So this is the common case, not the edge one, and it had the worst answer of any:
+        nothing consulted the pages, so a manual holding no diagram at all reported `drawn`.
+        """
+        self.assertEqual(
+            support._diagram_state(("sphinxcontrib.plantuml",), 0, complete=True,
+                                   has_diagram=False),
+            support.NO_DIAGRAMS)
+
+    def test_that_stays_none_on_a_build_that_never_finished(self):
+        """It is a fact about the source, which is readable without building anything."""
+        self.assertEqual(
+            support._diagram_state(("sphinxcontrib.plantuml",), 0, complete=False,
+                                   has_diagram=False),
+            support.NO_DIAGRAMS)
+
+    def test_a_tree_with_no_diagram_reports_none_end_to_end(self):
+        """The unit rule above, through `check`, where the pages are read for real."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "docs"
+            out.mkdir()
+            (out / "index.rst").write_text("Docs\n====\n\n.. toctree::\n\n   p\n")
+            (out / "p.rst").write_text("P\n=\n\nProse and no pictures.\n")
+            result = support.check(str(out), extensions=("sphinxcontrib.plantuml",))
+            if result.status == support.SKIPPED:
+                self.skipTest("no builder installed: %s" % result.detail[:120])
+            self.assertEqual(result.status, support.PASSED,
+                             "%s: %s" % (result.status, result.detail[:200]))
+            self.assertEqual(result.diagrams, support.NO_DIAGRAMS)
 
     def test_a_result_defaults_to_unknown(self):
         """`none` on a check that never ran is a claim, and wrong wherever a diagram
@@ -55,13 +108,20 @@ class StateTests(unittest.TestCase):
             self.assertNotEqual(result.diagrams, support.NO_DIAGRAMS)
             self.assertEqual(result.diagrams, support.UNKNOWN)
 
-    def test_a_failed_build_reports_no_diagram_measurement(self):
-        """`-W` stops at the first error, so the renderer may never have been reached.
+    def test_a_failed_build_reports_only_what_it_can_show(self):
+        """A failing status is not a verdict on the pictures, in either direction.
 
-        Unlike the case above, this document fails on markup no version of Sphinx accepts,
-        so it exercises the `invalid_markup` leg wherever a builder exists rather than
-        depending on which major reports what. `drawn` here would be a measurement nobody
-        took -- the build that would have taken it never finished.
+        This document fails on markup no version of Sphinx accepts, so the `invalid_markup`
+        leg runs wherever a builder exists. What that leg may report was the thing this test
+        got wrong once already: it asserted `unknown`, on the theory that `-W` stops before
+        the renderer is reached. That is Sphinx 7's behaviour. Sphinx 9 runs to the end and
+        draws the diagram, so `drawn` there is a fact about a file that exists, and the
+        assertion was false on half the matrix -- passing only because the code it tested
+        was also wrong, and wrong in the same direction.
+
+        So the invariant is one-sided, and that is all it can be: whatever is reported must
+        be backed by something. A picture that exists gives `drawn`; nothing found gives
+        `unknown`; `none` is never available on a document holding a `uml` directive.
         """
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "docs"
@@ -75,8 +135,34 @@ class StateTests(unittest.TestCase):
             if result.status == support.SKIPPED:
                 self.skipTest("no builder installed: %s" % result.detail[:120])
             self.assertTrue(result.failed, "%s: %s" % (result.status, result.detail[:200]))
-            self.assertEqual(result.diagrams, support.UNKNOWN,
-                             "%s: %s" % (result.status, result.detail[:200]))
+            self.assertNotEqual(result.diagrams, support.NO_DIAGRAMS)
+            self.assertIn(result.diagrams, (support.DRAWN, support.UNKNOWN),
+                          "%s: %s" % (result.diagrams, result.detail[:200]))
+
+    def test_an_unwired_build_reports_what_was_drawn_not_what_was_wanted(self):
+        """The case that showed status is not evidence about pictures.
+
+        An orphan page makes `-W` non-zero. Sphinx 7 stops there and draws nothing; Sphinx 9
+        runs to the end and draws everything. Both report `unwired`, so any rule keyed on
+        the status is right on one leg of the matrix and wrong on the other -- measured here
+        rather than argued: with no renderer this is `unknown`, with one that drew it is
+        `drawn`, and it is never `none` on a document holding a `uml` directive.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "docs"
+            out.mkdir()
+            (out / "index.rst").write_text("Docs\n====\n\n.. toctree::\n\n   wired\n")
+            (out / "wired.rst").write_text("Wired\n=====\n\n.. uml:: a.puml\n")
+            (out / "orphan.rst").write_text("Orphan\n======\n\nIn no toctree.\n")
+            (out / "a.puml").write_text("@startuml\nclass A\n@enduml\n")
+            result = support.check(str(out), extensions=("sphinxcontrib.plantuml",))
+            if result.status == support.SKIPPED:
+                self.skipTest("no builder installed: %s" % result.detail[:120])
+            self.assertEqual(result.status, support.UNWIRED,
+                             "%s: %s" % (result.status, result.detail[:300]))
+            self.assertNotEqual(result.diagrams, support.NO_DIAGRAMS)
+            self.assertIn(result.diagrams, (support.DRAWN, support.UNKNOWN),
+                          "%s: %s" % (result.diagrams, result.detail[:200]))
 
     def test_the_invariant_holds_with_no_builder_at_all(self):
         """The one leg that needs no Sphinx, so it is pinned on every machine.
@@ -100,8 +186,9 @@ class StateTests(unittest.TestCase):
 
     def test_a_directory_that_is_not_there_reports_unknown_too(self):
         """A runner failure is not evidence that a project has no diagrams."""
-        result = support.check("/nonexistent/docs/tree",
-                              extensions=("sphinxcontrib.plantuml",))
+        with tempfile.TemporaryDirectory() as tmp:
+            result = support.check(str(Path(tmp) / "absent"),
+                                   extensions=("sphinxcontrib.plantuml",))
         self.assertEqual(result.status, support.RUNNER_FAILURE)
         self.assertEqual(result.diagrams, support.UNKNOWN)
 
