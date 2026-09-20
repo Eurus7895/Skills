@@ -11,6 +11,7 @@ import unittest
 from component_scripts import component_paths, script
 sys.path[:0] = component_paths()
 import manual
+import authored
 import build_document_model as model
 import render_docs
 import check_prose
@@ -308,6 +309,52 @@ class ManualTests(unittest.TestCase):
         # And every page is seeded empty: composing is the work.
         self.assertTrue(all(p['sections'] == [] for p in draft['pages'].values()))
 
+    def test_the_initializer_cli_puts_claims_and_statements_in_the_reading_list(self):
+        """The two largest sources, and for a while the CLI passed neither.
+
+        An end-to-end run on a real repository offered 2 facts where 15 existed -- both of
+        them configuration settings -- because `manual.py --init` had no `--claims` or
+        `--analysis` flag and the driver supplied none. `scaffold` accepted them all along.
+
+        It matters more than a short list: `observed` and `declared` each require a
+        `verified_id`, so an answer whose evidence the draft never mentioned cannot be
+        written at that basis at all. The model has no way to know the id exists, and the
+        only honest answers left are `inferred` and `unknown`.
+        """
+        (self.root / 'index.json').write_text(json.dumps(self.index))
+        (self.root / 'claims.jsonl').write_text(json.dumps(
+            {'id': 'claim:verified', 'status': 'verified', 'index_hash': 'scan'}) + '\n')
+        (self.root / 'analysis.jsonl').write_text(json.dumps(
+            {'analysis_version': 1, 'path': 'README.md', 'index_hash': 'scan',
+             'statements': [{'id': 'stmt:observed', 'kind': 'responsibility',
+                             'status': 'observed', 'text': 't', 'evidence': []}]}) + '\n')
+        out = self.root / 'draft.json'
+        proc = subprocess.run(
+            [sys.executable, script('manual.py'), '--init', str(out),
+             '--index', str(self.root / 'index.json'),
+             '--claims', str(self.root / 'claims.jsonl'),
+             '--analysis', str(self.root / 'analysis.jsonl')],
+            capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        facts = json.loads(out.read_text())['facts']
+        self.assertEqual(facts.get('claim'), ['claim:verified'])
+        self.assertEqual(facts.get('statement'), ['stmt:observed'])
+        self.assertIn('2 verified fact(s)', proc.stdout)
+
+    def test_the_initializer_cli_refuses_rows_from_another_scan(self):
+        """A claims file from an earlier run names real ids and would read as citable."""
+        (self.root / 'index.json').write_text(json.dumps(self.index))
+        (self.root / 'claims.jsonl').write_text(json.dumps(
+            {'id': 'claim:old', 'status': 'verified', 'index_hash': 'a-different-scan'})
+            + '\n')
+        proc = subprocess.run(
+            [sys.executable, script('manual.py'), '--init', str(self.root / 'd.json'),
+             '--index', str(self.root / 'index.json'),
+             '--claims', str(self.root / 'claims.jsonl')],
+            capture_output=True, text=True)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn('a-different-scan', proc.stdout + proc.stderr)
+
     def test_a_v1_draft_is_refused_rather_than_relabelled(self):
         """A v1 `confirmed` was mechanical. Carrying it over would forge an approval."""
         self.answers['manual_version'] = 1
@@ -455,10 +502,19 @@ class ManualTests(unittest.TestCase):
         proc = subprocess.run([sys.executable,script('render_docs.py'),'--doc',str(doc),
             '--out',str(self.root/'docs')],capture_output=True,text=True)
         self.assertEqual(proc.returncode,0,proc.stdout+proc.stderr)
-        # Generated pages plus index.rst. An authored page is never written over.
+        # Generated pages, index.rst, and a scaffold for every authored page nobody has
+        # settled. `compliance` is waived by default, so it gets none.
+        scaffolded = [p for p in manual.AUTHORED
+                      if p['id'] not in authored.DEFAULT_WAIVED]
         self.assertEqual(len(list((self.root/'docs').rglob('*.rst'))),
-                         len(manual.GENERATED) + 1)
-        self.assertFalse((self.root/'docs/appendix/glossary.rst').exists())
+                         len(manual.GENERATED) + 1 + len(scaffolded))
+        glossary = self.root/'docs/appendix/glossary.rst'
+        self.assertTrue(glossary.exists())
+        body = glossary.read_text()
+        # A brief, not a draft: it says it is unwritten and it composes no definition.
+        self.assertIn('DRAFT', body)
+        self.assertIn('5.2.1', body)
+        self.assertFalse((self.root/'docs/appendix/compliance.rst').exists())
         self.assertTrue((self.root/'docs/architecture/class_diagram.rst').exists())
         self.assertTrue((self.root/'docs/architecture/data_flow.rst').exists())
 

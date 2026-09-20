@@ -11,6 +11,55 @@ fail. Repair the model or manual analysis and rerun `document` and `render` inst
 renderer owns headings, tables, references, escaping and the toctree. Hand-written
 directives are how a build starts failing on markup nobody remembers adding.
 
+## Release hygiene — what is wrong with a tree whose pages are all right
+
+`release_hygiene.py` runs in `review`, between the prose check and the gate, and reports `H0xx` findings about
+the **tree** rather than its content. Every other check here asks whether a claim is
+supported, whether markup parses, whether a reference resolves. None of them notices that:
+
+| | |
+| --- | --- |
+| `H001` | no index: no entry point for a reader, no root document for Sphinx |
+| `H002` | two indexes — a reader lands on one, the pipeline maintains the other |
+| `H003` | two `conf.py` — a build uses whichever it is pointed at, so fixing the other does nothing |
+| `H004` | build output committed — every later diff carries generated lines, and a stale page outlives its source |
+| `H005` | build output neither committed nor ignored, so the first `git add -A` commits it |
+| `H006` | generated HTML in the source tree, which the next build reads as more source |
+| `H007` | `doc.json` names a page that is not on disk — a toctree entry pointing at nothing |
+
+Each is a fact about the filesystem, checkable in seconds, and none is a judgement about
+anybody's prose. A build directory is found **by name or by marker**: `_build` is output
+whatever is in it, and a directory holding `environment.pickle` is output whatever it is
+called. Nesting does not hide one.
+
+Findings **fail** the quality gate, so a bad tree never reaches a seal. The stage itself tolerates exit 1 so
+the gate still runs and the report names the problem rather than the component ending in silence.
+
+It is pointed at the **staging draft**, not at `docs/`. The shape problems above have to block publication, and
+once `publish` has promoted the tree atomically it is too late to say so. `H004` and `H005` ask git about
+committed build output and do not fire on a staging directory that is ignored in its entirety — those are
+questions about a published tree, not about whether this draft may ship.
+
+## Navigation is grouped by reader purpose
+
+The generated index carries one toctree per group rather than a single `Contents`:
+
+| Group | Prefix |
+| --- | --- |
+| Getting Started | `getting_started/` |
+| Architecture | `architecture/` |
+| Usage | `usage/` |
+| Development | `development/` |
+| Appendix | `appendix/` |
+
+**The group comes from the page id, not from a new field.** The manual template already
+encodes it there, and a second declaration of the same fact is one that can disagree with
+the first. Pages whose ids carry no group prefix — which is every non-manual preset — fall
+through to a single `Contents` toctree, exactly as before.
+
+Grouping changes how pages are presented, never which ones appear: a page that exists and
+is in no toctree is unreachable, and that is still the check the renderer makes.
+
 ## Formats
 
 `--format` chooses the markup: `rst` (the default) or `myst`. The same `doc.json` renders
@@ -50,10 +99,39 @@ Both are off by default, for that reason.
 
 - **`--wire-toctree`** adds the generated pages to an index that already exists. It is
   idempotent, keeps every entry and every line of prose that was there, and **refuses** an
-  index with no toctree, with more than one, or that it cannot parse — leaving the file
-  untouched and naming the pages to add by hand. Without the flag the pages are written and
-  the run prints what is missing; the build check then reports `unwired`, and wiring is what
-  turns that into `passed`.
+  index with no toctree, or that it cannot parse — leaving the file untouched and naming the
+  pages to add by hand. Without the flag the pages are written and the run prints what is
+  missing; the build check then reports `unwired`, and wiring is what turns that into
+  `passed`.
+
+  With **more than one** toctree it wires by `:caption:`, one group at a time, and refuses
+  only when no caption matches. That case used to be refused outright — correctly, when the
+  only multi-toctree index was somebody else's and nothing said which one was meant. A
+  grouped index is now what this pipeline itself writes, so refusing them all would mean a
+  second run could not wire into the index the first run produced.
+- **`--write-conf`** also writes `Makefile`, `make.bat` and `_static/README.md`, under the
+  same never-overwrite rule as the `conf.py` itself — each one only where no file is, and a
+  dangling symlink counts as a file. A `conf.py` makes the pages buildable by somebody who
+  already knows the `sphinx-build` invocation; these make them buildable by somebody who
+  does not, which is most readers of a repository they did not set up.
+
+  | Target | |
+  | --- | --- |
+  | `make html` | build it |
+  | `make strict` | build with `-W`, so a warning fails |
+  | `make clean` | remove the build directory |
+  | `make linkcheck` | report every link that does not resolve |
+  | `make spelling`, `make livehtml` | optional; each names the package to install |
+
+  **`make strict` is the one worth knowing about.** A page in no toctree, a broken
+  reference and a missing image are all warnings by default, and all three mean a reader
+  hits something that is not there.
+
+  The optional targets are written with their install line in a comment rather than left
+  out: an absent target tells a reader nothing, and one that names its dependency tells them
+  what to install. Nothing is enabled in `conf.py`, so an uninstalled target costs a failed
+  `make` and never a failed build.
+
 - **`--assume-parser`** writes MyST into a project whose `conf.py` does not visibly enable
   `myst_parser`. `conf.py` is read as text, never imported — running a stranger's
   configuration to find out what it configures is not a check, it is execution.

@@ -121,9 +121,9 @@ is meant to be committed.
 
 Everything except the finished document is written to **`.docs-build/`** in the working directory:
 `structure.json`, the claims, fragments and analyses with their verified counterparts, `findings.jsonl`,
-`class-graph.json`, `doc.json`, `diagrams/`, `rendered-docs/` and `timings.jsonl`. Say so when you finish, and
-offer to delete it; nothing in there is meant to be committed. Publication copies the reviewed diagrams and
-pages into the target tree together.
+`class-graph.json`, `authored.jsonl`, `doc.json`, `diagrams/`, `rendered-docs/` and `timings.jsonl`. Say so when
+you finish, and offer to delete it; nothing in there is meant to be committed. Publication copies the reviewed
+diagrams and pages into the target tree together.
 
 ## Where the run pauses for the user
 
@@ -194,6 +194,10 @@ The driver times every script stage automatically. Bracket work done by the mode
 to compare model work with runtime stages: elapsed time between commands may include a checkpoint
 or time waiting for the user. Details and the record format are in [references/pipeline.md](references/pipeline.md).
 
+**Did not start this run yourself?** `pipeline.py status` says where it is — the scan, each checkpoint, which
+modules are read, partly written or not started, and what to do next. It runs no stage and writes nothing, so
+it answers while a checkpoint is open or a stage is failing, which is exactly when nothing else will.
+
 A component stops at the first stage that fails and names it, and exit codes pass through unchanged: `0` fine,
 `1` a policy the stage enforces was not met, `2` bad input or a missing dependency, `3` internal. **`1` is a
 verdict and `2`/`3` are breakage** — the first says the repository or the claims need work, the second that
@@ -237,6 +241,10 @@ is the one script you call yourself, for a packet's parts. You do not need to re
 
 Writes intermediates and the rendered draft under `.docs-build/`. Only `publish` replaces `docs/` (or a path
 you name), after validating the final-review seal.
+
+With `--preset manual` the draft includes a scaffold for each appendix page nobody has written or waived — a
+brief carrying the questions and the evidence this run verified for them. **An existing page is never
+overwritten**; a scaffold is only ever created where no file is.
 Reads the working tree only. Uses `git ls-files` when the target is a git repository so ignored files are
 skipped, and `git rev-parse`/`git status` to record which revision was scanned. `annotate_import_usage.py`
 invokes `ruff` when enabled, read-only and with `--no-cache`, so nothing is written into the scanned

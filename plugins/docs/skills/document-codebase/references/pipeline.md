@@ -78,26 +78,44 @@ judgements the document rests on — the scope, the module roles, the architectu
 between components, and none of the validators downstream can tell a wrong role or a wrong boundary from a
 right one.
 
+<<<<<<< HEAD
 **All four are enforced by the driver.** `survey` opens `P1` and `analyze` refuses while it is open;
 `analyze` opens `P2` and `check` refuses; `check` opens `P3` and `document` refuses; the first
 `review` opens `P4` when prose is queued, and the reviewed `review` is held until that checkpoint is
 decided. Each refusal
 prints what to put in front of the person, what to ask them, and the command that records the answer:
+=======
+**All four are enforced here.** `survey` opens `P1` and `analyze` refuses while it is open; `analyze` opens
+`P2` and `check` refuses; `check` opens `P3` and `document` refuses; `publish` opens `P4` when it queues a block
+and refuses to run again. Each refusal prints what to put in front of the person, what to ask them, and the
+command that records the answer:
+>>>>>>> 9976693 (Release hygiene: what is wrong with a tree whose pages are all right)
 
 | | Opened by | Blocks | Asks |
 | --- | --- | --- | --- |
 | `P1` | `survey` | `analyze` and everything after it | is this the right scope to spend the budget on |
 | `P2` | `analyze` | `check` and everything after it | do these roles match what the repository is |
 | `P3` | `check` | `document` and everything after it | is this the architecture, and are the boundaries right |
+<<<<<<< HEAD
 | `P4` | `review`, only when prose is queued | reviewed `review` and `publish` | are these the intended readings |
+=======
+| `P4` | `publish` | `publish`, on its next run | are the queued readings the intended ones |
+>>>>>>> 9976693 (Release hygiene: what is wrong with a tree whose pages are all right)
 
 **An open checkpoint holds every later component, not only the next one.** A build directory that already
 holds an earlier run's artifacts is why: blocking `analyze` alone would leave later components free to
 run over what is on disk and produce a finished report with the scope decision still outstanding.
 
+<<<<<<< HEAD
 P4 is conditional: a review that queues nothing does not open it. When it opens, the driver records the
 question and blocks the reviewed review and publication. The gate's `review_required` result is the verdict;
 the checkpoint is the control-flow stop.
+=======
+`P4` was once left out of this, on the reasoning that an undecided block already holds the run at
+`review_required`. That confuses holding the *gate* with opening a *pause*: nothing printed the question and
+nothing refused to run, so a run reached a published manual with twenty blocks queued, zero reviewed, and the
+final validation never executed. A run that queued nothing opens nothing.
+>>>>>>> 9976693 (Release hygiene: what is wrong with a tree whose pages are all right)
 
 They are enforced because they used to be prose, and prose was the only rule in this pipeline that failed
 silently. Everything else here refuses — `analyze` will not overwrite hand-written claims, `assemble` will not
@@ -116,6 +134,42 @@ reopens them — the scope approved against the old tree says nothing about the 
 file bypasses it, in the same way deleting `claims.jsonl` bypasses the claims: the mechanism is against
 forgetting, not against intent.
 
+## `status` — where the run is
+
+```bash
+python3 scripts/pipeline.py status
+```
+
+**Read-only, and never blocked by anything.** It runs no stage, writes nothing — not even the build directory
+it would report as absent — and answers the same whether the last component passed, failed, or was never
+reached.
+
+That last part is the reason it exists. A checkpoint refuses to let the next component run, and a failing
+stage stops the ones behind it; both are correct, and between them they meant the state of a run was only ever
+reported by something that might decline to report it. A session whose context was reset halfway through the
+modules had no way to ask what was left: `quality_docs.py` names the unread modules, but that runs in
+`publish`, and a partial analysis fails `check` first.
+
+It prints the scan identity and revision, each checkpoint's state, the module budget, the manual's answered
+and composed counts, the authored ledger, and the review queue — then one line naming the next action.
+
+**Modules are reported in three states, not two:**
+
+| | Means |
+| --- | --- |
+| read | at least two of `responsibility`, `state`, `interface`, `failure` — the same floor the gate applies |
+| partly written | a statement or two and no more; there is work in it already |
+| not started | nothing under this path at all |
+
+A module with one statement is *touched*, not read. Reporting it beside the untouched ones is what invites a
+resumed session to write it a second time.
+
+A checkpoint opened or decided against an earlier `index_hash` is marked as such rather than counted, for the
+same reason `decision_for` refuses it: the units may now be different.
+
+**Run it first in any session that did not start the run.** Nothing else reports state without the power to
+withhold it.
+
 **The driver decides nothing.** Every stage is a script that was already the authority on its own question,
 invoked with the paths its component fixes. Where a genuine choice exists — the fan-in cutoff, the preset,
 whether Ruff runs — it is a flag with a default, not a rule hidden in the driver.
@@ -128,9 +182,13 @@ whether Ruff runs — it is a flag with a default, not a rule hidden in the driv
 | `analyze` | `derive_claims` → `query_graph --packet`, once per unit |
 | `check` | `validate_analysis` → `assemble` → `verify_doc` |
 | `document` | `validate_architecture` → `validate_flows` → `validate_operations` → `build_class_graph` → `build_diagrams` → `validate_diagrams` → `build_flow_diagrams` → `validate_flow_diagrams` → `build_document_model` |
+<<<<<<< HEAD
 | `render` | `prepare_stage` → `render_docs` → `snapshot_draft` |
 | `review` | `validate_draft` → `check_prose` → `quality_docs` → `seal_draft` |
 | `publish` | `promote_docs` |
+=======
+| `publish` | `render_docs` → `check_prose` → `release_hygiene` → `quality_docs` |
+>>>>>>> 9976693 (Release hygiene: what is wrong with a tree whose pages are all right)
 
 Stages are named `component/script` as they run, so the line that reports a failure also says which component
 owns the thing that failed.
@@ -149,7 +207,12 @@ fine, `1` a policy was not met, `2` bad input or a missing dependency, `3` inter
 | Stage | Why `1` is not fatal |
 | --- | --- |
 | `document/build_flow_diagrams` | exits `1` when no flow was traced, the common answer on ordinary object-oriented code |
+<<<<<<< HEAD
 | `review/check_prose` | exits `1` on a block queued for review, and the quality gate carries that forward |
+=======
+| `publish/check_prose` | exits `1` on a block queued for review, and the quality gate is meant to carry that forward |
+| `publish/release_hygiene` | exits `1` on a tree finding, and the gate is meant to report it rather than the component ending in silence |
+>>>>>>> 9976693 (Release hygiene: what is wrong with a tree whose pages are all right)
 
 The component still ends non-zero in both cases. Tolerating a code is not forgiving it.
 

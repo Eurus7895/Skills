@@ -95,13 +95,40 @@ REFERENCE_MARKERS = (
 )
 
 
+# What a build actually establishes about a diagram, which is less than "it built". These
+# are separate states because collapsing them is how a run reports full diagram validation
+# on a machine where nothing could draw a diagram at all.
+#
+#   accepted   the build ran to the end, the markup parsed, and no picture came of it. A
+#              stub directive swallowing the source is one way to land here: all that is
+#              known is that it parsed, and the source could say anything
+#   drawn      an image the renderer writes was found in the build tree. Established by
+#              finding the file, never by reasoning that the extension was installed and
+#              must therefore have worked
+#   none       there is no diagram here to report on -- no renderer was asked for, or no
+#              page holds a directive one would draw
+#   unknown    nothing was established: no builder, or a build that produced no picture
+#              and cannot be shown to have finished. `none` here would be a claim, and the
+#              claim would be wrong on any document that does hold a diagram
+#
+# A further state -- visually reviewed -- is a person's, and belongs in the review channel
+# rather than here. A drawn diagram with unreadable labels is still a drawn diagram, so the
+# report says the question is a review one instead of implying a build settled it.
+ACCEPTED, DRAWN, NO_DIAGRAMS, UNKNOWN = "accepted", "drawn", "none", "unknown"
+
+
 class Result(object):
     """One outcome, its explanation, and the warning lines behind it."""
 
-    def __init__(self, status, detail, warnings=()):
+    def __init__(self, status, detail, warnings=(), diagrams=UNKNOWN, stubbed=()):
         self.status = status
         self.detail = detail
         self.warnings = list(warnings)
+        # Reported beside `status`, never folded into it. A build whose markup is sound is
+        # `passed`, and that stays true; whether a picture was drawn is a different
+        # question and a reader of the report is owed both answers separately.
+        self.diagrams = diagrams
+        self.stubbed = list(stubbed)
 
     @property
     def failed(self):
@@ -178,6 +205,14 @@ def classify(warnings):
 # `uml` is an unknown directive, `-W` turns that into an error, and every page fails over
 # a renderer that was optional all along.
 OPTIONAL_DIRECTIVES = {"sphinxcontrib.plantuml": ("uml",)}
+
+# What each renderer leaves behind when it actually draws something, as a filename prefix
+# inside the build tree's image directory. This is how `drawn` is established: by finding
+# the picture, not by reasoning that the extension was installed and therefore must have
+# worked. An extension can load and still draw nothing -- a renderer binary that is absent,
+# a `.puml` that is unreadable, a build that stopped before the writing phase -- and each of
+# those reads as `drawn` to anything that only checks what was requested.
+RENDERER_ARTIFACTS = {"sphinxcontrib.plantuml": ("plantuml-",)}
 
 STUB_MODULE = "_optional_directives"
 STUB_SOURCE = '''"""Written by sphinx_support for one check. Never part of a project."""
@@ -350,6 +385,157 @@ def write_conf(out_dir, extensions=(), project="Documentation", author=""):
     return "written", path
 
 
+# A `conf.py` makes the pages buildable by someone who already knows the sphinx-build
+# invocation. These make them buildable by someone who does not, which is most readers of a
+# repository they did not set up. `make html` is the convention; `make.bat` is the same
+# targets for a shell that has no make.
+#
+# `SPHINXBUILD ?=` and `%SPHINXBUILD%` are the stock sphinx-quickstart spellings, kept so a
+# project that later runs quickstart itself finds what it expects.
+MAKEFILE_TEMPLATE = '''\
+# Documentation build targets. Generated once; edit freely.
+SPHINXOPTS    ?=
+SPHINXBUILD   ?= sphinx-build
+SOURCEDIR     = %(source)s
+BUILDDIR      = %(build)s
+
+.PHONY: help html clean linkcheck%(optional_phony)s
+
+help:
+\t@echo "html       build the HTML documentation"
+\t@echo "clean      remove what Sphinx built under $(BUILDDIR)"
+\t@echo "linkcheck  report every link that does not resolve"%(optional_help)s
+
+html:
+\t@$(SPHINXBUILD) -b html "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS)
+
+# -W turns a warning into an error. A page in no toctree, a broken reference and a missing
+# image are all warnings by default, and all three mean a reader hits something that is not
+# there -- so the strict build is the one worth having a target for.
+strict:
+\t@$(SPHINXBUILD) -b html -W "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS)
+
+# `sphinx-build -M clean` rather than `rm -rf "$(BUILDDIR)"`. This file is published into
+# somebody's repository and edited there, and a recursive delete of whatever BUILDDIR has
+# come to mean -- the source directory, the repository root -- is not a risk a generated
+# build file gets to carry. Sphinx removes what it built, inside its own output tree.
+clean:
+\t@$(SPHINXBUILD) -M clean "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS)
+
+linkcheck:
+\t@$(SPHINXBUILD) -b linkcheck "$(SOURCEDIR)" "$(BUILDDIR)/linkcheck" $(SPHINXOPTS)
+%(optional_targets)s'''
+
+BATCH_TEMPLATE = '''\
+@ECHO OFF
+REM Documentation build targets. Generated once; edit freely.
+if "%%SPHINXBUILD%%" == "" (set SPHINXBUILD=sphinx-build)
+set SOURCEDIR=%(source)s
+set BUILDDIR=%(build)s
+
+if "%%1" == "" goto help
+if "%%1" == "help" goto help
+if "%%1" == "clean" goto clean
+
+%%SPHINXBUILD%% -b %%1 %%SOURCEDIR%% %%BUILDDIR%%\\%%1 %%SPHINXOPTS%%
+goto end
+
+:help
+echo.  html       build the HTML documentation
+echo.  clean      remove what Sphinx built under %%BUILDDIR%%
+echo.  linkcheck  report every link that does not resolve
+goto end
+
+:clean
+REM Deliberately not `rmdir /S /Q %%BUILDDIR%%`: see the note on the Makefile's clean.
+%%SPHINXBUILD%% -M clean %%SOURCEDIR%% %%BUILDDIR%% %%SPHINXOPTS%%
+goto end
+
+:end
+'''
+
+SPELLING_TARGET = '''
+# Needs `pip install sphinxcontrib-spelling`.
+spelling:
+\t@$(SPHINXBUILD) -b spelling "$(SOURCEDIR)" "$(BUILDDIR)/spelling" $(SPHINXOPTS)
+'''
+
+LIVE_TARGET = '''
+# Needs `pip install sphinx-autobuild`.
+livehtml:
+\t@sphinx-autobuild "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS)
+'''
+
+STATIC_README = '''\
+Files placed here are copied into the built documentation and can be referenced from a
+page as `_static/<name>`. Sphinx reads this directory because `html_static_path` in
+`conf.py` names it.
+
+Put a `custom.css` here to restyle the theme, and add this to `conf.py`:
+
+    html_css_files = ["custom.css"]
+'''
+
+
+def _write_once(path, body, executable=False):
+    """Write `path` only if nothing is there. Returns `written`, `exists` or a failure.
+
+    Same rules as `write_conf`, and for the same reason: these are a project's build files
+    once they exist, and a generator that rewrites them destroys work no rerun restores.
+    `lexists` and `O_NOFOLLOW` because a dangling symlink is not a file, and writing
+    through one would create its target outside the only directory this writes to.
+    """
+    if os.path.lexists(path):
+        return "exists", path
+    try:
+        directory = os.path.dirname(path)
+        if directory and not os.path.isdir(directory):
+            os.makedirs(directory)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        mode = 0o755 if executable else 0o644
+        with os.fdopen(os.open(path, flags, mode), "w", encoding="utf-8") as fh:
+            fh.write(body)
+    except FileExistsError:
+        return "exists", path
+    except OSError as exc:
+        return "failed", "cannot write %s: %s" % (path, exc)
+    return "written", path
+
+
+def write_build_files(out_dir, source=".", build="_build", optional=()):
+    """Create `Makefile`, `make.bat` and `_static/` beside the pages, where absent.
+
+    A `conf.py` makes the pages buildable by somebody who already knows the sphinx-build
+    invocation; these make them buildable by somebody who does not, which is most readers
+    of a repository they did not set up.
+
+    `optional` names targets whose tooling may not be installed -- `spelling`, `livehtml`.
+    They are written with the install line in a comment above them rather than left out,
+    because a target that is absent tells a reader nothing and one that names its
+    dependency tells them what to install. Nothing here is enabled in `conf.py`, so an
+    uninstalled target costs a failed make and not a failed build.
+
+    Returns [(name, outcome, detail)], one per file, in the order written.
+    """
+    phony = "".join(" " + t for t in optional)
+    helps = {"spelling": '\n\t@echo "spelling   check spelling (needs '
+                         'sphinxcontrib-spelling)"',
+             "livehtml": '\n\t@echo "livehtml   rebuild and serve on change (needs '
+                         'sphinx-autobuild)"'}
+    bodies = {"spelling": SPELLING_TARGET, "livehtml": LIVE_TARGET}
+    fill = {"source": source, "build": build, "optional_phony": phony,
+            "optional_help": "".join(helps.get(t, "") for t in optional),
+            "optional_targets": "".join(bodies.get(t, "") for t in optional)}
+    results = []
+    for name, body, executable in (
+            ("Makefile", MAKEFILE_TEMPLATE % fill, False),
+            ("make.bat", BATCH_TEMPLATE % fill, False),
+            (os.path.join("_static", "README.md"), STATIC_README, False)):
+        outcome, detail = _write_once(os.path.join(out_dir, name), body, executable)
+        results.append((name, outcome, detail))
+    return results
+
+
 def _note(detail, stubbed):
     if not stubbed:
         return detail
@@ -357,6 +543,64 @@ def _note(detail, stubbed):
             "installed here, so the diagram source was checked as markup and not drawn"
             % (detail, ", ".join("`%s`" % name for name in stubbed),
                ", ".join(sorted(OPTIONAL_DIRECTIVES))))
+
+
+def _drawn_images(build_dir, extensions):
+    """How many pictures an optional renderer actually left in the build tree.
+
+    Counted rather than inferred. A theme ships its own images, so only the prefixes the
+    renderers themselves write are matched.
+    """
+    prefixes = tuple(prefix for extension in extensions
+                     for prefix in RENDERER_ARTIFACTS.get(extension, ()))
+    if not prefixes:
+        return 0
+    found = 0
+    for base, _, names in os.walk(build_dir):
+        del base
+        found += sum(1 for name in names if name.startswith(prefixes))
+    return found
+
+
+def _diagram_state(extensions, images=0, complete=False, has_diagram=True):
+    """`drawn`, `accepted`, `none` or `unknown` -- what this build establishes.
+
+    `images` is how many pictures were found, `complete` whether the build ran to the end,
+    and `has_diagram` whether any page actually holds a directive an optional renderer would
+    draw. The order of the tests is the point:
+
+    * A tree with no diagram in it has nothing to report on, and saying `accepted` there
+      would invent a caveat about pictures that do not exist. Both halves of this matter:
+      the renderer not being requested, and it being requested over a document with no
+      diagram in it. The second is the commoner case by far -- `render_docs` asks for the
+      extension on every run -- and it used to report `drawn` on a document holding no
+      diagram at all, since nothing consulted the pages. Neither half needs a build: they
+      are facts about the configuration and the source.
+    * A picture that is on disk was drawn. That is an observation, so it holds whatever the
+      exit code was: a build can report bad markup on one page and still have drawn the
+      diagram on another.
+    * Otherwise, with no picture found, the answer depends on whether the build finished. A
+      build that ran to the end and drew nothing establishes `accepted` -- the source
+      parsed and no image came of it. A build that stopped establishes nothing, and
+      `accepted` would be a claim about markup that may never have been read.
+
+    That last distinction is why `stubbed` is not a parameter. A stub draws nothing, which
+    a picture count already says; it is one reason for `accepted` rather than a separate
+    state. Nor is the build `status` a parameter, and that was a defect: `-W` aborts at the
+    first error on Sphinx 7 and runs to the end on Sphinx 9, so the same failing status
+    means nothing was drawn on one leg of the matrix and everything was on the other.
+    Status is not evidence about pictures. The pictures are.
+    """
+    wanted = [e for e in extensions if e in OPTIONAL_DIRECTIVES]
+    if not wanted:
+        return NO_DIAGRAMS
+    if images:
+        return DRAWN
+    if not has_diagram:
+        return NO_DIAGRAMS
+    if not complete:
+        return UNKNOWN
+    return ACCEPTED
 
 
 def _with_sphinx(out_dir, extensions):
@@ -375,8 +619,17 @@ def _with_sphinx(out_dir, extensions):
             return Result(RUNNER_FAILURE, "sphinx-build could not be run: %s" % exc)
 
         output = (proc.stderr or proc.stdout).strip()
+        # Counted once, from the tree the build just wrote, and before the `finally` below
+        # removes it. A picture on disk is the only thing that establishes `drawn`.
+        images = _drawn_images(build, extensions)
+        # Read from the source the caller handed in, not from the staged copy: the answer is
+        # about the project's pages.
+        drawable = _has_diagram(_source_pages(out_dir))
         if proc.returncode == 0:
-            return Result(PASSED, _note("sphinx-build -W reported no warnings", stubbed))
+            return Result(PASSED, _note("sphinx-build -W reported no warnings", stubbed),
+                          diagrams=_diagram_state(extensions, images, complete=True,
+                                                  has_diagram=drawable),
+                          stubbed=stubbed)
         warnings = warning_lines(output)
         if any(marker in output.lower() for marker in FATAL_FRAMING):
             return Result(RUNNER_FAILURE,
@@ -384,8 +637,15 @@ def _with_sphinx(out_dir, extensions):
         advisories = [line for line in warnings if renderer_advisory(line)]
         warnings = [line for line in warnings if not renderer_advisory(line)]
         if advisories and not warnings:
+            # The renderer said so itself, so the build's own report is what is read here
+            # rather than the picture count: this build got as far as trying to draw, which
+            # is `accepted` whatever is installed. A count is still consulted, because one
+            # `.puml` failing does not mean its neighbours did.
             return Result(PASSED, _note("sphinx-build -W reported no defect", stubbed)
-                          + ". A diagram was not drawn: %s" % advisories[0])
+                          + ". A diagram was not drawn: %s" % advisories[0],
+                          diagrams=_diagram_state(extensions, images, complete=True,
+                                                  has_diagram=drawable),
+                          stubbed=stubbed)
         if not warnings:
             # Non-zero with nothing to read is the builder itself failing, not the
             # document. Reporting it as bad markup sends the reader to the wrong file.
@@ -393,7 +653,14 @@ def _with_sphinx(out_dir, extensions):
                           "sphinx-build exited %d without reporting a warning: %s"
                           % (proc.returncode, output[:400] or "no output"))
         status = classify(warnings)
-        return Result(status, _explain(status, warnings), warnings)
+        # `complete=False`: a non-zero `-W` build may have stopped at the first error or run
+        # to the end, and which one it did is the Sphinx version's business, not something
+        # `status` reveals. So no picture found means nothing established, and a picture
+        # found still means `drawn` -- that half is an observation and needs no completion.
+        return Result(status, _explain(status, warnings), warnings,
+                      diagrams=_diagram_state(extensions, images,
+                                              has_diagram=drawable),
+                      stubbed=stubbed)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -447,6 +714,29 @@ def _teach_docutils_about_sphinx():
         roles.register_local_role(role, reference)
 
 
+def _source_pages(out_dir):
+    """Every page in the tree, recursively -- a preset writes into subdirectories."""
+    pages = []
+    for base, _, names in os.walk(out_dir):
+        pages.extend(os.path.join(base, name) for name in names
+                     if name.endswith(".rst") or name.endswith(".md"))
+    return pages
+
+
+def _has_diagram(pages):
+    """Whether any page holds a directive only an optional renderer can draw."""
+    names = tuple(name for names in OPTIONAL_DIRECTIVES.values() for name in names)
+    for path in pages:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        if any(".. %s::" % name in text or "{%s}" % name in text for name in names):
+            return True
+    return False
+
+
 def _with_docutils(out_dir):
     from docutils.core import publish_doctree                # noqa: PLC0415
     from docutils.utils import SystemMessage                 # noqa: PLC0415
@@ -487,9 +777,12 @@ def _with_docutils(out_dir):
                       "docutils parsed %d reStructuredText page(s) and cannot read the "
                       "%d Markdown one(s) beside them, so this is not a check of the "
                       "tree. Install sphinx-build." % (len(pages), len(markdown)))
+    # docutils has never heard of `uml`, so every diagram here was swallowed by the same
+    # stub that keeps `toctree` from failing. Nothing was drawn, and nothing could be.
     return Result(PASSED, "docutils parsed %d page(s) with no warnings. This is not a "
                           "Sphinx build: cross-page references were not resolved, so a "
-                          "broken one would not have been seen." % len(pages))
+                          "broken one would not have been seen." % len(pages),
+                  diagrams=ACCEPTED if _has_diagram(pages) else NO_DIAGRAMS)
 
 
 def check(out_dir, extensions=(), policy="optional"):
