@@ -203,6 +203,18 @@ produces its input — so you do not have to remember the order, and a run resum
 cannot skip a step silently. Exit `2` with `which <component> produces` in the message means the predecessor,
 not the tooling. Run the step it names; do not create the missing file by hand.
 
+**Every component opens by saying where the run is**, so you never have to remember to ask:
+
+```
+-- step 3 of 7: check   scan sha256:9b6a9
+-- still owed: write the analysis for 1 remaining module(s), appending one scope at a time, then run check
+```
+
+The second line appears only when the run owes work **no script can produce** — the modules to read, the
+questions to answer, the sections to compose. Those cannot be enforced by refusing to run, because nothing
+downstream tells an absent reading from a thin one until the gate. If you see it, that work is yours and it is
+not done.
+
 A component stops at the first stage that fails and names it, and exit codes pass through unchanged: `0` fine,
 `1` a policy the stage enforces was not met, `2` bad input or a missing dependency, `3` internal. **`1` is a
 verdict and `2`/`3` are breakage** — the first says the repository or the claims need work, the second that

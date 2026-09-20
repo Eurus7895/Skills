@@ -943,6 +943,39 @@ def missing_inputs(args):
     return absent
 
 
+def orientation(args):
+    """Where this run is, printed by every component before it does anything.
+
+    `status` answers this, and answers it better -- but only when someone thinks to ask, and
+    the reader who most needs it is the one who does not know there is a run in progress. An
+    agent resuming with no memory of starting has no reason to type `status` first: it has a
+    task, and the pipeline looked like a sequence of commands. So the orientation stops being
+    something to remember and becomes something every command says.
+
+    Two lines at most, because this prints on every invocation and a banner nobody reads is
+    worse than no banner. The second appears only when the run owes something no script can
+    produce -- the modules to read, the questions to answer, the sections to compose. Those
+    are the steps that cannot be enforced by refusing to run, because nothing downstream can
+    tell a thin answer from an absent one until the gate. Naming them on every command is
+    the closest thing to enforcement they can have.
+
+    `next_step` writes that sentence already and is the single place that decides it; this
+    prints it, and drops it when it says the run is simply ready to proceed.
+    """
+    digest = index_hash_of(args.build)
+    if not digest:
+        # Before the first survey there is nothing to orient against, and `preflight` is
+        # about to name the survey anyway.
+        return []
+    lines = ["step %d of %d: %s   scan %s"
+             % (ORDER.index(args.component) + 1, len(ORDER), args.component, digest[:12])]
+    _, _, touched, untouched = analysis_progress(args.build)
+    owed = next_step(args.build, digest, remaining=touched + untouched)
+    if not owed.startswith("run the next component"):
+        lines.append("still owed: %s" % owed)
+    return lines
+
+
 def preflight(args):
     """The message for a component whose inputs are not there yet, or None.
 
@@ -1088,6 +1121,12 @@ def main():
         print("%s decided: %s" % (args.checkpoint, args.note.strip()))
         print("wrote %s" % path)
         return 0
+
+    # Ahead of every gate below, so a component that is about to refuse still says where the
+    # run is. A refusal names one thing -- an undecided checkpoint, a missing input -- and a
+    # reader who does not know a run is in progress needs the position more than the reason.
+    for line in orientation(args):
+        print("-- %s" % line)
 
     # Refuse rather than run on. The message has to be enough to act on without opening
     # anything: what to put in front of the person, what to ask them, and the one command
