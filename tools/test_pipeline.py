@@ -331,13 +331,38 @@ def driver_tests(tmp, root):
           len(os.listdir(os.path.join(build, "packets"))) == len(units))
 
     # A stage that fails must stop its component, and its exit code must arrive unchanged.
+    #
+    # The inputs are present and one of them is corrupt, which is what makes this a stage
+    # failure. An empty build directory was the fixture here until the preflight told a
+    # skipped step apart from a broken one: `check` on a build with no survey in it now
+    # names the survey and exits 2 before any stage runs, so it no longer produces the
+    # failing stage this is about.
     broken = os.path.join(tmp, "broken")
     os.makedirs(broken, exist_ok=True)
+    write(os.path.join(broken, "structure.json"), "{ this is not json")
+    write(os.path.join(broken, "claims.jsonl"), "")
     code, text = run("pipeline.py", "check", "--root", root, "--build", broken)
     check("a failing stage stops the component", code != 0, text[-300:])
     check("the failing stage is named", "check/assemble" in text, text[-300:])
     check("a stage that never ran is reported as such",
           "did not run" in text or "last stage" in text, text[-300:])
+
+    # The other half of the same distinction, and the reason the preflight exists: an agent
+    # resuming with no memory of this run gets the step it skipped, not a traceback from a
+    # script that was handed a path to a file nobody wrote.
+    empty = os.path.join(tmp, "no-survey")
+    os.makedirs(empty, exist_ok=True)
+    code, text = run("pipeline.py", "document", "--root", root, "--build", empty,
+                     "--docs", os.path.join(tmp, "docs"))
+    check("a component with no predecessor is an input error", code == 2, text[-400:])
+    check("it names the step that did not run", "which survey produces" in text,
+          text[-400:])
+    check("it names the command that produces it", "pipeline.py survey --root" in text,
+          text[-400:])
+    check("it offers status, which answers for the whole run", "status --root" in text,
+          text[-400:])
+    check("no traceback reaches the reader", "Traceback" not in text, text[-400:])
+    check("and nothing ran", not os.path.exists(os.path.join(empty, "doc.json")))
 
     # The optional analyses are absent far more often than they are broken.
     code, text = run("pipeline.py", "document", "--root", root, "--build", build,

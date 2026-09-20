@@ -568,6 +568,33 @@ COMPONENTS = {"survey": survey, "analyze": analyze, "check": check,
               "publish": publish}
 ORDER = ["survey", "analyze", "check", "document", "render", "review", "publish"]
 
+# What each component cannot start without, and the component that produces it.
+#
+# **A skipped step must read as a skipped step.** Running `document` on a build with no
+# survey in it used to reach the script and die on `FileNotFoundError:
+# .docs-build/structure.json`, under a `FAIL could not write ...` line that named the
+# output rather than the missing input. A traceback is an invitation to debug the tooling,
+# or to satisfy it by writing the missing file by hand -- and an agent resuming with no
+# memory of this run is exactly who receives it. The order of this pipeline is enforced by
+# nothing else: `blocking_checkpoint` holds the four human decisions, and a component whose
+# predecessor never ran simply crashed.
+#
+# So the check is here, where the next command can be named. Optional inputs are not in
+# this table: those are the ones components already report as `-- skip`, with a note saying
+# what the document will lack. These are the ones without which there is nothing to do.
+REQUIRES = {
+    "analyze": (("structure.json", "survey"),),
+    "check": (("structure.json", "survey"), ("claims.jsonl", "analyze")),
+    "document": (("structure.json", "survey"), ("claims.verified.jsonl", "check")),
+    "render": (("doc.json", "document"),),
+    "review": (("doc.json", "document"), ("render-manifest.json", "render")),
+    "publish": (("publish-seal.json", "review"),),
+}
+
+# The staging tree is a directory rather than a file in the build, so it is checked apart
+# from the table above. `review` reads the draft `render` wrote; `publish` promotes it.
+NEEDS_STAGING = ("review", "publish")
+
 # The judgements the document rests on that no script can make, and the component each
 # one stands in front of.
 #
@@ -895,6 +922,45 @@ def next_step(build, digest, remaining):
     return "run the next component: it has the inputs it needs"
 
 
+def missing_inputs(args):
+    """[(path, producing component)] this component needs and does not have, in order.
+
+    In pipeline order, so the first entry is the earliest step that did not run -- which is
+    the one worth naming. Reporting the latest would send a reader to `check` when the
+    survey is what is missing.
+    """
+    absent = [(os.path.join(args.build, name), producer)
+              for name, producer in REQUIRES.get(args.component, ())
+              if not os.path.exists(os.path.join(args.build, name))]
+    if args.component in NEEDS_STAGING:
+        staging = staging_of(args)
+        if not os.path.isdir(staging):
+            absent.append((staging, "render"))
+    absent.sort(key=lambda pair: ORDER.index(pair[1]))
+    return absent
+
+
+def preflight(args):
+    """The message for a component whose inputs are not there yet, or None.
+
+    Names the earliest missing step and the command that produces it, because the reader is
+    often an agent resuming a run it has no memory of starting. `status` is offered beside
+    it: it answers the same question for the whole run rather than for this one component.
+    """
+    absent = missing_inputs(args)
+    if not absent:
+        return None
+    path, producer = absent[0]
+    others = ""
+    if len(absent) > 1:
+        others = " (%d more input(s) are also missing)" % (len(absent) - 1)
+    return ("%s needs %s, which %s produces, and it is not there%s.\n"
+            "      Run:  python3 %s %s --root %s\n"
+            "      Or:   python3 %s status --root %s -- it says where this run is"
+            % (args.component, path, producer, others,
+               invoked_as(), producer, args.root, invoked_as(), args.root))
+
+
 def blocking_checkpoint(build, component, digest):
     """The open checkpoint standing in front of this component, if there is one.
 
@@ -1055,6 +1121,19 @@ def main():
         packets = os.path.join(args.build, "packets")
         if os.path.isdir(packets):
             shutil.rmtree(packets)
+
+    # Before anything runs, and after the checkpoint gate: a decision nobody was asked for
+    # is the better complaint where both apply, since a build with an open P1 has no scope
+    # settled and its missing artifacts are a consequence of that.
+    #
+    # A dry run is told rather than stopped. It exists to show what a component would do,
+    # and a reader previewing a run they have not started yet is entitled to see the stages
+    # and the gap at once instead of one of the two.
+    warning = preflight(args)
+    if warning:
+        if not args.dry_run:
+            return fail(warning, 2)
+        print("-- note: %s" % warning)
 
     component_started_at = utc_now()
     component_started = time.perf_counter()
