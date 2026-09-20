@@ -571,6 +571,10 @@ COMPONENTS = {"survey": survey, "analyze": analyze, "check": check,
               "publish": publish}
 ORDER = ["survey", "analyze", "check", "document", "render", "review", "publish"]
 
+# Named once, because a suggested recovery command has to know whether the build it is
+# about is the default one or a path the reader chose.
+DEFAULT_BUILD = ".docs-build"
+
 # What each component cannot start without, and the component that produces it.
 #
 # **A skipped step must read as a skipped step.** Running `document` on a build with no
@@ -693,25 +697,31 @@ def uncertain_modules(build):
     The static `show` stands in then, and this list appears where it can be acted on -- in
     the refusal `check` gives, which is when the material exists and somebody is looking.
     """
-    unknowns, kinds = set(), {}
+    kinds = module_kinds(build)
+    unknowns = set()
     for line in _lines(os.path.join(build, "module-analysis.jsonl")):
         try:
             row = json.loads(line)
         except ValueError:
-            continue                       # validate_analysis owns the verdict on this
-        if not isinstance(row, dict):
             continue
-        path = row.get("path")
-        if not path:
+        if not isinstance(row, dict) or not row.get("path"):
             continue
-        for statement in row.get("statements", ()) or ():
-            if not isinstance(statement, dict):
-                continue
-            kinds.setdefault(path, set()).add(statement.get("kind"))
-            if statement.get("status") == "unknown":
-                unknowns.add(path)
+        statements = row.get("statements")
+        if not isinstance(statements, (list, tuple)):
+            continue
+        for statement in statements:
+            if isinstance(statement, dict) and statement.get("status") == "unknown":
+                unknowns.add(row["path"])
     if not kinds:
         return None
+    # Modules in scope with no row at all, and rows that recorded nothing. Neither was in
+    # this list before, and between them they are the modules least likely to have been read
+    # -- so P2 asked someone to approve the roles while showing them only the settled ones.
+    # A module cannot be absent from its own review list for the reason that nothing is
+    # written about it.
+    scope = _lines(os.path.join(build, "units.txt"))
+    missing = {path for path in scope if path not in kinds}
+    silent = {path for path, seen in kinds.items() if not seen}
 
     def listed(paths):
         paths = sorted(paths)
@@ -721,17 +731,21 @@ def uncertain_modules(build):
         return shown
 
     thin = {path for path, seen in kinds.items()
-            if len(seen & set(READ_KINDS)) < len(READ_KINDS)}
+            if seen and len(seen & set(READ_KINDS)) < len(READ_KINDS)}
     parts = []
+    unwritten = missing | silent
+    if unwritten:
+        parts.append("the %d module(s) with no reading recorded at all, which cannot have "
+                     "a role to approve: %s" % (len(unwritten), listed(unwritten)))
     if unknowns:
-        parts.append("the %d module(s) that recorded an `unknown`, where the repository "
-                     "does not answer and a wrong role hides: %s"
+        parts.append("the %d that recorded an `unknown`, where the repository does not "
+                     "answer and a wrong role hides: %s"
                      % (len(unknowns), listed(unknowns)))
-    remaining = thin - unknowns
+    remaining = thin - unknowns - unwritten
     if remaining:
         parts.append("the %d with fewer than the four kinds answered: %s"
                      % (len(remaining), listed(remaining)))
-    rest = sorted(set(kinds) - unknowns - thin)
+    rest = sorted(set(kinds) - unknowns - thin - unwritten)
     if rest:
         parts.append("and %d of the %d settled one(s) as a sample: %s"
                      % (min(SHOW_SAMPLE, len(rest)), len(rest),
@@ -855,6 +869,56 @@ def _lines(path):
         return []
 
 
+def module_kinds(build):
+    """{module path: the statement kinds recorded about it}, from the analysis ledger.
+
+    One parse, shared by everything that asks about progress, so a defensive reading is
+    written once. The file is hand-authored, so a half-written line is an ordinary state to
+    find it in -- and a line that is valid JSON but not an object, such as `[]`, is another.
+    `row.get` raised on that one, which turned reporting a run's position into an exit 3
+    before `validate_analysis` could report the malformed row as the finding it is. Saying
+    where a run is must never be able to stop the validator that would explain it.
+
+    A path with no statements is kept with an empty set, not dropped. It is a module
+    somebody started a row for and recorded nothing in, which is a state of its own and the
+    one most worth naming.
+    """
+    kinds = {}
+    for line in _lines(os.path.join(build, "module-analysis.jsonl")):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue                       # validate_analysis owns the verdict on this
+        if not isinstance(row, dict):
+            continue                       # and on this
+        path = row.get("path")
+        if not path:
+            continue
+        statements = row.get("statements")
+        if not isinstance(statements, (list, tuple)):
+            statements = ()
+        kinds.setdefault(path, set()).update(
+            s.get("kind") for s in statements if isinstance(s, dict))
+    return kinds
+
+
+def unanswered_modules(build):
+    """Modules in scope that do not answer all four kinds, in `units.txt` order.
+
+    **Not `analysis_progress`'s `read`, and the difference is the point.** `read` uses the
+    gate's two-of-four floor, which separates a module somebody worked on from one nobody
+    touched. Answered is four of four, which is what `analyze.md` requires and what the
+    quality gate counts: a run of two-kind modules is `partial` however cleanly it verifies.
+
+    Reusing `read` meant the orientation banner told a run with every module at three kinds
+    that it had the inputs it needs, while the work it owed was exactly those modules and
+    the gate was going to reject them.
+    """
+    kinds = module_kinds(build)
+    return [path for path in _lines(os.path.join(build, "units.txt"))
+            if len(kinds.get(path, set()) & set(READ_KINDS)) < len(READ_KINDS)]
+
+
 def analysis_progress(build):
     """(in scope, read, remaining) module paths, from units.txt and module-analysis.jsonl.
 
@@ -868,17 +932,7 @@ def analysis_progress(build):
     kinds. A module named once and left there is not a module that was read.
     """
     scope = _lines(os.path.join(build, "units.txt"))
-    kinds = {}
-    for line in _lines(os.path.join(build, "module-analysis.jsonl")):
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue                       # validate_analysis owns the verdict on this
-        path = row.get("path")
-        if not path:
-            continue
-        kinds.setdefault(path, set()).update(
-            s.get("kind") for s in row.get("statements", ()) if isinstance(s, dict))
+    kinds = module_kinds(build)
     read = [p for p in scope
             if len(kinds.get(p, set()) & set(READ_KINDS)) >= READ_KINDS_FLOOR]
     # Touched but not read is its own state, and the one a resumed session most needs
@@ -980,7 +1034,11 @@ def status(args, build):
               % (coverage.get("queued") or 0, coverage.get("reviewed") or 0,
                  len(report.get("unreviewed") or ())))
 
-    print("\nnext       %s" % next_step(build, digest, remaining=touched + untouched))
+    # The breakdown above uses the gate's two-of-four floor, which is the right line between
+    # a module somebody worked on and one nobody touched. What is *owed* is four of four, so
+    # the advice is computed from that and not from the same split.
+    print("\nnext       %s" % next_step(build, digest,
+                                        remaining=unanswered_modules(build)))
     return 0
 
 
@@ -1080,11 +1138,33 @@ def orientation(args):
         return []
     lines = ["step %d of %d: %s   scan %s"
              % (ORDER.index(args.component) + 1, len(ORDER), args.component, digest[:12])]
-    _, _, touched, untouched = analysis_progress(args.build)
-    owed = next_step(args.build, digest, remaining=touched + untouched)
+    # `unanswered_modules`, not `analysis_progress`'s split: a module at three of the four
+    # kinds counts as `read` against the gate's floor, so reusing that told a run whose every
+    # module was three-quarters written that it had the inputs it needs -- while the work it
+    # owed was exactly those modules, and the gate was going to call the run partial.
+    owed = next_step(args.build, digest, remaining=unanswered_modules(args.build))
     if not owed.startswith("run the next component"):
         lines.append("still owed: %s" % owed)
     return lines
+
+
+def invocation_args(args, component):
+    """The path options this run is using, so a suggested command acts on the same build.
+
+    A recovery command that drops `--build` is a command that reads `.docs-build` while the
+    build whose missing input was just reported is somewhere else: copying it appears to do
+    nothing, and the reader concludes the tool is wrong rather than that they are one flag
+    short. Only the options that change *where* the work is are carried, and only when they
+    differ from the default -- a suggestion cluttered with every flag is one nobody copies.
+    """
+    parts = ["--root %s" % args.root]
+    if args.build != DEFAULT_BUILD:
+        parts.append("--build %s" % args.build)
+    # `render` is the only suggested producer that writes the staging tree, and `publish`
+    # the only consumer that reads it, so the flag rides those two and nothing else.
+    if component in ("render", "publish") and getattr(args, "staging", None):
+        parts.append("--staging %s" % args.staging)
+    return " " + " ".join(parts)
 
 
 def preflight(args):
@@ -1102,10 +1182,11 @@ def preflight(args):
     if len(absent) > 1:
         others = " (%d more input(s) are also missing)" % (len(absent) - 1)
     return ("%s needs %s, which %s produces, and it is not there%s.\n"
-            "      Run:  python3 %s %s --root %s\n"
-            "      Or:   python3 %s status --root %s -- it says where this run is"
+            "      Run:  python3 %s %s%s\n"
+            "      Or:   python3 %s status%s -- it says where this run is"
             % (args.component, path, producer, others,
-               invoked_as(), producer, args.root, invoked_as(), args.root))
+               invoked_as(), producer, invocation_args(args, producer),
+               invoked_as(), invocation_args(args, "status")))
 
 
 def blocking_checkpoint(build, component, digest):
@@ -1152,7 +1233,8 @@ def main():
     parser.add_argument("--status", choices=("completed", "failed", "cancelled"),
                         default="completed", help="measure --state stop: outcome")
     parser.add_argument("--root", default=".", help="the repository being documented")
-    parser.add_argument("--build", default=".docs-build", help="where intermediates go")
+    parser.add_argument("--build", default=DEFAULT_BUILD,
+                        help="where intermediates go")
     parser.add_argument("--docs", default="docs", help="where the document is written")
     parser.add_argument("--staging", help="rendered draft directory; defaults to "
                                           ".docs-build/rendered-docs")

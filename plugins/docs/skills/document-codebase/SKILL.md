@@ -248,6 +248,7 @@ is the one script you call yourself, for a packet's parts. You do not need to re
 | `references/three-analyses.md` | between `check` and `document`, for the three files you write |
 | `references/pipeline.md` | any component, to see what it runs, what it may skip, and its flags |
 | `references/schemas.md` | `analyze`, before emitting the first statement; every schema and finding code |
+| `scripts/findings.py` | a report names a code you do not recognise — every code in one place, with its family, the script that raises it and what it means. Data only: read it, never run it |
 | `references/context-policy.md` | `analyze`, for packets, partitions and the append discipline |
 | `references/diagram-policy.md` | `document`, before reviewing a diagram or writing a view spec |
 | `references/presets.md` | `document`, to override the preset |

@@ -221,5 +221,106 @@ class ShownAtTheRefusalTests(Build):
                              checkpoint["show"])
 
 
+class CodexRoundTwoTests(Build):
+    """The second review's findings on the P2 list and the owed-work count.
+
+    Four of them, all real. Three were holes in code this branch had just added, and the
+    fourth was the conformance test missing the likeliest form of the bug it exists to catch.
+    """
+
+    def test_a_row_that_recorded_nothing_is_in_the_p2_list(self):
+        """`statements: []` initialised no kinds, so the module was in neither group.
+
+        It fell out of the list entirely, which meant P2 showed the settled modules and hid
+        the one nothing was written about -- while blocking `check`, so the validator that
+        would have reported it could not run yet.
+        """
+        self.analysis([self.settled("src/a.py"),
+                       {"path": "src/empty.py", "statements": []}])
+        shown = pipeline.uncertain_modules(str(self.build))
+        self.assertIn("src/empty.py", shown)
+        self.assertIn("no reading recorded at all", shown)
+
+    def test_a_module_in_scope_with_no_row_at_all_is_in_it_too(self):
+        """The list never compared itself against `units.txt`, so an unstarted module was
+        invisible to the question about whether the roles are right."""
+        self.units("src/a.py", "src/never.py")
+        self.analysis([self.settled("src/a.py")])
+        shown = pipeline.uncertain_modules(str(self.build))
+        self.assertIn("src/never.py", shown)
+
+    def test_a_row_that_is_not_an_object_does_not_stop_the_run(self):
+        """`[]` is valid JSON and not a row, and `row.get` raised on it.
+
+        Reporting a run's position then exited 3 before `validate_analysis` could report the
+        malformed line as the finding it is -- and every component carried the same banner,
+        so nothing could run at all. Saying where a run is must never be able to stop the
+        validator that would explain it.
+        """
+        (self.build / "module-analysis.jsonl").write_text("[]\n")
+        self.assertEqual(pipeline.module_kinds(str(self.build)), {})
+        scope, read, touched, untouched = pipeline.analysis_progress(str(self.build))
+        self.assertEqual(read, [])
+
+    def test_a_module_answering_three_of_four_kinds_is_still_owed(self):
+        """`read` is the gate's two-of-four floor, and answered is four of four.
+
+        Reusing `read` told a run whose every module was three-quarters written that it had
+        the inputs it needs, while the work it owed was exactly those modules and the gate
+        was going to call the run partial.
+        """
+        self.units("src/h.py")
+        self.analysis([{"path": "src/h.py",
+                        "statements": [self.statement(k)
+                                       for k in pipeline.READ_KINDS[:3]]}])
+        self.assertEqual(pipeline.unanswered_modules(str(self.build)), ["src/h.py"])
+        _, read, _, _ = pipeline.analysis_progress(str(self.build))
+        self.assertEqual(read, ["src/h.py"], "still read against the gate's floor")
+        owed = pipeline.next_step(str(self.build), DIGEST,
+                                 pipeline.unanswered_modules(str(self.build)))
+        self.assertIn("remaining module(s)", owed)
+
+    def test_a_fully_answered_module_is_not_owed(self):
+        """The floor refuses what is under it, not what reaches it."""
+        self.units("src/a.py")
+        self.analysis([self.settled("src/a.py")])
+        self.assertEqual(pipeline.unanswered_modules(str(self.build)), [])
+
+
+class RecoveryCommandTests(Build):
+    """A suggested command has to act on the build the failure was about."""
+
+    def args(self, **kwargs):
+        class Args(object):
+            root = "."
+            build = pipeline.DEFAULT_BUILD
+            staging = None
+            component = "document"
+        args = Args()
+        for key, value in kwargs.items():
+            setattr(args, key, value)
+        return args
+
+    def test_a_default_build_is_not_named(self):
+        """A suggestion cluttered with every flag is one nobody copies."""
+        self.assertEqual(pipeline.invocation_args(self.args(), "survey"), " --root .")
+
+    def test_a_custom_build_is_carried(self):
+        """Dropping it pointed the reader at `.docs-build` while their build was elsewhere,
+        so the command appeared to do nothing and the tool looked wrong."""
+        shown = pipeline.invocation_args(self.args(build="mybuild"), "survey")
+        self.assertIn("--build mybuild", shown)
+
+    def test_status_carries_it_too(self):
+        shown = pipeline.invocation_args(self.args(build="mybuild"), "status")
+        self.assertIn("--build mybuild", shown)
+
+    def test_a_custom_staging_rides_the_commands_that_use_it(self):
+        args = self.args(staging="draft")
+        self.assertIn("--staging draft", pipeline.invocation_args(args, "render"))
+        self.assertIn("--staging draft", pipeline.invocation_args(args, "publish"))
+        self.assertNotIn("--staging", pipeline.invocation_args(args, "survey"))
+
+
 if __name__ == "__main__":
     unittest.main()

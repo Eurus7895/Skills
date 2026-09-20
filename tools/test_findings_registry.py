@@ -66,9 +66,28 @@ def codes_in(text):
 
 
 def severities_in(text):
-    """Every severity string the file assigns, from a keyword or a dict key."""
+    """Every severity string the file assigns: a call keyword, a dict value, or a default.
+
+    **The default is the one that matters most, and it was the one missing.** The validators
+    raise most of their findings through a helper declared
+    `def finding(self, code, message, ..., severity="error")`, so the severity of an ordinary
+    finding is written once, in a signature, and never at a call site. A first version of this
+    scanned keywords and dict values only: changing that default to `"warning"` left it
+    unchanged and the whole conformance suite passing, while every consumer filtering for
+    `error` silently stopped blocking. That is the exact bug this file exists to catch, and it
+    walked straight through the check named for it.
+    """
     found = set()
     for node in ast.walk(ast.parse(text)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            spec = node.args
+            names = list(spec.args) + list(spec.kwonlyargs)
+            defaults = ([None] * (len(spec.args) - len(spec.defaults))
+                        + list(spec.defaults) + list(spec.kw_defaults))
+            for name, default in zip(names, defaults):
+                if name.arg in SEVERITY_KEYS and isinstance(default, ast.Constant) \
+                        and isinstance(default.value, str):
+                    found.add(default.value)
         if isinstance(node, ast.Call):
             for keyword in node.keywords:
                 if keyword.arg in SEVERITY_KEYS and isinstance(keyword.value, ast.Constant) \

@@ -158,11 +158,19 @@ class StatusTests(unittest.TestCase):
         self.assertIn('write the analysis for 1 remaining module',
                       run(self.root, 'status').stdout)
 
-    def test_next_asks_for_answers_once_the_modules_are_read(self):
+    def test_next_asks_for_answers_once_the_modules_are_answered(self):
+        """All four kinds, not two.
+
+        The fixture supplied two and called the module read, which is the gate's floor for
+        telling a module somebody worked on from one nobody touched. What the run *owes* is
+        four of four, so with two the honest advice is to finish the module -- and advising
+        the manual questions there was the defect, not this assertion.
+        """
         self.scan()
         self.units('src/a.py')
         self.analysis([{'path': 'src/a.py', 'index_hash': 'sha256:aaa', 'statements': [
-            self.statement('s1', 'responsibility'), self.statement('s2', 'state')]}])
+            self.statement('s1', 'responsibility'), self.statement('s2', 'state'),
+            self.statement('s3', 'interface'), self.statement('s4', 'failure')]}])
         (self.build / 'manual-analysis.json').write_text(json.dumps(
             {'answers': {'1.1.1': {'completeness': 'unanswered'}}, 'pages': {}}))
         self.assertIn('answer 1 remaining question', run(self.root, 'status').stdout)

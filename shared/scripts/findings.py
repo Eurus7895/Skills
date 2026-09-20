@@ -145,8 +145,10 @@ CODES = {
             "standard library",
     "D002": "files with an extension the scanner does not examine were left unread",
     "D003": "a symlink resolves outside the root and was skipped rather than followed",
-    "D004": "a file could not be read, so it is in the index without its contents",
-    "D005": "no parser for the language, so its imports are approximated by regex",
+    "D004": "a Python file did not parse, so its imports are approximated by regex rather "
+            "than read from a syntax tree",
+    "D005": "no parser for the file's language at all, so its imports are approximated by "
+            "regex",
     "D006": "imported bindings are never read according to Ruff, which is not proof the "
             "dependency is unnecessary",
     "D007": "Ruff diagnostics could not be tied to an import record, and are reported "
