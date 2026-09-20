@@ -275,7 +275,7 @@ def driver_tests(tmp, root):
     with open(reopened, "w", encoding="utf-8") as fh:
         json.dump(dict(kept, state="pending"), fh)
     code, text = run("pipeline.py", "decide", "--checkpoint", "P1", "--build", build,
-                     "--note", "preview only", "--dry-run")
+                     "--note", "previewing only, nothing decided here", "--dry-run")
     with open(reopened, encoding="utf-8") as fh:
         after = json.load(fh)
     check("--dry-run records no decision", code == 0 and after["state"] == "pending",

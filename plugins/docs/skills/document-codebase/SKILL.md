@@ -146,9 +146,11 @@ one, and refuses to run the next component until a decision is recorded:
 python3 scripts/pipeline.py decide --checkpoint P1 --note "<what they said>"
 ```
 
-The note is required and goes in the closing report, so "ran unattended, kept the default scope" is a
-permitted answer and a recorded one. A decision is bound to the `index_hash` it was made against: rescanning
-reopens the checkpoints, because the units may now be different.
+**The note needs at least five words saying what was decided and on what basis.** `--note "ok"` is refused: it
+records a signature rather than a judgement, and the closing report carries the note verbatim as the evidence
+that somebody answered. "ran unattended, kept the default scope" is a permitted answer and a recorded one —
+deciding unattended is a decision, and the requirement is that it says so. A decision is bound to the
+`index_hash` it was made against: rescanning reopens the checkpoints, because the units may now be different.
 
 **P4 was once left out of this**, on the reasoning that a queued block nobody decided already holds the run
 at `review_required`. That confuses holding the *gate* with opening a *pause*: nothing printed the question

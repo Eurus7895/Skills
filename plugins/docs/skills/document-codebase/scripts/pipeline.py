@@ -622,6 +622,7 @@ CHECKPOINTS = (
      "ask": "is this the right scope to spend the budget on"},
     {"id": "P2", "opened_by": "analyze", "blocks": "check",
      "show": "one line per module -- what you decided it is for -- and every `unknown`",
+     "show_from": "uncertain_modules",
      "ask": "do these roles match what the repository is"},
     {"id": "P3", "opened_by": "check", "blocks": "document",
      "show": "the components and their boundaries, the flows traced and the ones "
@@ -666,7 +667,117 @@ def prose_queued(build):
     return (coverage.get("queued") or 0) > (coverage.get("reviewed") or 0)
 
 
+SHOW_SAMPLE = 3
+SHOW_CAP = 8
+
+
+def uncertain_modules(build):
+    """What P2 should actually put in front of someone, or None if nothing is written yet.
+
+    **The question was right and the unit was wrong.** "One line per module" is fifty lines
+    of the model's own prose handed to a person for confirmation on a fifty-module
+    repository, which is the review load that produces a habitual yes -- and a checkpoint
+    answered out of habit is worse than no checkpoint, because it leaves a record saying
+    somebody looked. So the ask is bounded, and it is pointed at the modules where the
+    analysis is least sure of itself rather than spread evenly over all of them:
+
+    * every module carrying an `unknown` statement -- the ones where the analysis said the
+      repository does not answer, which is exactly where a wrong role hides
+    * every module with fewer than the four kinds answered, which the gate counts as read
+      but not answered
+    * a small sample of the rest, so a run where nothing is uncertain is still spot-checked
+      rather than waved through
+
+    Returns None when `module-analysis.jsonl` holds nothing. That is the ordinary state at
+    the moment P2 opens: `analyze` opens it, and the roles are written by hand afterwards.
+    The static `show` stands in then, and this list appears where it can be acted on -- in
+    the refusal `check` gives, which is when the material exists and somebody is looking.
+    """
+    unknowns, kinds = set(), {}
+    for line in _lines(os.path.join(build, "module-analysis.jsonl")):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue                       # validate_analysis owns the verdict on this
+        if not isinstance(row, dict):
+            continue
+        path = row.get("path")
+        if not path:
+            continue
+        for statement in row.get("statements", ()) or ():
+            if not isinstance(statement, dict):
+                continue
+            kinds.setdefault(path, set()).add(statement.get("kind"))
+            if statement.get("status") == "unknown":
+                unknowns.add(path)
+    if not kinds:
+        return None
+
+    def listed(paths):
+        paths = sorted(paths)
+        shown = ", ".join(paths[:SHOW_CAP])
+        if len(paths) > SHOW_CAP:
+            shown += ", and %d more" % (len(paths) - SHOW_CAP)
+        return shown
+
+    thin = {path for path, seen in kinds.items()
+            if len(seen & set(READ_KINDS)) < len(READ_KINDS)}
+    parts = []
+    if unknowns:
+        parts.append("the %d module(s) that recorded an `unknown`, where the repository "
+                     "does not answer and a wrong role hides: %s"
+                     % (len(unknowns), listed(unknowns)))
+    remaining = thin - unknowns
+    if remaining:
+        parts.append("the %d with fewer than the four kinds answered: %s"
+                     % (len(remaining), listed(remaining)))
+    rest = sorted(set(kinds) - unknowns - thin)
+    if rest:
+        parts.append("and %d of the %d settled one(s) as a sample: %s"
+                     % (min(SHOW_SAMPLE, len(rest)), len(rest),
+                        ", ".join(rest[:SHOW_SAMPLE])))
+    return "; ".join(parts)
+
+
+SHOW_FROM = {"uncertain_modules": uncertain_modules}
+
+
+def checkpoint_show(checkpoint, build):
+    """What to put in front of the person: the computed list where there is one.
+
+    A checkpoint may name a function that reads the build and says what is actually
+    uncertain. Where it returns nothing -- because the material is not written yet -- the
+    static description stands, so a checkpoint never loses its question to an empty list.
+    """
+    compute = SHOW_FROM.get(checkpoint.get("show_from"))
+    if compute:
+        try:
+            computed = compute(build)
+        except (OSError, ValueError):
+            # Naming what to review must not be able to fail the run. The static text says
+            # the same thing less precisely.
+            computed = None
+        if computed:
+            return computed
+    return checkpoint["show"]
+
+
 OPENS_WHEN = {"prose_queued": prose_queued}
+
+# The floor a recorded decision has to clear, in words, and the same one `manual.py` puts on
+# a brevity exception -- where the rule is that "Short." is a label rather than a reason.
+#
+# **A checkpoint that accepts "ok" records a signature, not a judgement.** Until this, the
+# only requirement was a note that was not empty, so `--note "ok"` cleared a question about
+# the scope of an entire run, and nothing downstream could tell it from a decision somebody
+# made. That is a stricter standard applied to the smaller decision: an exception about the
+# length of one section had to be argued in five words, and the scope the whole budget is
+# spent on did not.
+#
+# A floor is not a guarantee of substance -- five words can be spent on nothing. What it buys
+# is that the reflex costs more than the judgement did, and that a rubber stamp is legible as
+# one in the closing report, which carries these notes verbatim.
+DECISION_NOTE_WORDS = 5
 
 
 def invoked_as():
@@ -1092,9 +1203,17 @@ def main():
         known = {c["id"]: c for c in CHECKPOINTS}
         if args.checkpoint not in known:
             return fail("--checkpoint must be one of: %s" % ", ".join(sorted(known)))
-        if not (args.note or "").strip():
+        note = (args.note or "").strip()
+        if not note:
             return fail("--note is required: a decision with no record of what was "
                         "decided is not one the closing report can carry")
+        if len(note.split()) < DECISION_NOTE_WORDS:
+            return fail(
+                "--note needs at least %d words saying what was decided and on what "
+                "basis. %r is a signature, and the closing report carries this verbatim "
+                "as the record that somebody answered %s. Deciding unattended is "
+                "allowed -- say that, and say what you went on."
+                % (DECISION_NOTE_WORDS, note[:40], args.checkpoint))
         path = checkpoint_path(args.build, args.checkpoint)
         # Only a checkpoint that is actually open may be decided. Without this a caller
         # can answer a question nobody has been asked yet -- decide `P2` straight after
@@ -1108,17 +1227,17 @@ def main():
                         "is not one anybody answered."
                         % (args.checkpoint, known[args.checkpoint]["opened_by"]), 1)
         if args.dry_run:
-            print("would record %s: %s" % (args.checkpoint, args.note.strip()))
+            print("would record %s: %s" % (args.checkpoint, note))
             print("would write %s" % path)
             return 0
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"checkpoint": args.checkpoint, "state": "decided",
-                       "index_hash": digest, "note": args.note.strip(),
+                       "index_hash": digest, "note": note,
                        "ask": known[args.checkpoint]["ask"]}, fh, indent=1,
                       sort_keys=True)
             fh.write("\n")
-        print("%s decided: %s" % (args.checkpoint, args.note.strip()))
+        print("%s decided: %s" % (args.checkpoint, note))
         print("wrote %s" % path)
         return 0
 
@@ -1143,7 +1262,8 @@ def main():
                 "said>'\n"
                 "      Running unattended is a decision too -- record what you chose and "
                 "why, and it will be in the closing report.\n"
-                % (args.component, blocked["id"], blocked["opened_by"], blocked["show"],
+                % (args.component, blocked["id"], blocked["opened_by"],
+                   checkpoint_show(blocked, args.build),
                    blocked["ask"], invoked_as(), blocked["id"]))
             return 1
 
@@ -1227,7 +1347,8 @@ def main():
                 print("\n-- checkpoint %s is open, and %s will not run until it is "
                       "decided.\n   Show them: %s\n   Ask them:  %s\n   Then:      "
                       "python3 %s decide --checkpoint %s --note '<what they said>'"
-                      % (checkpoint["id"], checkpoint["blocks"], checkpoint["show"],
+                      % (checkpoint["id"], checkpoint["blocks"],
+                         checkpoint_show(checkpoint, args.build),
                          checkpoint["ask"], invoked_as(), checkpoint["id"]))
     return code
 
