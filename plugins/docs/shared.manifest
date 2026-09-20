@@ -12,6 +12,9 @@
 
 scripts/pipeline.py                        -> skills/document-codebase/scripts/pipeline.py
 scripts/build_dir.py                       -> skills/document-codebase/scripts/build_dir.py
+# Data only, imported by nothing: it ships so that a reader holding a report with `G003` in
+# it can look the code up beside the scripts that raised it.
+scripts/findings.py                        -> skills/document-codebase/scripts/findings.py
 scripts/draft_artifact.py                  -> skills/document-codebase/scripts/draft_artifact.py
 
 scripts/survey/scan_repo.py                -> skills/document-codebase/scripts/survey/scan_repo.py
