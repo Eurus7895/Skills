@@ -551,45 +551,42 @@ def main():
             # this script wrote -- has a caption to match rather than an ambiguity to
             # refuse. Pages outside every group keep the old single-toctree behaviour.
             #
-            # **All or none.** Each `wire` writes the index as it succeeds, so a later
-            # group with no matching caption used to leave the file half wired while the
-            # refusal below said it was untouched -- and `unwired` does not fail a build,
-            # so that incomplete navigation could reach review and publication on the
-            # strength of a message that was false. The original bytes are kept and put
-            # back, so the promise the refusal makes is one the code keeps.
+            # **All or none, and nothing written until all of it resolves.** Each group is
+            # planned against the text the previous one produced, in memory, and the file is
+            # written once at the end. A later group with no matching caption used to leave
+            # the file half wired while the refusal below said it was untouched -- and
+            # `unwired` does not fail a build, so that incomplete navigation could reach
+            # review and publication on the strength of a message that was false.
+            #
+            # Planning first rather than writing and undoing is what makes that message
+            # true unconditionally. A rollback keeps its promise only for the exceptions it
+            # anticipates: an `OSError` from the third group's write, or an interrupt
+            # between two writes, leaves the earlier groups on disk with nothing left
+            # running to take them back. Here there is one write, and before it the file is
+            # still the author's.
             index_path = os.path.join(args.out, index_name)
             try:
-                with open(index_path, "rb") as handle:
-                    original = handle.read()
-            except OSError as exc:
-                sys.stderr.write("FAIL  cannot read %s: %s\n" % (index_name, exc))
-                return 2
-            try:
+                text = wire_toctree.read_index(index_path)
                 notes, changed = [], False
                 for caption, group in grouped(entries):
-                    one, note = wire_toctree.wire(index_path, group, caption)
+                    text, one, note = wire_toctree.plan(text, group, caption, index_name)
                     changed = changed or one
                     notes.append(note)
-                note = "; ".join(notes)
             except wire_toctree.Refused as exc:
                 # The index is the author's, so a refusal leaves it exactly as it was and
                 # the pages stand unwired rather than the file being guessed at.
-                restored = ""
-                try:
-                    with open(index_path, "rb") as handle:
-                        if handle.read() != original:
-                            with open(index_path, "wb") as writing:
-                                writing.write(original)
-                            restored = " (earlier groups were rolled back)"
-                except OSError as failure:
-                    # Say so rather than claiming a rollback that did not happen.
-                    restored = (" -- and %s could not be restored: %s. Check it by hand"
-                                % (index_name, failure))
                 sys.stderr.write("REFUSED  %s\n" % exc)
-                print("kept the existing %s unchanged%s; wire these in by hand: %s"
-                      % (index_name, restored, ", ".join(entries)))
+                print("kept the existing %s unchanged; wire these in by hand: %s"
+                      % (index_name, ", ".join(entries)))
             else:
-                print(note)
+                if changed:
+                    try:
+                        wire_toctree.write_index(index_path, text)
+                    except OSError as exc:
+                        sys.stderr.write("FAIL  cannot write %s: %s\n"
+                                         % (index_name, exc))
+                        return 2
+                print("; ".join(notes))
         else:
             print("kept the existing %s. Add these to its toctree, or rerun with "
                   "--wire-toctree: %s" % (index_name, ", ".join(entries)))

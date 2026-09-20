@@ -117,8 +117,14 @@ def _caption(lines, start, body_end):
     return None
 
 
-def wire(path, entries, caption=None):
-    """Add `entries` to a toctree in `path`. Returns (changed, note).
+def plan(text, entries, caption=None, name="index"):
+    """What `text` becomes with `entries` added. Returns (new_text, changed, note).
+
+    Pure: it reads nothing and writes nothing, so a caller wiring several groups into one
+    index can resolve every group before touching the file. That is what makes a multi-group
+    wiring atomic -- there is one write, at the end, and a refusal on the fourth group
+    cannot leave the first three on disk. A caller that writes as it goes has to undo them
+    instead, which is a promise it can only keep when nothing unexpected is raised.
 
     With one toctree, that one. With several, only the one whose `:caption:` is `caption`
     -- because a grouped index is now what this pipeline itself generates, and refusing
@@ -126,14 +132,6 @@ def wire(path, entries, caption=None):
     wrote. The refusal below stands for the case it was written for: several toctrees and
     nothing saying which is meant.
     """
-    if not os.path.isfile(path):
-        raise Refused("no such index: %s" % path)
-    # Read without newline translation. Reading universally and writing "\n" would
-    # convert a CRLF file line by line: the promise is that everything outside the entry
-    # list survives byte for byte, and a whole-file diff on a Windows checkout breaks it
-    # more thoroughly than any wrong entry would.
-    with open(path, encoding="utf-8", newline="") as fh:
-        text = fh.read()
     ending = "\r\n" if "\r\n" in text else "\n"
     lines = text.splitlines()
 
@@ -141,8 +139,7 @@ def wire(path, entries, caption=None):
     if not blocks:
         raise Refused(
             "%s has no toctree. Adding one means choosing where in the document it "
-            "belongs, which is the author's decision; add the directive and rerun"
-            % os.path.basename(path))
+            "belongs, which is the author's decision; add the directive and rerun" % name)
     if len(blocks) > 1:
         named = [b for b in blocks
                  if caption and _caption(lines, b[0], b[2]) == caption]
@@ -150,7 +147,7 @@ def wire(path, entries, caption=None):
             raise Refused(
                 "%s has %d toctrees and nothing says which one these pages belong in%s; "
                 "add them by hand"
-                % (os.path.basename(path), len(blocks),
+                % (name, len(blocks),
                    " (no toctree is captioned %r)" % caption if caption else ""))
         blocks = named
 
@@ -165,7 +162,7 @@ def wire(path, entries, caption=None):
 
     missing = [entry for entry in entries if entry not in listed]
     if not missing:
-        return False, "every page was already listed in %s" % os.path.basename(path)
+        return text, False, "every page was already listed in %s" % name
 
     # Options must stay directly under the directive, so new entries go after the last
     # non-entry line rather than at the top of the body.
@@ -186,10 +183,41 @@ def wire(path, entries, caption=None):
     output = ending.join(rebuilt)
     if text.endswith(("\n", "\r")):
         output += ending
+    return output, True, "added %d page(s) to the toctree in %s: %s" % (
+        len(missing), name, ", ".join(missing))
+
+
+def read_index(path):
+    """The index's bytes as text, without newline translation.
+
+    Reading universally and writing "\\n" would convert a CRLF file line by line: the
+    promise is that everything outside the entry list survives byte for byte, and a
+    whole-file diff on a Windows checkout breaks it more thoroughly than any wrong entry
+    would.
+    """
+    if not os.path.isfile(path):
+        raise Refused("no such index: %s" % path)
+    with open(path, encoding="utf-8", newline="") as fh:
+        return fh.read()
+
+
+def write_index(path, text):
     with open(path, "w", encoding="utf-8", newline="") as fh:
-        fh.write(output)
-    return True, "added %d page(s) to the toctree in %s: %s" % (
-        len(missing), os.path.basename(path), ", ".join(missing))
+        fh.write(text)
+
+
+def wire(path, entries, caption=None):
+    """Add `entries` to a toctree in `path`. Returns (changed, note).
+
+    One group, one file, one write. A caller with several groups to wire into the same
+    index uses `plan` directly and writes once, so that nothing is on disk until every
+    group has resolved.
+    """
+    text = read_index(path)
+    output, changed, note = plan(text, entries, caption, os.path.basename(path))
+    if changed:
+        write_index(path, output)
+    return changed, note
 
 
 def main():

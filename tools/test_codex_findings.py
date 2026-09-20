@@ -70,6 +70,13 @@ class AtomicWiringTests(unittest.TestCase):
     left earlier groups written while the message said the index was untouched -- and
     `unwired` does not fail a build, so that incomplete navigation could reach publication
     on the strength of a claim that was false.
+
+    The first fix for this wrote as before and restored the original bytes on `Refused`,
+    which keeps the promise only for the exception it anticipates: an `OSError` on the third
+    group's write, or an interrupt between two writes, left the earlier groups on disk with
+    nothing running to take them back. So the groups are resolved in memory and the file is
+    written once, which is what the finding asked for, and the file is still the author's
+    until every group has agreed.
     """
 
     def setUp(self):
@@ -108,7 +115,13 @@ class AtomicWiringTests(unittest.TestCase):
         # The promise the refusal makes is one the code now keeps.
         self.assertEqual(self.index.read_text(), self.before)
 
-    def test_it_says_so_when_it_rolled_back(self):
+    def test_it_claims_no_rollback_because_there_is_nothing_to_roll_back(self):
+        """The earlier fix reported "(earlier groups were rolled back)" here.
+
+        That message was honest about what that version did, and it is now a message about
+        an event that cannot happen: the refusal comes before any write, so the index was
+        never other than unchanged.
+        """
         pages = ["getting_started/quick_start", "usage/invoking"]
         model = self.root / "doc.json"
         model.write_text(json.dumps(self.doc(pages)))
@@ -116,7 +129,44 @@ class AtomicWiringTests(unittest.TestCase):
             [sys.executable, script("render_docs.py"), "--doc", str(model),
              "--out", str(self.out), "--wire-toctree"],
             capture_output=True, text=True)
-        self.assertIn("rolled back", result.stdout)
+        self.assertIn("kept the existing index.rst unchanged", result.stdout)
+        self.assertNotIn("rolled back", result.stdout)
+        self.assertEqual(self.index.read_text(), self.before)
+
+    def test_a_failure_that_is_not_a_refusal_leaves_the_index_alone_too(self):
+        """The hole the rollback could not cover, so it is pinned rather than argued.
+
+        The second group raises `OSError` -- a full disk, a lost mount, a permission that
+        changed under the run. Under write-as-you-go the first group was already on disk and
+        the exception escaped the `except Refused`, so nothing restored it. Planning first
+        makes this case need no handling at all.
+        """
+        pages = ["getting_started/quick_start", "architecture/data_flow"]
+        model = self.root / "doc.json"
+        model.write_text(json.dumps(self.doc(pages)))
+
+        import wire_toctree
+        import render_docs
+        real = wire_toctree.plan
+        calls = []
+
+        def failing(*args, **kwargs):
+            calls.append(1)
+            if len(calls) > 1:
+                raise OSError("no space left on device")
+            return real(*args, **kwargs)
+
+        wire_toctree.plan = failing
+        argv = sys.argv
+        sys.argv = ["render_docs.py", "--doc", str(model), "--out", str(self.out),
+                    "--wire-toctree"]
+        try:
+            with self.assertRaises(OSError):
+                render_docs.main()
+        finally:
+            wire_toctree.plan = real
+            sys.argv = argv
+        self.assertGreater(len(calls), 1, "the second group never ran")
         self.assertEqual(self.index.read_text(), self.before)
 
     def test_every_group_matching_still_wires(self):
