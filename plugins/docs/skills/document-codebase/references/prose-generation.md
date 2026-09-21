@@ -74,13 +74,30 @@ section omits a material facet, overstates evidence, remains generic, or is not 
 reader. Repair `manual-analysis.json`, then review the changed content again. Rendering is a transformation,
 not a content review.
 
-**Read one page as a reader before you accept it**, and answer three questions about it rather than about
-the answers behind it:
+**Run the measurement first, then read what it found.**
 
-1. Does the first sentence of each section say something, or announce something?
-2. Is there a sentence you had to read twice? That one is too long, and splitting it is the repair.
-3. Do three consecutive sections open the same way? Then the shape is writing the prose, not the subject.
+```bash
+python3 scripts/publish/readability.py docs --for-review
+```
 
-A page that passes every validator and fails these is a page that is correct and unread. Fix it in
+It names the long sentences, the walls of text and the sections that all open the same way, worst first, with
+each passage quoted. Two reasons to start there rather than reading the whole document: twenty pages is more
+than anyone reviews honestly, and the same question asked over fifteen passages gets a real answer where over
+twenty pages it gets a habitual yes. It is the same bounded-ask rule P2 follows.
+
+**Then do the part it cannot.** The script measures shape, and shape is a signal, not a verdict — a 30-word
+sentence can be perfectly clear and a 10-word one impenetrable. Answer for each flagged passage: is it clear
+as it stands; if not, what is wrong; and what replaces it. Give the replacement, not a note asking for one.
+
+**Two defects it cannot see at all**, and they are the ones that make a correct document useless:
+
+- **A term used before it is defined.** `The reconciler idempotently converges divergent state` clears every
+  measurement in the script and tells a reader nothing.
+- **A procedure given out of order.** "Call flush after write. Call write after open." is two short, clean
+  sentences teaching the sequence backwards.
+
+Look for both while you are reading the flagged passages, and on any page the script called clean.
+
+A page that passes every validator and fails this is a page that is correct and unread. Fix it in
 `manual-analysis.json`, where the prose lives — never in the rendered output, which the next render
 overwrites.

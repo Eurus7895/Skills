@@ -198,8 +198,25 @@ def heading_depth(lines, start):
     return 0
 
 
+QUOTE_WORDS = 30
+
+
+def quote(text):
+    """Enough of a passage to judge it by, without reprinting the page."""
+    parts = words(text)
+    if len(parts) <= QUOTE_WORDS:
+        return " ".join(parts)
+    return " ".join(parts[:QUOTE_WORDS]) + " ..."
+
+
 def measure(title, line, paragraphs):
-    """What is worth saying about one section, and how much of it there is."""
+    """What is worth saying about one section, and how much of it there is.
+
+    Each note carries the passage itself, not only where it is. A number is enough to find
+    a long sentence and not enough to judge one: whether 30 words are clear or tangled is a
+    reading, and the reading is what this cannot do. Quoting the text is what lets the next
+    reader -- a person, or a model asked to look -- answer the question this only raises.
+    """
     notes, longest, sentence_count = [], 0, 0
     for where, text in paragraphs:
         lengths = sentence_lengths(text)
@@ -208,14 +225,17 @@ def measure(title, line, paragraphs):
             longest = max(longest, length)
             if length > LONG_SENTENCE_WORDS:
                 notes.append({"line": where, "kind": "long_sentence", "value": length,
+                              "text": quote(text),
                               "detail": "a %d-word sentence: one idea per sentence, and "
                                         "under %d words" % (length, LONG_SENTENCE_WORDS)})
         if len(lengths) > LONG_PARAGRAPH_SENTENCES:
             notes.append({"line": where, "kind": "long_paragraph", "value": len(lengths),
+                          "text": quote(text),
                           "detail": "a %d-sentence paragraph: a block this long is one "
                                     "nobody scans" % len(lengths)})
     if paragraphs and announces(paragraphs[0][1]):
         notes.append({"line": paragraphs[0][0], "kind": "announces", "value": 1,
+                      "text": quote(paragraphs[0][1]),
                       "detail": "opens by saying what the section is about. Lead with the "
                                 "answer instead -- the heading already said the subject"})
     return {"section": title, "line": line, "paragraphs": len(paragraphs),
@@ -292,7 +312,8 @@ def worst_first(result, limit):
         for section in page["sections"]:
             for note in section["notes"]:
                 rows.append((note["value"], page["path"], note["line"],
-                             section["section"], note["detail"]))
+                             section["section"], note["detail"],
+                             note.get("text", "")))
     rows.sort(key=lambda row: -row[0])
     return rows[:limit]
 
@@ -314,8 +335,10 @@ def render(result, limit):
     rows = worst_first(result, limit)
     if rows:
         print("\nworst first:")
-        for _, path, line, section, detail in rows:
+        for _, path, line, section, detail, text in rows:
             print("  %s:%d  [%s]\n      %s" % (path, line, section, detail))
+            if text:
+                print("      > %s" % text)
 
     for page in result["pages"]:
         for run in page["repeated_openings"]:
@@ -328,11 +351,51 @@ def render(result, limit):
               "shape,\nnot about whether the document explains anything.")
 
 
+REVIEW_PREAMBLE = """\
+These passages were flagged by shape alone -- sentence length, paragraph length, a repeated
+opening. Shape is a signal and not a verdict, and the questions below are the ones no
+measurement can answer. Read each passage and say, for each one:
+
+  1. Is it clear as it stands? A long sentence can be perfectly clear, and a short one can
+     be impenetrable. If it is clear, say so and move on.
+  2. If it is not, what is wrong: too much in one sentence, an undefined term, or steps in
+     an order the reader cannot follow?
+  3. Give the replacement, not a note asking for one.
+
+Two things this could not check at all, so look for them while you are here: a term used
+before it is defined, and a procedure given out of order.
+"""
+
+
+def for_review(result, limit):
+    """The flagged passages, framed for whoever reads them next.
+
+    **The measurement and the judgement are different jobs, and this is the join.** What the
+    script finds is shape; whether a 30-word sentence is tangled or merely long is a reading.
+    Handing over the passages with the questions attached is what turns a list of line
+    numbers into something a person -- or a model asked to look -- can act on, and it keeps
+    the reading bounded: the whole document is too much to review honestly, and fifteen
+    passages is not.
+    """
+    lines = [REVIEW_PREAMBLE]
+    for position, row in enumerate(worst_first(result, limit), 1):
+        _, path, line, section, detail, text = row
+        lines.append("%d. %s:%d  [%s]\n   %s\n   > %s"
+                     % (position, path, line, section, detail, text or "(no text)"))
+    if len(lines) == 1:
+        lines.append("Nothing was flagged by shape. The two questions above still stand, "
+                     "and\nnothing here has looked at them.")
+    return "\n\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("docs", help="the rendered documentation directory")
     parser.add_argument("--worst", type=int, default=15,
                         help="how many passages to list (default 15)")
+    parser.add_argument("--for-review", action="store_true",
+                        help="print the flagged passages with the questions a reader or "
+                             "model should answer about them")
     parser.add_argument("--format", choices=("text", "json"), default="text")
     parser.add_argument("--out", help="also write the full report here, as JSON")
     args = parser.parse_args()
@@ -346,7 +409,9 @@ def main():
                          % args.docs)
         return 2
 
-    if args.format == "json":
+    if args.for_review:
+        print(for_review(result, args.worst))
+    elif args.format == "json":
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         render(result, args.worst)

@@ -108,7 +108,7 @@ class BadProseTests(Fixture):
 
     def test_a_finding_names_the_file_and_line(self):
         rows = readability.worst_first(self.report(), 1)
-        _, path, line, section, detail = rows[0]
+        _, path, line, section, detail, _text = rows[0]
         self.assertEqual(path, "bad.rst")
         self.assertGreater(line, 0)
         self.assertEqual(section, "Configuration")
@@ -232,6 +232,66 @@ class CommandTests(Fixture):
         for forbidden in ("import manual", "import build_dir", "import findings",
                           "import sphinx_support", "import pipeline"):
             self.assertNotIn(forbidden, source, forbidden)
+
+
+class ReviewHandoffTests(Fixture):
+    """The join between what code measures and what only a reading can settle.
+
+    The script finds shape. Whether a 30-word sentence is tangled or merely long is a
+    reading, and two defects are invisible to it entirely: a term used before it is defined,
+    and a procedure given out of order. Both clear every measurement here.
+    """
+
+    def test_the_passages_are_quoted_not_just_located(self):
+        """A line number is enough to find a sentence and not enough to judge one."""
+        self.page("bad.rst", BAD)
+        rows = readability.worst_first(self.report(), 1)
+        self.assertTrue(rows[0][5], "no text carried with the finding")
+        self.assertIn("loader", rows[0][5])
+
+    def test_a_quote_is_bounded(self):
+        """Reprinting the page would make the handoff the thing nobody reads."""
+        self.page("bad.rst", BAD)
+        rows = readability.worst_first(self.report(), 1)
+        self.assertLessEqual(len(rows[0][5].split()),
+                             readability.QUOTE_WORDS + 1)
+
+    def test_the_handoff_asks_what_shape_cannot_answer(self):
+        self.page("bad.rst", BAD)
+        text = readability.for_review(self.report(), 5)
+        self.assertIn("clear as it stands", text)
+        self.assertIn("before it is defined", text)
+        self.assertIn("out of order", text)
+
+    def test_the_handoff_gives_the_passages_to_judge(self):
+        self.page("bad.rst", BAD)
+        text = readability.for_review(self.report(), 5)
+        self.assertIn("bad.rst:", text)
+        self.assertIn("The loader", text)
+
+    def test_a_clean_document_still_hands_over_the_questions(self):
+        """Zero findings by shape is not zero to read: the two blind spots remain."""
+        self.page("ok.rst", GOOD)
+        text = readability.for_review(self.report(), 5)
+        self.assertIn("Nothing was flagged by shape", text)
+        self.assertIn("before it is defined", text)
+
+    def test_prose_that_is_short_and_unreadable_is_not_flagged(self):
+        """Pinned as a limit, not a defect: this is what the reading is for.
+
+        Jargon with nothing defined, and a procedure taught backwards. Short sentences,
+        short paragraphs, no repetition -- clean by every measure this has.
+        """
+        self.page("opaque.rst",
+                  "Reconciliation\n==============\n\n"
+                  "The reconciler idempotently converges divergent state. Conflicts "
+                  "resolve via LWW semantics keyed on the vector clock.\n\n"
+                  "Ordering\n========\n\n"
+                  "Call flush after write. Call write after open.\n")
+        counts = self.counts()
+        for key in ("long_sentences", "long_paragraphs", "announcing_openings",
+                    "repeated_openings"):
+            self.assertEqual(counts[key], 0, key)
 
 
 if __name__ == "__main__":
