@@ -41,9 +41,46 @@ failure behavior. A processing section normally needs all of mechanism, decision
 - Keep an unresolved item explicit when its answer matters to the reader. Never fill the gap with a plausible
   convention.
 
+## How it has to read
+
+Everything above is about being right. None of it is about being read, and a manual nobody finishes is a
+manual that failed whatever its citations prove. These rules are the other half, and they are concrete so
+that "make it clearer" is not the review note.
+
+- **Lead with the answer.** The first sentence of a section states what happens, not what the section is
+  about. "This section describes how orders are validated" tells the reader nothing they did not get from
+  the heading. "An order is rejected before it reaches the queue when its SKU is unknown" is the answer.
+- **One idea per sentence, and keep it under 25 words.** A sentence carrying three clauses is where the
+  reader loses the thread, and it is the single most common defect in generated prose. Split it. Two plain
+  sentences beat one accurate paragraph-long one.
+- **Two to four sentences per paragraph.** A section that is one unbroken block is one nobody scans, and a
+  reader who cannot scan cannot find the part they came for.
+- **The seven-point shape is coverage, not an outline.** It lists what a section may owe a reader; it is not
+  the order to write them in, and following it literally makes every section read the same. When two
+  consecutive sections have the same beats in the same order, at least one is padded to fit the form — cut
+  it to what that subject actually needs.
+- **Name the thing, then say what it does.** Subject first. "`OrderService` writes each SKU to the store"
+  reads; "each SKU is written to the store by `OrderService`" makes the reader hold the object until the
+  end of the sentence to find out who did it.
+
+**Readability is not brevity.** A section may be long because the subject is; what it may not be is a single
+25-line paragraph of 40-word sentences. The density floor elsewhere in this pipeline refuses a section that
+replaced its answers with nothing; these rules refuse one that buried them.
+
 ## Model review before render
 
 Review the draft against the assigned questions, grounding record, and cited source. Request changes when a
 section omits a material facet, overstates evidence, remains generic, or is not actionable for its intended
 reader. Repair `manual-analysis.json`, then review the changed content again. Rendering is a transformation,
 not a content review.
+
+**Read one page as a reader before you accept it**, and answer three questions about it rather than about
+the answers behind it:
+
+1. Does the first sentence of each section say something, or announce something?
+2. Is there a sentence you had to read twice? That one is too long, and splitting it is the repair.
+3. Do three consecutive sections open the same way? Then the shape is writing the prose, not the subject.
+
+A page that passes every validator and fails these is a page that is correct and unread. Fix it in
+`manual-analysis.json`, where the prose lives — never in the rendered output, which the next render
+overwrites.
