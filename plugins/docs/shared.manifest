@@ -43,6 +43,9 @@ scripts/document/validate_flow_diagrams.py -> skills/document-codebase/scripts/d
 scripts/document/build_document_model.py   -> skills/document-codebase/scripts/document/build_document_model.py
 
 scripts/publish/render_docs.py             -> skills/document-codebase/scripts/publish/render_docs.py
+# Standalone: imports nothing from the pipeline and reads no build directory, so it runs
+# against a docs/ tree on a machine that has none of the other scripts.
+scripts/publish/readability.py             -> skills/document-codebase/scripts/publish/readability.py
 scripts/publish/sphinx_support.py          -> skills/document-codebase/scripts/publish/sphinx_support.py
 scripts/publish/wire_toctree.py            -> skills/document-codebase/scripts/publish/wire_toctree.py
 scripts/publish/check_prose.py             -> skills/document-codebase/scripts/publish/check_prose.py

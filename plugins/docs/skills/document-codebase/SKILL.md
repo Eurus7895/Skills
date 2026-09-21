@@ -249,6 +249,7 @@ is the one script you call yourself, for a packet's parts. You do not need to re
 | `references/pipeline.md` | any component, to see what it runs, what it may skip, and its flags |
 | `references/schemas.md` | `analyze`, before emitting the first statement; every schema and finding code |
 | `scripts/findings.py` | a report names a code you do not recognise — every code in one place, with its family, the script that raises it and what it means. Data only: read it, never run it |
+| `scripts/publish/readability.py` | before accepting a rendered page, or any time a document is correct and hard to read. `python3 scripts/publish/readability.py docs` names the long sentences, the walls of text and the sections that all open the same way, worst first. It imports nothing else and reads no build directory, so it runs wherever the pages are |
 | `references/context-policy.md` | `analyze`, for packets, partitions and the append discipline |
 | `references/diagram-policy.md` | `document`, before reviewing a diagram or writing a view spec |
 | `references/presets.md` | `document`, to override the preset |
