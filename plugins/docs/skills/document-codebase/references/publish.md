@@ -6,7 +6,9 @@ successful final `review`, then atomically promotes `.docs-build/rendered-docs/`
 **P4 is an enforced checkpoint.** The first `review` opens it when `check_prose` queues content. That run
 normally returns `review_required`; the queue is the condition that opens the checkpoint. The driver refuses
 the reviewed `review` and all later components until
-`decide --checkpoint P4` records the judgement.
+`decide --checkpoint P4 --user-response "<their answer>" --p4-verdict accepted|changes-requested`
+records the user's judgement. Show the queue
+and evidence before asking; never supply this response on an unattended run.
 `review_required` remains the quality verdict for queued blocks without a review; P4 is what stops the
 workflow and puts those blocks in front of a reviewer.
 
@@ -47,13 +49,15 @@ review stale and requires another model review; a block id alone never approves 
 Write verdicts to `.docs-build/prose-review.jsonl` and run `review` again:
 
 ```bash
-python3 scripts/pipeline.py decide --checkpoint P4 --note "<what the review decided>"
+python3 scripts/pipeline.py decide --checkpoint P4 --user-response "<the user's answer>" --p4-verdict accepted
 python3 scripts/pipeline.py review --review .docs-build/prose-review.jsonl
 ```
 
 A queued block you did not decide is reported as undecided, never as passed, and holds the run at
 `review_required` — which is honest. Ranks, ceilings and the review format are in
 [`prose-rules.md`](prose-rules.md).
+If a repair changes the queue, render and run the unreviewed `review` again, show the updated readings,
+and collect a new P4 response before running `review --review`.
 
 ## 8. Read the report against your own run
 

@@ -6,9 +6,9 @@ Instructions for any AI agent working inside this repository.
 
 A **GitHub Copilot plugin marketplace**. It ships plugins; each plugin bundles one or more Agent Skills.
 
-There is no application here — no build, no test suite, no runtime, no dependencies to install. Do not look for
-a `package.json` to run, and do not add a toolchain unless you are explicitly asked to. The deliverable is
-always Markdown and JSON.
+There is no application here. The repository has stdlib Python scripts and a behavioural test suite under
+`tools/test_*.py`; CI installs Sphinx, MyST and PlantUML to exercise the documentation pipeline. Do not add
+an application toolchain unless explicitly asked. Deliverables include Markdown, JSON and bundled scripts.
 
 Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before authoring anything. It is the normative standard; this file
 tells you how to operate, that file tells you what correct output looks like.

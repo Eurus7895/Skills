@@ -146,9 +146,14 @@ one, and refuses to run the next component until a decision is recorded:
 python3 scripts/pipeline.py decide --checkpoint P1 --note "<what they said>"
 ```
 
-The note is required and goes in the closing report, so "ran unattended, kept the default scope" is a
-permitted answer and a recorded one. A decision is bound to the `index_hash` it was made against: rescanning
-reopens the checkpoints, because the units may now be different.
+For P1–P3 the note goes in the closing report; an unattended decision may be recorded there when the user
+has asked for an unattended run. **P4 requires the user's direct answer after the queued blocks and their
+evidence are shown.** Do not decide it yourself, even on an unattended run. Record the answer with
+`decide --checkpoint P4 --user-response "<their answer>" --p4-verdict accepted|changes-requested`.
+`changes-requested` keeps P4 open until the draft is repaired and shown again. The CLI records the response; it cannot
+authenticate who spoke, so the agent must not invent or paraphrase approval. A content-changing repair
+invalidates P4 and the final review: run `review` without `--review` to refresh the queue, show the changed
+readings to the user, and collect a fresh answer before submitting the reviewed pass.
 
 **P4 was once left out of this**, on the reasoning that a queued block nobody decided already holds the run
 at `review_required`. That confuses holding the *gate* with opening a *pause*: nothing printed the question
@@ -163,8 +168,8 @@ into `module-analysis.jsonl` is lost at the next stage, and the decision note is
 
 **Do not pause anywhere else.** Everything else reads findings a script produced and acts on a documented
 table, and `check`'s re-dispatch is bounded at two attempts. Asking about those spends the user's attention
-on something already decided. If the user says to run unattended, note at each pause what you chose and why,
-and put the same list in the closing report.
+on something already decided. For an unattended run, record choices at P1–P3 and leave P4 pending until the
+user responds; put the decisions and pending checkpoint in the closing report.
 
 ## The run
 

@@ -481,6 +481,26 @@ def check_materialized():
                 fail("materialize", line.strip())
 
 
+def check_merge_markers():
+    """Reject unresolved conflicts in the instructions installed with a plugin."""
+    marker = re.compile(r"^(?:<<<<<<<(?: .*)?|=======[ \t]*|>>>>>>>(?: .*)?)$", re.M)
+    for root in (PLUGINS, os.path.join(REPO, "shared")):
+        for dirpath, _, filenames in os.walk(root):
+            for filename in filenames:
+                if not filename.endswith(".md"):
+                    continue
+                path = os.path.join(dirpath, filename)
+                try:
+                    content = read(path)
+                except OSError as exc:
+                    fail(rel(path), "cannot be read (%s)" % exc)
+                    continue
+                match = marker.search(content)
+                if match:
+                    fail(rel(path), "unresolved merge marker at line %d"
+                         % (content.count("\n", 0, match.start()) + 1))
+
+
 def main():
     names = plugin_names()
     if not names:
@@ -497,6 +517,7 @@ def main():
     check_skill_collisions()
     check_readme(names)
     check_repo_links()
+    check_merge_markers()
     check_tracked()
     check_materialized()
 

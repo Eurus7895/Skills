@@ -142,6 +142,7 @@ class BlockingTests(unittest.TestCase):
         checkpoints.mkdir(exist_ok=True)
         (checkpoints / "P4.json").write_text(json.dumps(
             {"checkpoint": "P4", "state": "pending", "index_hash": "sha256:aaa",
+             "review_queue_hash": pipeline.review_queue_hash(str(self.build)),
              "show": "the queued blocks", "ask": "are these the intended readings"}))
 
     def test_an_open_p4_holds_publish(self):
@@ -154,13 +155,66 @@ class BlockingTests(unittest.TestCase):
     def test_a_decision_releases_it(self):
         self.open_p4()
         decided = self.run_pipeline("decide", "--checkpoint", "P4",
-                                    "--note", "readings confirmed")
+                                    "--user-response", "readings confirmed",
+                                    "--p4-verdict", "accepted")
         self.assertEqual(decided.returncode, 0, decided.stderr)
         self.assertIsNotNone(
             pipeline.decision_for(str(self.build), "P4", "sha256:aaa"))
         # No longer the thing standing in front of publish.
         blocking = pipeline.blocking_checkpoint(str(self.build), "publish", "sha256:aaa")
         self.assertIsNone(blocking)
+
+    def test_a_generic_note_cannot_decide_p4(self):
+        self.open_p4()
+        decided = self.run_pipeline("decide", "--checkpoint", "P4",
+                                    "--note", "ran unattended")
+        self.assertNotEqual(decided.returncode, 0)
+        self.assertIn("--user-response", decided.stdout + decided.stderr)
+        self.assertIsNone(pipeline.decision_for(str(self.build), "P4", "sha256:aaa"))
+
+    def test_a_response_without_a_verdict_is_not_approval(self):
+        self.open_p4()
+        result = self.run_pipeline("decide", "--checkpoint", "P4",
+                                   "--user-response", "these need changes")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--p4-verdict", result.stdout + result.stderr)
+
+    def test_requested_changes_keep_p4_open(self):
+        self.open_p4()
+        result = self.run_pipeline("decide", "--checkpoint", "P4",
+                                   "--user-response", "fix the configuration section",
+                                   "--p4-verdict", "changes-requested")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNone(pipeline.decision_for(str(self.build), "P4", "sha256:aaa"))
+        self.assertIsNotNone(
+            pipeline.blocking_checkpoint(str(self.build), "publish", "sha256:aaa"))
+
+    def test_legacy_note_decision_cannot_bypass_p4(self):
+        self.open_p4()
+        (self.build / "checkpoints" / "P4.json").write_text(json.dumps(
+            {"checkpoint": "P4", "state": "decided", "index_hash": "sha256:aaa",
+             "note": "ran unattended"}))
+        self.assertIsNone(pipeline.decision_for(str(self.build), "P4", "sha256:aaa"))
+        self.assertIsNotNone(
+            pipeline.blocking_checkpoint(str(self.build), "publish", "sha256:aaa"))
+
+    def test_changed_queue_invalidates_p4_and_can_be_refreshed(self):
+        self.open_p4()
+        decided = self.run_pipeline("decide", "--checkpoint", "P4",
+                                    "--user-response", "these readings are right",
+                                    "--p4-verdict", "accepted")
+        self.assertEqual(decided.returncode, 0, decided.stderr)
+        (self.build / "prose-report.json").write_text(json.dumps(report(queued=21)))
+        self.assertIsNone(pipeline.decision_for(str(self.build), "P4", "sha256:aaa"))
+        self.assertIsNotNone(
+            pipeline.blocking_checkpoint(str(self.build), "review", "sha256:aaa",
+                                         review_file="prose-review.jsonl"))
+        self.assertIsNone(
+            pipeline.blocking_checkpoint(str(self.build), "review", "sha256:aaa"))
+        p4 = next(c for c in pipeline.CHECKPOINTS if c["id"] == "P4")
+        self.assertTrue(pipeline.open_checkpoint(str(self.build), p4, "sha256:aaa"))
+        refused = self.run_pipeline("decide", "--checkpoint", "P4", "--note", "old")
+        self.assertNotEqual(refused.returncode, 0)
 
     def test_status_reports_the_queue_from_coverage(self):
         """`status` had the same class of bug: it read `queue`, not `review_queue`."""
