@@ -651,6 +651,41 @@ def checkpoint_path(build, checkpoint_id):
     return os.path.join(build, "checkpoints", "%s.json" % checkpoint_id)
 
 
+def review_queue_hash(build):
+    """Bind P4 to the exact prose blocks and input hashes shown to the user."""
+    try:
+        with open(os.path.join(build, "prose-report.json"), encoding="utf-8") as fh:
+            queue = json.load(fh).get("review_queue")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(queue, list):
+        return None
+    payload = json.dumps(queue, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def retire_empty_p4(build, digest):
+    """Retire an obsolete prose question when a repair leaves no queued readings.
+
+    Keep the earlier user response in the checkpoint record for the closing report;
+    an empty queue has no question to ask, but a later nonempty queue must open P4
+    again instead of inheriting this retired state.
+    """
+    report = _json(os.path.join(build, "prose-report.json"))
+    if not isinstance(report, dict) or report.get("review_queue") != [] or prose_queued(build):
+        return False
+    path = checkpoint_path(build, "P4")
+    record = _json(path)
+    if not isinstance(record, dict) or record.get("state") == "retired":
+        return False
+    record.update(state="retired", index_hash=digest,
+                  retired_reason="current review queue is empty")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(record, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+    return True
+
+
 def index_hash_of(build):
     """Which scan the build directory currently describes, or None before the survey."""
     try:
@@ -674,6 +709,14 @@ def decision_for(build, checkpoint_id, digest):
         return None
     if record.get("state") != "decided":
         return None
+    # Decisions recorded by older drivers with a generic note did not require the
+    # user's response. Do not silently inherit such a decision for P4.
+    if checkpoint_id == "P4" and (record.get("source") != "user_response" or
+                                  record.get("verdict") != "accepted"):
+        return None
+    if checkpoint_id == "P4" and (not review_queue_hash(build) or
+                                  record.get("review_queue_hash") != review_queue_hash(build)):
+        return None
     if digest and record.get("index_hash") != digest:
         return None
     return record
@@ -685,10 +728,13 @@ def open_checkpoint(build, checkpoint, digest):
         return False
     path = checkpoint_path(build, checkpoint["id"])
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    record = {"checkpoint": checkpoint["id"], "state": "pending",
+              "index_hash": digest, "show": checkpoint["show"],
+              "ask": checkpoint["ask"]}
+    if checkpoint["id"] == "P4":
+        record["review_queue_hash"] = review_queue_hash(build)
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump({"checkpoint": checkpoint["id"], "state": "pending",
-                   "index_hash": digest, "show": checkpoint["show"],
-                   "ask": checkpoint["ask"]}, fh, indent=1, sort_keys=True)
+        json.dump(record, fh, indent=1, sort_keys=True)
         fh.write("\n")
     return True
 
@@ -781,9 +827,14 @@ def status(args, build):
         elif os.path.isfile(path):
             # Stale means opened against an earlier scan: the units may now be different,
             # so the question has to be asked again rather than inherited.
-            stale = (_json(path, {}) or {}).get("index_hash") != digest
-            state = "OPEN (from an earlier scan)" if stale else "OPEN"
-            state += " -- blocks %s" % checkpoint["blocks"]
+            record = _json(path, {}) or {}
+            stale = record.get("index_hash") != digest
+            if checkpoint["id"] == "P4" and record.get("state") == "retired" and \
+                    not prose_queued(build):
+                state = "retired -- current review queue is empty"
+            else:
+                state = "OPEN (from an earlier scan)" if stale else "OPEN"
+                state += " -- blocks %s" % checkpoint["blocks"]
         else:
             state = "not opened yet (%s opens it)" % checkpoint["opened_by"]
         print("  %-3s %s" % (checkpoint["id"], state))
@@ -898,7 +949,7 @@ def next_step(build, digest, remaining):
     return "run the next component: it has the inputs it needs"
 
 
-def blocking_checkpoint(build, component, digest):
+def blocking_checkpoint(build, component, digest, review_file=None):
     """The open checkpoint standing in front of this component, if there is one.
 
     A checkpoint that was never opened does not block. It is opened by the component
@@ -919,9 +970,17 @@ def blocking_checkpoint(build, component, digest):
     except ValueError:
         return None
     for checkpoint in CHECKPOINTS:
+        # An unreviewed pass may refresh the queue after a repair. P4 holds the
+        # reviewed pass and publication, not the pass that prepares its question.
+        if checkpoint["id"] == "P4" and component == "review" and not review_file:
+            continue
         if ORDER.index(checkpoint["blocks"]) > position:
             continue
         if not os.path.isfile(checkpoint_path(build, checkpoint["id"])):
+            continue
+        if checkpoint["id"] == "P4" and \
+                (_json(checkpoint_path(build, "P4"), {}) or {}).get("state") == "retired" \
+                and not prose_queued(build):
             continue
         if not decision_for(build, checkpoint["id"], digest):
             return checkpoint
@@ -936,6 +995,10 @@ def main():
     parser.add_argument("--checkpoint", help="decide: which checkpoint (P1, P2, P3, P4)")
     parser.add_argument("--note", help="decide: what was decided, and by whom -- this is "
                                        "what the closing report carries")
+    parser.add_argument("--user-response", help="decide P4: the user's direct response "
+                                                "after seeing the queued readings")
+    parser.add_argument("--p4-verdict", choices=("accepted", "changes-requested"),
+                        help="decide P4: whether the user accepted these readings")
     parser.add_argument("--step", help="measure: model-driven step name")
     parser.add_argument("--state", choices=("start", "stop"), default="start",
                         help="measure: start or stop the named step")
@@ -993,9 +1056,24 @@ def main():
         known = {c["id"]: c for c in CHECKPOINTS}
         if args.checkpoint not in known:
             return fail("--checkpoint must be one of: %s" % ", ".join(sorted(known)))
-        if not (args.note or "").strip():
-            return fail("--note is required: a decision with no record of what was "
-                        "decided is not one the closing report can carry")
+        if args.checkpoint == "P4":
+            if args.note:
+                return fail("P4 requires --user-response, not --note; show the queued "
+                            "readings and wait for the user's direct answer", 1)
+            if not (args.user_response or "").strip():
+                return fail("P4 requires --user-response after the user sees the queue; "
+                            "an unattended decision is not accepted", 1)
+            if not args.p4_verdict:
+                return fail("P4 requires --p4-verdict accepted|changes-requested; "
+                            "a response alone is not approval", 1)
+            note = args.user_response.strip()
+        else:
+            if args.user_response or args.p4_verdict:
+                return fail("--user-response and --p4-verdict are reserved for P4", 2)
+            if not (args.note or "").strip():
+                return fail("--note is required: a decision with no record of what was "
+                            "decided is not one the closing report can carry")
+            note = args.note.strip()
         path = checkpoint_path(args.build, args.checkpoint)
         # Only a checkpoint that is actually open may be decided. Without this a caller
         # can answer a question nobody has been asked yet -- decide `P2` straight after
@@ -1008,18 +1086,30 @@ def main():
                         "opens it, and a decision recorded before the question exists "
                         "is not one anybody answered."
                         % (args.checkpoint, known[args.checkpoint]["opened_by"]), 1)
+        pending = _json(path, {}) or {}
+        if args.checkpoint == "P4" and (not review_queue_hash(args.build) or
+                                        pending.get("review_queue_hash") !=
+                                        review_queue_hash(args.build)):
+            return fail("P4 review queue changed; run review without --review to "
+                        "refresh the queue, then ask the user again", 1)
         if args.dry_run:
-            print("would record %s: %s" % (args.checkpoint, args.note.strip()))
+            print("would record %s: %s (%s)" %
+                  (args.checkpoint, note, args.p4_verdict or "decided"))
             print("would write %s" % path)
             return 0
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        state = ("pending" if args.p4_verdict == "changes-requested" else "decided")
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump({"checkpoint": args.checkpoint, "state": "decided",
-                       "index_hash": digest, "note": args.note.strip(),
+            json.dump({"checkpoint": args.checkpoint, "state": state,
+                       "index_hash": digest, "note": note,
+                       "verdict": args.p4_verdict,
+                       "source": "user_response" if args.checkpoint == "P4" else "note",
+                       "review_queue_hash": review_queue_hash(args.build)
+                       if args.checkpoint == "P4" else None,
                        "ask": known[args.checkpoint]["ask"]}, fh, indent=1,
                       sort_keys=True)
             fh.write("\n")
-        print("%s decided: %s" % (args.checkpoint, args.note.strip()))
+        print("%s %s: %s" % (args.checkpoint, state, note))
         print("wrote %s" % path)
         return 0
 
@@ -1027,19 +1117,26 @@ def main():
     # anything: what to put in front of the person, what to ask them, and the one command
     # that records the answer.
     if not args.dry_run:
-        blocked = blocking_checkpoint(args.build, args.component, digest)
+        blocked = blocking_checkpoint(args.build, args.component, digest,
+                                      review_file=args.review)
         if blocked is not None:
+            decision_command = ("--user-response '<the user's answer>' "
+                                "--p4-verdict accepted|changes-requested"
+                                if blocked["id"] == "P4" else
+                                "--note '<what they said>'")
+            unattended = ("      P4 requires a direct user response; leave it pending "
+                          "on an unattended run.\n" if blocked["id"] == "P4" else
+                          "      On an unattended run, record what you chose and why "
+                          "in the closing report.\n")
             sys.stderr.write(
                 "FAIL  %s is held at checkpoint %s, which %s opens and nothing has "
                 "decided.\n"
                 "      Show them: %s\n"
                 "      Ask them:  %s\n"
-                "      Then:      python3 %s decide --checkpoint %s --note '<what they "
-                "said>'\n"
-                "      Running unattended is a decision too -- record what you chose and "
-                "why, and it will be in the closing report.\n"
+                "      Then:      python3 %s decide --checkpoint %s %s\n%s"
                 % (args.component, blocked["id"], blocked["opened_by"], blocked["show"],
-                   blocked["ask"], invoked_as(), blocked["id"]))
+                   blocked["ask"], invoked_as(), blocked["id"], decision_command,
+                   unattended))
             return 1
 
     if args.component == "analyze" and not args.force:
@@ -1090,6 +1187,10 @@ def main():
         })
     print("\n== %s %s" % (args.component, "ok" if code == 0 else "exited %d" % code))
 
+    if args.component == "review" and not args.review and not args.dry_run:
+        if retire_empty_p4(args.build, index_hash_of(args.build)):
+            print("P4 retired: the refreshed review queue is empty")
+
     # Ordinarily a checkpoint opens only on success: a failed survey has no scope to
     # approve. A conditional checkpoint is different. P4 is intentionally produced by
     # the review-required result (exit 1), so its predicate -- the report the stage just
@@ -1106,11 +1207,16 @@ def main():
             if condition and not condition(args.build):
                 continue
             if open_checkpoint(args.build, checkpoint, index_hash_of(args.build)):
+                decision_command = ("--user-response '<the user's answer>' "
+                                    "--p4-verdict accepted|changes-requested"
+                                    if checkpoint["id"] == "P4" else
+                                    "--note '<what they said>'")
                 print("\n-- checkpoint %s is open, and %s will not run until it is "
                       "decided.\n   Show them: %s\n   Ask them:  %s\n   Then:      "
-                      "python3 %s decide --checkpoint %s --note '<what they said>'"
+                      "python3 %s decide --checkpoint %s %s"
                       % (checkpoint["id"], checkpoint["blocks"], checkpoint["show"],
-                         checkpoint["ask"], invoked_as(), checkpoint["id"]))
+                         checkpoint["ask"], invoked_as(), checkpoint["id"],
+                         decision_command))
     return code
 
 

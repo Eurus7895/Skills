@@ -293,12 +293,12 @@ def main():
 
         # A toolchain-provided runner still has to exist on this machine. Finding go.mod
         # proves the repository is Go, not that Go is installed.
-        _, out = run(roots["go"], "--check-env")
+        _, go_out = run(roots["go"], "--check-env")
         go_installed = shutil.which("go") is not None
         check("go -> availability tracks whether the toolchain is on PATH",
-              out["env"]["available"] is go_installed,
+              go_out["env"]["available"] is go_installed,
               "go on PATH: %s, reported available: %s"
-              % (go_installed, out["env"]["available"]))
+              % (go_installed, go_out["env"]["available"]))
         # A Maven project with mvn present must not be reported as missing its runner:
         # the skills gate execution on env.available, so a false negative makes a fully
         # prepared repository unusable.
@@ -332,8 +332,8 @@ def main():
               "got %r" % out["env"]["command"])
 
         check("go -> a missing toolchain is not proposed for installation",
-              go_installed or out["env"]["action"] == "unknown",
-              "got %r" % out["env"]["action"])
+              go_installed or go_out["env"]["action"] == "unknown",
+              "got %r" % go_out["env"]["action"])
 
         # unittest is standard library. Routing it through the package-manager path yields
         # `pip install unittest`, which fetches an unrelated package abandoned in 2007.

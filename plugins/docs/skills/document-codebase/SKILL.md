@@ -146,9 +146,14 @@ one, and refuses to run the next component until a decision is recorded:
 python3 scripts/pipeline.py decide --checkpoint P1 --note "<what they said>"
 ```
 
-The note is required and goes in the closing report, so "ran unattended, kept the default scope" is a
-permitted answer and a recorded one. A decision is bound to the `index_hash` it was made against: rescanning
-reopens the checkpoints, because the units may now be different.
+For P1–P3 the note goes in the closing report; an unattended decision may be recorded there when the user
+has asked for an unattended run. **P4 requires the user's direct answer after the queued blocks and their
+evidence are shown.** Do not decide it yourself, even on an unattended run. Record the answer with
+`decide --checkpoint P4 --user-response "<their answer>" --p4-verdict accepted|changes-requested`.
+`changes-requested` keeps P4 open until the draft is repaired and shown again. The CLI records the response; it cannot
+authenticate who spoke, so the agent must not invent or paraphrase approval. A content-changing repair
+invalidates P4 and the final review: run `review` without `--review` to refresh the queue, show the changed
+readings to the user, and collect a fresh answer before submitting the reviewed pass.
 
 **P4 was once left out of this**, on the reasoning that a queued block nobody decided already holds the run
 at `review_required`. That confuses holding the *gate* with opening a *pause*: nothing printed the question
@@ -163,8 +168,8 @@ into `module-analysis.jsonl` is lost at the next stage, and the decision note is
 
 **Do not pause anywhere else.** Everything else reads findings a script produced and acts on a documented
 table, and `check`'s re-dispatch is bounded at two attempts. Asking about those spends the user's attention
-on something already decided. If the user says to run unattended, note at each pause what you chose and why,
-and put the same list in the closing report.
+on something already decided. For an unattended run, record choices at P1–P3 and leave P4 pending until the
+user responds; put the decisions and pending checkpoint in the closing report.
 
 ## The run
 
@@ -183,7 +188,7 @@ output and what to decide from it.
 | `analyze` | `pipeline.py analyze` | `module-analysis.jsonl`, `fragments.jsonl`, any `calls` claim | [references/analyze.md](references/analyze.md) |
 | `check` | `pipeline.py check` | — fix what its findings name | [references/check.md](references/check.md) |
 | — | no command | `architecture-analysis.json`, `flow-analysis.json`, `operations-analysis.json` | [references/three-analyses.md](references/three-analyses.md) |
-| `document` | `pipeline.py document` | — fix what its findings name | [references/document.md](references/document.md) |
+| `document` | `pipeline.py document --preset <chosen-preset>` | — fix what its findings name | [references/document.md](references/document.md) |
 | `render` | `pipeline.py render --docs docs` | — inspect `.docs-build/rendered-docs/` | [references/rendering.md](references/rendering.md) |
 | `review` | `pipeline.py review` | `prose-review.jsonl`, then rerun with `--review` | [references/prose-rules.md](references/prose-rules.md) |
 | `publish` | `pipeline.py publish --docs docs` | — promotes only the sealed draft | [references/publish.md](references/publish.md) |
@@ -205,16 +210,19 @@ the invocation does. Which stages each component runs, which two may fail withou
 are optional, and every flag are in [references/pipeline.md](references/pipeline.md). **You do not need to
 read any script**; their output is the interface.
 
-**The default deliverable is a manual**, answered from a question template rather than built from the graph.
-Read [references/manual.md](references/manual.md) and the
-[question template](references/documentation-template.md) before choosing scope, not after — the template
-decides what the run has to find, so reading it afterwards means scoping for the wrong thing.
+**Choose the deliverable from the user's request before scoping.** For an architecture overview, dependency
+map, data flow or codebase onboarding report, run `document --preset architecture` (or another graph-driven
+preset that matches the request); do not let the CLI's `auto` default turn that request into a product manual.
+For a product/user manual, or a generic "document this repo" request that calls for one, select
+`document --preset manual` explicitly. Read [references/manual.md](references/manual.md) and the
+[question template](references/documentation-template.md) before scoping a manual — the template decides
+what the run has to find.
 
 On a repository's first run `document` writes the answer draft and stops at exit `1`; answer it, compose each
 page's sections from the answers, and run `document` again. **`--preset onboarding`**, `architecture`,
 `outside-in` or `handbook` gives an architecture report instead, built from the graph without a question
-template. Those are the better choice when the deliverable is a report rather than a manual, and they are
-what the verification apparatus covers best.
+template. Those are the right choice when the deliverable is a report; they are also what the verification
+apparatus covers best. The CLI's `auto` setting selects `manual`, so pass the chosen preset explicitly.
 
 ## Bundled resources
 
