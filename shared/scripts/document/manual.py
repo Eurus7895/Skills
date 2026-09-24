@@ -20,6 +20,7 @@ bar for it -- requiring a verified claim there would only push honest readings d
 """
 import argparse
 import json
+import re
 from pathlib import Path
 
 import authored
@@ -435,6 +436,25 @@ def terms(text):
             if len(w.strip(".,;:()[]\"'`")) >= TERM_LENGTH}
 
 
+# Where a sentence stops being one idea and starts being three clauses the reader has to
+# hold at once. `prose-generation.md` gives the same number as a drafting rule; this is it
+# as a measurement, so the rule is visible in the report rather than only in the guidance.
+LONG_SENTENCE_WORDS = 25
+
+# A full stop that ends a sentence, rather than one inside `pipeline.py`, `e.g.` or `3.11`.
+# Crude on purpose: this counts sentences to describe a section's shape, and a count that is
+# one or two out does not change what a reviewer does about a 60-word sentence.
+SENTENCE_END = re.compile(r"[.!?]+(?:\s|$)")
+
+
+def sentence_lengths(text):
+    """Word counts of each sentence in `text`, longest-first order not assumed."""
+    body = str(text or "").strip()
+    if not body:
+        return []
+    return [len(words(part)) for part in SENTENCE_END.split(body) if words(part)]
+
+
 def composition_health(body, cited_notes):
     """How much of what the answers held reached the reader, as numbers and complaints.
 
@@ -455,6 +475,8 @@ def composition_health(body, cited_notes):
             "covers %d question(s) in %d word(s) (%.1f per question, floor %d) -- a "
             "section this short did not compose its answers, it replaced them"
             % (len(cited_notes), body_words, per_answer, MIN_WORDS_PER_ANSWER))
+    lengths = sentence_lengths(body)
+    long_ones = [n for n in lengths if n > LONG_SENTENCE_WORDS]
     return {"body_words": body_words, "answer_words": answer_words,
             "words_per_answer": round(per_answer, 1),
             # Both reported, neither a verdict -- see the calibration note above for why
@@ -462,6 +484,14 @@ def composition_health(body, cited_notes):
             # shape of a section without re-deriving it, and so a future floor can be set
             # from recorded runs instead of from a guess.
             "retained": round(retained, 3), "shared_terms": len(shared),
+            # Reported for the same reason and with the same standing: every other measure
+            # here is about whether a section kept its answers, and none is about whether a
+            # person can read what it kept. A section can pass every floor above and still
+            # be one 40-word sentence after another, which is the commonest defect in
+            # generated prose and the one no validator here could see.
+            "sentences": len(lengths),
+            "longest_sentence": max(lengths) if lengths else 0,
+            "long_sentences": len(long_ones),
             "problems": problems}
 
 

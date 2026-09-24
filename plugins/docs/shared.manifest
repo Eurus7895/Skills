@@ -12,6 +12,9 @@
 
 scripts/pipeline.py                        -> skills/document-codebase/scripts/pipeline.py
 scripts/build_dir.py                       -> skills/document-codebase/scripts/build_dir.py
+# Data only, imported by nothing: it ships so that a reader holding a report with `G003` in
+# it can look the code up beside the scripts that raised it.
+scripts/findings.py                        -> skills/document-codebase/scripts/findings.py
 scripts/draft_artifact.py                  -> skills/document-codebase/scripts/draft_artifact.py
 
 scripts/survey/scan_repo.py                -> skills/document-codebase/scripts/survey/scan_repo.py
@@ -40,6 +43,9 @@ scripts/document/validate_flow_diagrams.py -> skills/document-codebase/scripts/d
 scripts/document/build_document_model.py   -> skills/document-codebase/scripts/document/build_document_model.py
 
 scripts/publish/render_docs.py             -> skills/document-codebase/scripts/publish/render_docs.py
+# Standalone: imports nothing from the pipeline and reads no build directory, so it runs
+# against a docs/ tree on a machine that has none of the other scripts.
+scripts/publish/readability.py             -> skills/document-codebase/scripts/publish/readability.py
 scripts/publish/sphinx_support.py          -> skills/document-codebase/scripts/publish/sphinx_support.py
 scripts/publish/wire_toctree.py            -> skills/document-codebase/scripts/publish/wire_toctree.py
 scripts/publish/check_prose.py             -> skills/document-codebase/scripts/publish/check_prose.py

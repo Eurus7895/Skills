@@ -156,5 +156,54 @@ class GateTests(unittest.TestCase):
             self.assertIn('words_per_answer', block['composition'])
 
 
+class ReadabilityMeasureTests(unittest.TestCase):
+    """Every other measure here asks whether a section kept its answers.
+
+    None asked whether a person can read what it kept, and a section can clear every floor
+    above while being one forty-word sentence after another -- the commonest defect in
+    generated prose, and the one no validator in this pipeline could see. Reported, not
+    refused: the drafting rule lives in `prose-generation.md`, and this makes it visible in
+    the report rather than only in the guidance.
+    """
+
+    def health(self, body, answers=('a b c d',)):
+        return manual.composition_health(body, [{'text': a} for a in answers])
+
+    def test_a_sentence_is_counted_by_its_words(self):
+        self.assertEqual(
+            manual.sentence_lengths('An order is rejected when its SKU is unknown.'), [9])
+
+    def test_several_sentences_are_counted_separately(self):
+        self.assertEqual(manual.sentence_lengths('One two. Three four five.'), [2, 3])
+
+    def test_empty_prose_has_no_sentences(self):
+        self.assertEqual(manual.sentence_lengths(''), [])
+        self.assertEqual(manual.sentence_lengths(None), [])
+
+    def test_a_long_sentence_is_named(self):
+        body = ' '.join(['word'] * (manual.LONG_SENTENCE_WORDS + 5)) + '.'
+        health = self.health(body)
+        self.assertEqual(health['long_sentences'], 1)
+        self.assertEqual(health['longest_sentence'], manual.LONG_SENTENCE_WORDS + 5)
+
+    def test_a_sentence_at_the_limit_is_not_long(self):
+        """A ceiling refuses what is over it, not what reaches it."""
+        body = ' '.join(['word'] * manual.LONG_SENTENCE_WORDS) + '.'
+        self.assertEqual(self.health(body)['long_sentences'], 0)
+
+    def test_short_sentences_are_reported_as_such(self):
+        health = self.health('The queue rejects it. The caller sees an error.')
+        self.assertEqual(health['sentences'], 2)
+        self.assertEqual(health['long_sentences'], 0)
+
+    def test_the_measurement_never_refuses_a_section(self):
+        """The verdict belongs to the gate, on the same render-then-hold pattern as P4."""
+        body = ' '.join(['word'] * 80) + '.'
+        health = self.health(body, answers=('a b c d e f g h',))
+        self.assertEqual(health['long_sentences'], 1)
+        self.assertEqual(health['problems'], [],
+                         'a long sentence must not fail the build on its own')
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -129,6 +129,19 @@ unreviewed. The note is required, because a decision the closing report cannot c
 can check later; running unattended is a legitimate answer as long as it is written down. `--dry-run` prints
 what would be recorded and records nothing — an approval is the one thing a dry run must not leave behind.
 
+**Five words is the floor for a note**, the same one a brevity exception has to clear in `manual.py`, and for
+the same reason: "ok" is a label. Until this the only requirement was a note that was not empty, so one word
+settled the scope an entire budget is spent on and nothing downstream could tell it from a decision somebody
+made — a stricter standard applied to the smaller judgement. A floor does not guarantee substance; what it buys
+is that the reflex costs more than the judgement did, and that a rubber stamp is legible as one afterwards.
+
+**What a checkpoint shows may be computed.** P2 asked about every module, which on a large repository is a
+review load nobody can honestly carry, so the refusal that holds `check` lists the modules recording an
+`unknown`, those with fewer than the four kinds answered, and a sample of the settled ones — capped, and
+pointed at where a wrong role hides. The static description stands in when no analysis is written yet, which is
+the ordinary state at the moment `analyze` opens P2: the roles are written by hand between the two, so the list
+appears at the refusal, where the material exists and somebody is looking.
+
 Decisions are bound to the `index_hash` they were made against, so a rescan
 reopens them — the scope approved against the old tree says nothing about the new one. Deleting a checkpoint
 file bypasses it, in the same way deleting `claims.jsonl` bypasses the claims: the mechanism is against

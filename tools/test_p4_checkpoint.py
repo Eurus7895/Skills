@@ -154,7 +154,7 @@ class BlockingTests(unittest.TestCase):
     def test_a_decision_releases_it(self):
         self.open_p4()
         decided = self.run_pipeline("decide", "--checkpoint", "P4",
-                                    "--note", "readings confirmed")
+                                    "--note", "read each queued block, the verbs are right")
         self.assertEqual(decided.returncode, 0, decided.stderr)
         self.assertIsNotNone(
             pipeline.decision_for(str(self.build), "P4", "sha256:aaa"))

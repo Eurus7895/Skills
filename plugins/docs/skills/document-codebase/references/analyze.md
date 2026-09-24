@@ -72,4 +72,14 @@ Why each of those matters, how to read a packet and its omission manifest, and t
 [`context-policy.md`](context-policy.md).
 
 **Pause here — P2.** Every page downstream is built on these roles, and no later stage can tell a wrong role
-from a right one. List them, one line per module, mark the `unknown`s, and ask.
+from a right one.
+
+**Put a bounded list in front of them, not one line per module.** Fifty lines of your own prose handed over for
+confirmation is the review load that produces a habitual yes, and a checkpoint answered out of habit is worse
+than none: it leaves a record saying somebody looked. The refusal `check` gives computes the list for you —
+every module that recorded an `unknown`, every one with fewer than the four kinds answered, and a sample of the
+settled ones. Show that, and ask about those.
+
+**A decision needs at least five words saying what you went on.** `--note "ok"` is refused. Deciding unattended
+is still a decision you may record — say that, and say what you accepted, because the closing report carries
+the note verbatim as the evidence that this question was answered.

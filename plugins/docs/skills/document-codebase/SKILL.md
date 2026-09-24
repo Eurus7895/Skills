@@ -146,9 +146,11 @@ one, and refuses to run the next component until a decision is recorded:
 python3 scripts/pipeline.py decide --checkpoint P1 --note "<what they said>"
 ```
 
-The note is required and goes in the closing report, so "ran unattended, kept the default scope" is a
-permitted answer and a recorded one. A decision is bound to the `index_hash` it was made against: rescanning
-reopens the checkpoints, because the units may now be different.
+**The note needs at least five words saying what was decided and on what basis.** `--note "ok"` is refused: it
+records a signature rather than a judgement, and the closing report carries the note verbatim as the evidence
+that somebody answered. "ran unattended, kept the default scope" is a permitted answer and a recorded one —
+deciding unattended is a decision, and the requirement is that it says so. A decision is bound to the
+`index_hash` it was made against: rescanning reopens the checkpoints, because the units may now be different.
 
 **P4 was once left out of this**, on the reasoning that a queued block nobody decided already holds the run
 at `review_required`. That confuses holding the *gate* with opening a *pause*: nothing printed the question
@@ -198,6 +200,23 @@ or time waiting for the user. Details and the record format are in [references/p
 modules are read, partly written or not started, and what to do next. It runs no stage and writes nothing, so
 it answers while a checkpoint is open or a stage is failing, which is exactly when nothing else will.
 
+**A component you run out of order refuses and names the step that did not run**, with the command that
+produces its input — so you do not have to remember the order, and a run resumed with no memory of itself
+cannot skip a step silently. Exit `2` with `which <component> produces` in the message means the predecessor,
+not the tooling. Run the step it names; do not create the missing file by hand.
+
+**Every component opens by saying where the run is**, so you never have to remember to ask:
+
+```
+-- step 3 of 7: check   scan sha256:9b6a9
+-- still owed: write the analysis for 1 remaining module(s), appending one scope at a time, then run check
+```
+
+The second line appears only when the run owes work **no script can produce** — the modules to read, the
+questions to answer, the sections to compose. Those cannot be enforced by refusing to run, because nothing
+downstream tells an absent reading from a thin one until the gate. If you see it, that work is yours and it is
+not done.
+
 A component stops at the first stage that fails and names it, and exit codes pass through unchanged: `0` fine,
 `1` a policy the stage enforces was not met, `2` bad input or a missing dependency, `3` internal. **`1` is a
 verdict and `2`/`3` are breakage** — the first says the repository or the claims need work, the second that
@@ -229,6 +248,8 @@ is the one script you call yourself, for a packet's parts. You do not need to re
 | `references/three-analyses.md` | between `check` and `document`, for the three files you write |
 | `references/pipeline.md` | any component, to see what it runs, what it may skip, and its flags |
 | `references/schemas.md` | `analyze`, before emitting the first statement; every schema and finding code |
+| `scripts/findings.py` | a report names a code you do not recognise — every code in one place, with its family, the script that raises it and what it means. Data only: read it, never run it |
+| `scripts/publish/readability.py` | before accepting a rendered page, or any time a document is correct and hard to read. `python3 scripts/publish/readability.py docs` names the long sentences, the walls of text and the sections that all open the same way, worst first. It imports nothing else and reads no build directory, so it runs wherever the pages are |
 | `references/context-policy.md` | `analyze`, for packets, partitions and the append discipline |
 | `references/diagram-policy.md` | `document`, before reviewing a diagram or writing a view spec |
 | `references/presets.md` | `document`, to override the preset |

@@ -568,6 +568,37 @@ COMPONENTS = {"survey": survey, "analyze": analyze, "check": check,
               "publish": publish}
 ORDER = ["survey", "analyze", "check", "document", "render", "review", "publish"]
 
+# Named once, because a suggested recovery command has to know whether the build it is
+# about is the default one or a path the reader chose.
+DEFAULT_BUILD = ".docs-build"
+
+# What each component cannot start without, and the component that produces it.
+#
+# **A skipped step must read as a skipped step.** Running `document` on a build with no
+# survey in it used to reach the script and die on `FileNotFoundError:
+# .docs-build/structure.json`, under a `FAIL could not write ...` line that named the
+# output rather than the missing input. A traceback is an invitation to debug the tooling,
+# or to satisfy it by writing the missing file by hand -- and an agent resuming with no
+# memory of this run is exactly who receives it. The order of this pipeline is enforced by
+# nothing else: `blocking_checkpoint` holds the four human decisions, and a component whose
+# predecessor never ran simply crashed.
+#
+# So the check is here, where the next command can be named. Optional inputs are not in
+# this table: those are the ones components already report as `-- skip`, with a note saying
+# what the document will lack. These are the ones without which there is nothing to do.
+REQUIRES = {
+    "analyze": (("structure.json", "survey"),),
+    "check": (("structure.json", "survey"), ("claims.jsonl", "analyze")),
+    "document": (("structure.json", "survey"), ("claims.verified.jsonl", "check")),
+    "render": (("doc.json", "document"),),
+    "review": (("doc.json", "document"), ("render-manifest.json", "render")),
+    "publish": (("publish-seal.json", "review"),),
+}
+
+# The staging tree is a directory rather than a file in the build, so it is checked apart
+# from the table above. `review` reads the draft `render` wrote; `publish` promotes it.
+NEEDS_STAGING = ("review", "publish")
+
 # The judgements the document rests on that no script can make, and the component each
 # one stands in front of.
 #
@@ -592,6 +623,7 @@ CHECKPOINTS = (
      "ask": "is this the right scope to spend the budget on"},
     {"id": "P2", "opened_by": "analyze", "blocks": "check",
      "show": "one line per module -- what you decided it is for -- and every `unknown`",
+     "show_from": "uncertain_modules",
      "ask": "do these roles match what the repository is"},
     {"id": "P3", "opened_by": "check", "blocks": "document",
      "show": "the components and their boundaries, the flows traced and the ones "
@@ -636,7 +668,127 @@ def prose_queued(build):
     return (coverage.get("queued") or 0) > (coverage.get("reviewed") or 0)
 
 
+SHOW_SAMPLE = 3
+SHOW_CAP = 8
+
+
+def uncertain_modules(build):
+    """What P2 should actually put in front of someone, or None if nothing is written yet.
+
+    **The question was right and the unit was wrong.** "One line per module" is fifty lines
+    of the model's own prose handed to a person for confirmation on a fifty-module
+    repository, which is the review load that produces a habitual yes -- and a checkpoint
+    answered out of habit is worse than no checkpoint, because it leaves a record saying
+    somebody looked. So the ask is bounded, and it is pointed at the modules where the
+    analysis is least sure of itself rather than spread evenly over all of them:
+
+    * every module carrying an `unknown` statement -- the ones where the analysis said the
+      repository does not answer, which is exactly where a wrong role hides
+    * every module with fewer than the four kinds answered, which the gate counts as read
+      but not answered
+    * a small sample of the rest, so a run where nothing is uncertain is still spot-checked
+      rather than waved through
+
+    Returns None when `module-analysis.jsonl` holds nothing. That is the ordinary state at
+    the moment P2 opens: `analyze` opens it, and the roles are written by hand afterwards.
+    The static `show` stands in then, and this list appears where it can be acted on -- in
+    the refusal `check` gives, which is when the material exists and somebody is looking.
+    """
+    kinds = module_kinds(build)
+    unknowns = set()
+    for line in _lines(os.path.join(build, "module-analysis.jsonl")):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(row, dict) or not row.get("path"):
+            continue
+        statements = row.get("statements")
+        if not isinstance(statements, (list, tuple)):
+            continue
+        for statement in statements:
+            if isinstance(statement, dict) and statement.get("status") == "unknown":
+                unknowns.add(row["path"])
+    if not kinds:
+        return None
+    # Modules in scope with no row at all, and rows that recorded nothing. Neither was in
+    # this list before, and between them they are the modules least likely to have been read
+    # -- so P2 asked someone to approve the roles while showing them only the settled ones.
+    # A module cannot be absent from its own review list for the reason that nothing is
+    # written about it.
+    scope = _lines(os.path.join(build, "units.txt"))
+    missing = {path for path in scope if path not in kinds}
+    silent = {path for path, seen in kinds.items() if not seen}
+
+    def listed(paths):
+        paths = sorted(paths)
+        shown = ", ".join(paths[:SHOW_CAP])
+        if len(paths) > SHOW_CAP:
+            shown += ", and %d more" % (len(paths) - SHOW_CAP)
+        return shown
+
+    thin = {path for path, seen in kinds.items()
+            if seen and len(seen & set(READ_KINDS)) < len(READ_KINDS)}
+    parts = []
+    unwritten = missing | silent
+    if unwritten:
+        parts.append("the %d module(s) with no reading recorded at all, which cannot have "
+                     "a role to approve: %s" % (len(unwritten), listed(unwritten)))
+    if unknowns:
+        parts.append("the %d that recorded an `unknown`, where the repository does not "
+                     "answer and a wrong role hides: %s"
+                     % (len(unknowns), listed(unknowns)))
+    remaining = thin - unknowns - unwritten
+    if remaining:
+        parts.append("the %d with fewer than the four kinds answered: %s"
+                     % (len(remaining), listed(remaining)))
+    rest = sorted(set(kinds) - unknowns - thin - unwritten)
+    if rest:
+        parts.append("and %d of the %d settled one(s) as a sample: %s"
+                     % (min(SHOW_SAMPLE, len(rest)), len(rest),
+                        ", ".join(rest[:SHOW_SAMPLE])))
+    return "; ".join(parts)
+
+
+SHOW_FROM = {"uncertain_modules": uncertain_modules}
+
+
+def checkpoint_show(checkpoint, build):
+    """What to put in front of the person: the computed list where there is one.
+
+    A checkpoint may name a function that reads the build and says what is actually
+    uncertain. Where it returns nothing -- because the material is not written yet -- the
+    static description stands, so a checkpoint never loses its question to an empty list.
+    """
+    compute = SHOW_FROM.get(checkpoint.get("show_from"))
+    if compute:
+        try:
+            computed = compute(build)
+        except (OSError, ValueError):
+            # Naming what to review must not be able to fail the run. The static text says
+            # the same thing less precisely.
+            computed = None
+        if computed:
+            return computed
+    return checkpoint["show"]
+
+
 OPENS_WHEN = {"prose_queued": prose_queued}
+
+# The floor a recorded decision has to clear, in words, and the same one `manual.py` puts on
+# a brevity exception -- where the rule is that "Short." is a label rather than a reason.
+#
+# **A checkpoint that accepts "ok" records a signature, not a judgement.** Until this, the
+# only requirement was a note that was not empty, so `--note "ok"` cleared a question about
+# the scope of an entire run, and nothing downstream could tell it from a decision somebody
+# made. That is a stricter standard applied to the smaller decision: an exception about the
+# length of one section had to be argued in five words, and the scope the whole budget is
+# spent on did not.
+#
+# A floor is not a guarantee of substance -- five words can be spent on nothing. What it buys
+# is that the reflex costs more than the judgement did, and that a rubber stamp is legible as
+# one in the closing report, which carries these notes verbatim.
+DECISION_NOTE_WORDS = 5
 
 
 def invoked_as():
@@ -714,6 +866,56 @@ def _lines(path):
         return []
 
 
+def module_kinds(build):
+    """{module path: the statement kinds recorded about it}, from the analysis ledger.
+
+    One parse, shared by everything that asks about progress, so a defensive reading is
+    written once. The file is hand-authored, so a half-written line is an ordinary state to
+    find it in -- and a line that is valid JSON but not an object, such as `[]`, is another.
+    `row.get` raised on that one, which turned reporting a run's position into an exit 3
+    before `validate_analysis` could report the malformed row as the finding it is. Saying
+    where a run is must never be able to stop the validator that would explain it.
+
+    A path with no statements is kept with an empty set, not dropped. It is a module
+    somebody started a row for and recorded nothing in, which is a state of its own and the
+    one most worth naming.
+    """
+    kinds = {}
+    for line in _lines(os.path.join(build, "module-analysis.jsonl")):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue                       # validate_analysis owns the verdict on this
+        if not isinstance(row, dict):
+            continue                       # and on this
+        path = row.get("path")
+        if not path:
+            continue
+        statements = row.get("statements")
+        if not isinstance(statements, (list, tuple)):
+            statements = ()
+        kinds.setdefault(path, set()).update(
+            s.get("kind") for s in statements if isinstance(s, dict))
+    return kinds
+
+
+def unanswered_modules(build):
+    """Modules in scope that do not answer all four kinds, in `units.txt` order.
+
+    **Not `analysis_progress`'s `read`, and the difference is the point.** `read` uses the
+    gate's two-of-four floor, which separates a module somebody worked on from one nobody
+    touched. Answered is four of four, which is what `analyze.md` requires and what the
+    quality gate counts: a run of two-kind modules is `partial` however cleanly it verifies.
+
+    Reusing `read` meant the orientation banner told a run with every module at three kinds
+    that it had the inputs it needs, while the work it owed was exactly those modules and
+    the gate was going to reject them.
+    """
+    kinds = module_kinds(build)
+    return [path for path in _lines(os.path.join(build, "units.txt"))
+            if len(kinds.get(path, set()) & set(READ_KINDS)) < len(READ_KINDS)]
+
+
 def analysis_progress(build):
     """(in scope, read, remaining) module paths, from units.txt and module-analysis.jsonl.
 
@@ -727,17 +929,7 @@ def analysis_progress(build):
     kinds. A module named once and left there is not a module that was read.
     """
     scope = _lines(os.path.join(build, "units.txt"))
-    kinds = {}
-    for line in _lines(os.path.join(build, "module-analysis.jsonl")):
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue                       # validate_analysis owns the verdict on this
-        path = row.get("path")
-        if not path:
-            continue
-        kinds.setdefault(path, set()).update(
-            s.get("kind") for s in row.get("statements", ()) if isinstance(s, dict))
+    kinds = module_kinds(build)
     read = [p for p in scope
             if len(kinds.get(p, set()) & set(READ_KINDS)) >= READ_KINDS_FLOOR]
     # Touched but not read is its own state, and the one a resumed session most needs
@@ -839,7 +1031,11 @@ def status(args, build):
               % (coverage.get("queued") or 0, coverage.get("reviewed") or 0,
                  len(report.get("unreviewed") or ())))
 
-    print("\nnext       %s" % next_step(build, digest, remaining=touched + untouched))
+    # The breakdown above uses the gate's two-of-four floor, which is the right line between
+    # a module somebody worked on and one nobody touched. What is *owed* is four of four, so
+    # the advice is computed from that and not from the same split.
+    print("\nnext       %s" % next_step(build, digest,
+                                        remaining=unanswered_modules(build)))
     return 0
 
 
@@ -895,6 +1091,101 @@ def next_step(build, digest, remaining):
     return "run the next component: it has the inputs it needs"
 
 
+def missing_inputs(args):
+    """[(path, producing component)] this component needs and does not have, in order.
+
+    In pipeline order, so the first entry is the earliest step that did not run -- which is
+    the one worth naming. Reporting the latest would send a reader to `check` when the
+    survey is what is missing.
+    """
+    absent = [(os.path.join(args.build, name), producer)
+              for name, producer in REQUIRES.get(args.component, ())
+              if not os.path.exists(os.path.join(args.build, name))]
+    if args.component in NEEDS_STAGING:
+        staging = staging_of(args)
+        if not os.path.isdir(staging):
+            absent.append((staging, "render"))
+    absent.sort(key=lambda pair: ORDER.index(pair[1]))
+    return absent
+
+
+def orientation(args):
+    """Where this run is, printed by every component before it does anything.
+
+    `status` answers this, and answers it better -- but only when someone thinks to ask, and
+    the reader who most needs it is the one who does not know there is a run in progress. An
+    agent resuming with no memory of starting has no reason to type `status` first: it has a
+    task, and the pipeline looked like a sequence of commands. So the orientation stops being
+    something to remember and becomes something every command says.
+
+    Two lines at most, because this prints on every invocation and a banner nobody reads is
+    worse than no banner. The second appears only when the run owes something no script can
+    produce -- the modules to read, the questions to answer, the sections to compose. Those
+    are the steps that cannot be enforced by refusing to run, because nothing downstream can
+    tell a thin answer from an absent one until the gate. Naming them on every command is
+    the closest thing to enforcement they can have.
+
+    `next_step` writes that sentence already and is the single place that decides it; this
+    prints it, and drops it when it says the run is simply ready to proceed.
+    """
+    digest = index_hash_of(args.build)
+    if not digest:
+        # Before the first survey there is nothing to orient against, and `preflight` is
+        # about to name the survey anyway.
+        return []
+    lines = ["step %d of %d: %s   scan %s"
+             % (ORDER.index(args.component) + 1, len(ORDER), args.component, digest[:12])]
+    # `unanswered_modules`, not `analysis_progress`'s split: a module at three of the four
+    # kinds counts as `read` against the gate's floor, so reusing that told a run whose every
+    # module was three-quarters written that it had the inputs it needs -- while the work it
+    # owed was exactly those modules, and the gate was going to call the run partial.
+    owed = next_step(args.build, digest, remaining=unanswered_modules(args.build))
+    if not owed.startswith("run the next component"):
+        lines.append("still owed: %s" % owed)
+    return lines
+
+
+def invocation_args(args, component):
+    """The path options this run is using, so a suggested command acts on the same build.
+
+    A recovery command that drops `--build` is a command that reads `.docs-build` while the
+    build whose missing input was just reported is somewhere else: copying it appears to do
+    nothing, and the reader concludes the tool is wrong rather than that they are one flag
+    short. Only the options that change *where* the work is are carried, and only when they
+    differ from the default -- a suggestion cluttered with every flag is one nobody copies.
+    """
+    parts = ["--root %s" % args.root]
+    if args.build != DEFAULT_BUILD:
+        parts.append("--build %s" % args.build)
+    # `render` is the only suggested producer that writes the staging tree, and `publish`
+    # the only consumer that reads it, so the flag rides those two and nothing else.
+    if component in ("render", "publish") and getattr(args, "staging", None):
+        parts.append("--staging %s" % args.staging)
+    return " " + " ".join(parts)
+
+
+def preflight(args):
+    """The message for a component whose inputs are not there yet, or None.
+
+    Names the earliest missing step and the command that produces it, because the reader is
+    often an agent resuming a run it has no memory of starting. `status` is offered beside
+    it: it answers the same question for the whole run rather than for this one component.
+    """
+    absent = missing_inputs(args)
+    if not absent:
+        return None
+    path, producer = absent[0]
+    others = ""
+    if len(absent) > 1:
+        others = " (%d more input(s) are also missing)" % (len(absent) - 1)
+    return ("%s needs %s, which %s produces, and it is not there%s.\n"
+            "      Run:  python3 %s %s%s\n"
+            "      Or:   python3 %s status%s -- it says where this run is"
+            % (args.component, path, producer, others,
+               invoked_as(), producer, invocation_args(args, producer),
+               invoked_as(), invocation_args(args, "status")))
+
+
 def blocking_checkpoint(build, component, digest):
     """The open checkpoint standing in front of this component, if there is one.
 
@@ -939,7 +1230,8 @@ def main():
     parser.add_argument("--status", choices=("completed", "failed", "cancelled"),
                         default="completed", help="measure --state stop: outcome")
     parser.add_argument("--root", default=".", help="the repository being documented")
-    parser.add_argument("--build", default=".docs-build", help="where intermediates go")
+    parser.add_argument("--build", default=DEFAULT_BUILD,
+                        help="where intermediates go")
     parser.add_argument("--docs", default="docs", help="where the document is written")
     parser.add_argument("--staging", help="rendered draft directory; defaults to "
                                           ".docs-build/rendered-docs")
@@ -990,9 +1282,17 @@ def main():
         known = {c["id"]: c for c in CHECKPOINTS}
         if args.checkpoint not in known:
             return fail("--checkpoint must be one of: %s" % ", ".join(sorted(known)))
-        if not (args.note or "").strip():
+        note = (args.note or "").strip()
+        if not note:
             return fail("--note is required: a decision with no record of what was "
                         "decided is not one the closing report can carry")
+        if len(note.split()) < DECISION_NOTE_WORDS:
+            return fail(
+                "--note needs at least %d words saying what was decided and on what "
+                "basis. %r is a signature, and the closing report carries this verbatim "
+                "as the record that somebody answered %s. Deciding unattended is "
+                "allowed -- say that, and say what you went on."
+                % (DECISION_NOTE_WORDS, note[:40], args.checkpoint))
         path = checkpoint_path(args.build, args.checkpoint)
         # Only a checkpoint that is actually open may be decided. Without this a caller
         # can answer a question nobody has been asked yet -- decide `P2` straight after
@@ -1006,19 +1306,25 @@ def main():
                         "is not one anybody answered."
                         % (args.checkpoint, known[args.checkpoint]["opened_by"]), 1)
         if args.dry_run:
-            print("would record %s: %s" % (args.checkpoint, args.note.strip()))
+            print("would record %s: %s" % (args.checkpoint, note))
             print("would write %s" % path)
             return 0
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"checkpoint": args.checkpoint, "state": "decided",
-                       "index_hash": digest, "note": args.note.strip(),
+                       "index_hash": digest, "note": note,
                        "ask": known[args.checkpoint]["ask"]}, fh, indent=1,
                       sort_keys=True)
             fh.write("\n")
-        print("%s decided: %s" % (args.checkpoint, args.note.strip()))
+        print("%s decided: %s" % (args.checkpoint, note))
         print("wrote %s" % path)
         return 0
+
+    # Ahead of every gate below, so a component that is about to refuse still says where the
+    # run is. A refusal names one thing -- an undecided checkpoint, a missing input -- and a
+    # reader who does not know a run is in progress needs the position more than the reason.
+    for line in orientation(args):
+        print("-- %s" % line)
 
     # Refuse rather than run on. The message has to be enough to act on without opening
     # anything: what to put in front of the person, what to ask them, and the one command
@@ -1035,7 +1341,8 @@ def main():
                 "said>'\n"
                 "      Running unattended is a decision too -- record what you chose and "
                 "why, and it will be in the closing report.\n"
-                % (args.component, blocked["id"], blocked["opened_by"], blocked["show"],
+                % (args.component, blocked["id"], blocked["opened_by"],
+                   checkpoint_show(blocked, args.build),
                    blocked["ask"], invoked_as(), blocked["id"]))
             return 1
 
@@ -1055,6 +1362,19 @@ def main():
         packets = os.path.join(args.build, "packets")
         if os.path.isdir(packets):
             shutil.rmtree(packets)
+
+    # Before anything runs, and after the checkpoint gate: a decision nobody was asked for
+    # is the better complaint where both apply, since a build with an open P1 has no scope
+    # settled and its missing artifacts are a consequence of that.
+    #
+    # A dry run is told rather than stopped. It exists to show what a component would do,
+    # and a reader previewing a run they have not started yet is entitled to see the stages
+    # and the gap at once instead of one of the two.
+    warning = preflight(args)
+    if warning:
+        if not args.dry_run:
+            return fail(warning, 2)
+        print("-- note: %s" % warning)
 
     component_started_at = utc_now()
     component_started = time.perf_counter()
@@ -1106,7 +1426,8 @@ def main():
                 print("\n-- checkpoint %s is open, and %s will not run until it is "
                       "decided.\n   Show them: %s\n   Ask them:  %s\n   Then:      "
                       "python3 %s decide --checkpoint %s --note '<what they said>'"
-                      % (checkpoint["id"], checkpoint["blocks"], checkpoint["show"],
+                      % (checkpoint["id"], checkpoint["blocks"],
+                         checkpoint_show(checkpoint, args.build),
                          checkpoint["ask"], invoked_as(), checkpoint["id"]))
     return code
 
