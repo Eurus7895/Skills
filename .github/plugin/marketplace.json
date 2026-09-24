@@ -12,19 +12,19 @@
       "name": "testing",
       "source": "plugins/testing",
       "description": "Write, review, and debug automated tests in whatever framework a repository already uses. Detects the stack at runtime rather than imposing a framework. With your agreement, will install the project's own test runner when it is missing \u2014 never anything else, and never unattended.",
-      "version": "0.2.0"
+      "version": "0.2.1"
     },
     {
       "name": "code-review",
       "source": "plugins/code-review",
       "description": "Review code against Google's Standard of Code Review, reporting findings with Conventional Comments labels and CWE-named security categories. Also generates a repository's agent and review rules files.",
-      "version": "0.1.1"
+      "version": "0.1.2"
     },
     {
       "name": "docs",
       "source": "plugins/docs",
       "description": "Write a project-specific product manual or architecture documentation from repository source, verified dependency and call evidence, and reviewed prose. Produces multi-page docs with file:line citations and a human checkpoint for the final readings.",
-      "version": "1.0.2"
+      "version": "1.0.3"
     }
   ]
 }

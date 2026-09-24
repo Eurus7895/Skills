@@ -1,7 +1,7 @@
 {
   "name": "docs",
   "description": "Write a project-specific product manual or architecture documentation from repository source, verified dependency and call evidence, and reviewed prose. Produces multi-page docs with file:line citations and a human checkpoint for the final readings.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "keywords": [
     "documentation",
     "architecture",

@@ -118,10 +118,11 @@ takes. **Read `consent`; do not re-derive it** from `action` or `modifies`.
 ```markdown
 ## Failure
 $ <command>
-<the actual assertion diff or traceback, quoted>
+<the actual assertion diff or traceback, quoted; for CI-only failures quote the available log>
 
 ## Isolation
-- Alone: <pass|fail>   With suite: <pass|fail>   Repeated: <n/n>
+- Alone: <pass|fail|not run|unavailable>   With suite: <pass|fail|not run|unavailable>
+- Repeated: <n/n | not run | unavailable> (state why a run was unavailable)
 
 ## Verdict
 **<Code is wrong | Test is wrong | Both | Flaky | Environment or tooling | Unresolved>**

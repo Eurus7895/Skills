@@ -483,7 +483,9 @@ def check_materialized():
 
 def check_merge_markers():
     """Reject unresolved conflicts in the instructions installed with a plugin."""
-    marker = re.compile(r"^(?:<<<<<<<(?: .*)?|=======[ \t]*|>>>>>>>(?: .*)?)$", re.M)
+    start = re.compile(r"^<<<<<<<(?: .*)?$")
+    middle = re.compile(r"^=======[ \t]*$")
+    end = re.compile(r"^>>>>>>>(?: .*)?$")
     for root in (PLUGINS, os.path.join(REPO, "shared")):
         for dirpath, _, filenames in os.walk(root):
             for filename in filenames:
@@ -495,10 +497,22 @@ def check_merge_markers():
                 except OSError as exc:
                     fail(rel(path), "cannot be read (%s)" % exc)
                     continue
-                match = marker.search(content)
-                if match:
-                    fail(rel(path), "unresolved merge marker at line %d"
-                         % (content.count("\n", 0, match.start()) + 1))
+                lines = content.splitlines()
+                for i, line in enumerate(lines):
+                    if not start.fullmatch(line):
+                        continue
+                    separator = False
+                    for later in lines[i + 1:]:
+                        if start.fullmatch(later):
+                            break
+                        if middle.fullmatch(later):
+                            separator = True
+                        elif separator and end.fullmatch(later):
+                            fail(rel(path), "unresolved merge marker at line %d" % (i + 1))
+                            break
+                    else:
+                        continue
+                    break
 
 
 def main():

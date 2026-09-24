@@ -171,7 +171,7 @@ whether Ruff runs — it is a flag with a default, not a rule hidden in the driv
 | `check` | `validate_analysis` → `assemble` → `verify_doc` |
 | `document` | `validate_architecture` → `validate_flows` → `validate_operations` → `build_class_graph` → `build_diagrams` → `validate_diagrams` → `build_flow_diagrams` → `validate_flow_diagrams` → `build_document_model` |
 | `render` | `prepare_stage` → `render_docs` → `snapshot_draft` |
-| `review` | `validate_draft` → `check_prose` → `quality_docs` → `seal_draft` |
+| `review` | `validate_draft` → `check_prose` → `release_hygiene` → `quality_docs` → `seal_draft` |
 | `publish` | `promote_docs` |
 
 Stages are named `component/script` as they run, so the line that reports a failure also says which component
@@ -186,12 +186,13 @@ A component runs its stages in order and **stops at the first one that fails**, 
 and how many later stages did not run. That stage's exit code is what the component returns, unchanged: `0`
 fine, `1` a policy was not met, `2` bad input or a missing dependency, `3` internal.
 
-**Two stages may fail without stopping their component**, and both say so as they do:
+**Three stages may fail with exit code `1` without stopping their component**, and each says so as it does:
 
 | Stage | Why `1` is not fatal |
 | --- | --- |
 | `document/build_flow_diagrams` | exits `1` when no flow was traced, the common answer on ordinary object-oriented code |
 | `review/check_prose` | exits `1` on a block queued for review, and the quality gate carries that forward |
+| `review/release_hygiene` | exits `1` on a staging-tree finding; the quality gate reads its report and blocks publication |
 
 The component still ends non-zero in both cases. Tolerating a code is not forgiving it.
 

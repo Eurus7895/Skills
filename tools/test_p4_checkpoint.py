@@ -216,6 +216,30 @@ class BlockingTests(unittest.TestCase):
         refused = self.run_pipeline("decide", "--checkpoint", "P4", "--note", "old")
         self.assertNotEqual(refused.returncode, 0)
 
+    def test_a_repair_removing_every_queued_block_retires_p4(self):
+        """A former changes-requested response must not strand an empty queue."""
+        self.open_p4()
+        result = self.run_pipeline("decide", "--checkpoint", "P4",
+                                   "--user-response", "remove unsupported prose",
+                                   "--p4-verdict", "changes-requested")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        (self.build / "prose-report.json").write_text(json.dumps({
+            "review_queue": [], "unreviewed": [],
+            "coverage": {"queued": 0, "reviewed": 0}}))
+        from unittest.mock import patch
+        with patch.object(pipeline, "run", return_value=1):
+            with patch.object(sys, "argv", [PIPELINE, "review", "--root", str(self.root),
+                                           "--build", str(self.build)]):
+                self.assertEqual(pipeline.main(), 1)
+        record = json.loads((self.build / "checkpoints" / "P4.json").read_text())
+        self.assertEqual(record["state"], "retired")
+        self.assertEqual(record["note"], "remove unsupported prose")
+        self.assertIsNone(pipeline.blocking_checkpoint(str(self.build), "publish", "sha256:aaa"))
+        self.assertIsNone(pipeline.blocking_checkpoint(
+            str(self.build), "review", "sha256:aaa", review_file="prose-review.jsonl"))
+        (self.build / "prose-report.json").write_text(json.dumps(report(queued=1, undecided=1)))
+        self.assertIsNotNone(pipeline.blocking_checkpoint(str(self.build), "publish", "sha256:aaa"))
+
     def test_status_reports_the_queue_from_coverage(self):
         """`status` had the same class of bug: it read `queue`, not `review_queue`."""
         result = self.run_pipeline("status")

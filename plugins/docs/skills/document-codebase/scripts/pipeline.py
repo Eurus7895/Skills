@@ -664,6 +664,28 @@ def review_queue_hash(build):
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def retire_empty_p4(build, digest):
+    """Retire an obsolete prose question when a repair leaves no queued readings.
+
+    Keep the earlier user response in the checkpoint record for the closing report;
+    an empty queue has no question to ask, but a later nonempty queue must open P4
+    again instead of inheriting this retired state.
+    """
+    report = _json(os.path.join(build, "prose-report.json"))
+    if not isinstance(report, dict) or report.get("review_queue") != [] or prose_queued(build):
+        return False
+    path = checkpoint_path(build, "P4")
+    record = _json(path)
+    if not isinstance(record, dict) or record.get("state") == "retired":
+        return False
+    record.update(state="retired", index_hash=digest,
+                  retired_reason="current review queue is empty")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(record, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+    return True
+
+
 def index_hash_of(build):
     """Which scan the build directory currently describes, or None before the survey."""
     try:
@@ -805,9 +827,14 @@ def status(args, build):
         elif os.path.isfile(path):
             # Stale means opened against an earlier scan: the units may now be different,
             # so the question has to be asked again rather than inherited.
-            stale = (_json(path, {}) or {}).get("index_hash") != digest
-            state = "OPEN (from an earlier scan)" if stale else "OPEN"
-            state += " -- blocks %s" % checkpoint["blocks"]
+            record = _json(path, {}) or {}
+            stale = record.get("index_hash") != digest
+            if checkpoint["id"] == "P4" and record.get("state") == "retired" and \
+                    not prose_queued(build):
+                state = "retired -- current review queue is empty"
+            else:
+                state = "OPEN (from an earlier scan)" if stale else "OPEN"
+                state += " -- blocks %s" % checkpoint["blocks"]
         else:
             state = "not opened yet (%s opens it)" % checkpoint["opened_by"]
         print("  %-3s %s" % (checkpoint["id"], state))
@@ -950,6 +977,10 @@ def blocking_checkpoint(build, component, digest, review_file=None):
         if ORDER.index(checkpoint["blocks"]) > position:
             continue
         if not os.path.isfile(checkpoint_path(build, checkpoint["id"])):
+            continue
+        if checkpoint["id"] == "P4" and \
+                (_json(checkpoint_path(build, "P4"), {}) or {}).get("state") == "retired" \
+                and not prose_queued(build):
             continue
         if not decision_for(build, checkpoint["id"], digest):
             return checkpoint
@@ -1155,6 +1186,10 @@ def main():
             "stage_count": len(stages),
         })
     print("\n== %s %s" % (args.component, "ok" if code == 0 else "exited %d" % code))
+
+    if args.component == "review" and not args.review and not args.dry_run:
+        if retire_empty_p4(args.build, index_hash_of(args.build)):
+            print("P4 retired: the refreshed review queue is empty")
 
     # Ordinarily a checkpoint opens only on success: a failed survey has no scope to
     # approve. A conditional checkpoint is different. P4 is intentionally produced by

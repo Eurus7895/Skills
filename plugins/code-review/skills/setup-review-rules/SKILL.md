@@ -87,10 +87,12 @@ code that does not match the codebase.
 
 ```markdown
 ## Detected
-- Stack: <ecosystem>, <test framework>
-- Build: `<command>`      (source: <where found>)
-- Test: `<command>`       (source: <where found>)
-- Lint: `<command|none>`  (source: <where found>)
+- Package: `<path>` (repeat this block for every package, or `.` for a single-package repo)
+  - Stack: <ecosystem>, <test framework>
+  - Working directory: `<path>`
+  - Build: `<command|none>` (source: <where found>)
+  - Test: `<command|none>` (source: <where found>)
+  - Lint: `<command|none>` (source: <where found>)
 - Commit style: <observed|none observed>
 
 ## Inferred — confirm these
