@@ -34,21 +34,23 @@ This skill does not rewrite the suite. It tells you what is wrong and what the f
 ## Steps
 
 1. **Detect the framework and check the environment.** Read `references/framework-detection.md` and run
-   `python3 scripts/detect_stack.py <repo-root> --check-env`. You need the framework's idioms to judge whether
+   `python3 scripts/detect_stack.py <repo-root> <target-package> --check-env` for each package under review.
+   You need the framework's idioms to judge whether
    a pattern is a smell or the house style, and steps 2 and 3 cannot run without the runner.
 
    If `env.available` is false, settle it under **Preparing the environment** below before step 2.
 
-2. **Run the suite.** Record the pass/fail counts and the runtime. If it does not pass on a clean checkout,
-   that is the first finding.
+2. **Run each package's suite after following its documented setup.** Record the pass/fail counts and runtime
+   per package. If a suite still cannot pass after setup, investigate and report the cause.
 
-   **`env.action` of `sync` is itself a finding.** The runner is declared and the lockfile pins it, yet the
-   environment did not have it — that is a suite nobody can run without a setup step, and the review says so
-   whether or not you then install it.
+   **`env.action` of `sync` is not itself a finding.** Check the documented and CI setup steps. Report a
+   reproducible setup defect only when following those steps still cannot run the suite; distinguish a clean
+   checkout before setup from a broken documented setup.
 
 3. **Check for order-dependence.** Run the suite in a different order or in isolation if the framework supports
    it (`pytest -p no:randomly` vs `-p randomly`, `--shuffle`, running a single file alone). Tests that pass
-   together but fail alone share state — a blocking finding.
+   together but fail alone may share state; reproduce the failure and inspect fixtures or required setup before
+   calling it a blocking finding.
 
 4. **Read the tests against the code they claim to cover.** For each test ask the one question that matters:
    **what change to the production code would make this test fail?** If the honest answer is "none" or "only a
@@ -61,7 +63,8 @@ This skill does not rewrite the suite. It tells you what is wrong and what the f
 ## Audit checklist
 
 **Assertions that cannot fail**
-- No assertion at all — the test only checks that nothing threw.
+- No assertion at all where the promised behavior requires checking an outcome; successfully completing a call
+  can itself be a valid contract when the test names and exercises that contract.
 - Asserting on a literal (`assert 1 == 1`) or on the mock's own return value.
 - `assertTrue(result)` where any non-empty value passes.
 - Snapshot tests regenerated whenever they fail, which asserts only that the code is deterministic.

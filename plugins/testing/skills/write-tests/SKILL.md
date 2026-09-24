@@ -11,7 +11,8 @@ Given a file, function, class, or module, produce a test suite that would actual
 happy path, the edge cases, the error paths, and the boundaries. The suite matches the repository's existing
 framework and idioms — you adopt what is there rather than introducing what you prefer.
 
-The deliverable is test files written to disk, plus the command that runs them and the result of running it.
+For a request to add tests, deliver test files, the command and its actual result. For a request asking only
+which cases are missing, deliver the cases with evidence without editing files.
 
 ## When to use this skill
 
@@ -33,7 +34,8 @@ The deliverable is test files written to disk, plus the command that runs them a
 ## Steps
 
 1. **Detect the framework and check the environment.** Read `references/framework-detection.md` and follow it.
-   Run `python3 scripts/detect_stack.py <repo-root> --check-env` to get the ecosystem, framework, runner,
+   Run `python3 scripts/detect_stack.py <repo-root> <target> --check-env` (where `<target>` is the file or
+   package being tested) to get the ecosystem, framework, runner,
    test-file convention, and whether that runner can actually be invoked. If `confidence` is `none`, or the
    result conflicts with what you see, stop and ask — do not pick a framework for the user.
 
@@ -43,8 +45,9 @@ The deliverable is test files written to disk, plus the command that runs them a
 2. **Read the code under test.** Identify for each unit: the inputs and their valid ranges, the return values,
    the error conditions and how they surface, the side effects, and the dependencies that will need doubles.
 
-3. **Read one existing test file.** It is ground truth for import style, fixtures and setup, assertion style,
-   naming, and file organization. Match it.
+3. **Read one existing test file if there is one in the target package.** It is ground truth for import style,
+   fixtures and setup, assertion style, naming, and file organization. If there are none, use the package's
+   declared framework and idioms without copying tests from an unrelated package.
 
 4. **Enumerate cases before writing any.** For each unit list:
    - **Happy path** — the ordinary call with ordinary input.
@@ -56,15 +59,18 @@ The deliverable is test files written to disk, plus the command that runs them a
 5. **Write the tests.** One behavior per test. Name each for the behavior it pins, not the function it calls —
    `test_rejects_negative_quantity`, not `test_add_item_2`.
 
-6. **Run them.** Use the runner command from step 1. Every test must pass. A test you did not run is not a
-   test you wrote.
+6. **Run them.** Use the runner command for the target package from step 1. Report the actual result, including
+   failures. A failing test that proves a documented contract is violated is a useful result: retain it,
+   identify the production bug and do not edit code under test or weaken the assertion to get green. Fix
+   mistakes in the new tests, such as invalid setup or unsupported expectations, and run them again. A test
+   you did not run is not a test you wrote.
 
 7. **Verify they can fail.** For at least the most important assertions, confirm the test actually detects a
    regression — break the behavior mentally or temporarily and check the test would catch it. A test that
    passes against broken code is worse than no test, because it reports safety that does not exist.
 
-8. **Report.** State the files written, the command, the pass count, and anything you deliberately did not
-   cover with the reason.
+8. **Report.** State the files written, the command, the pass/fail counts, any documented behavior the code
+   violates, and anything you deliberately did not cover with the reason.
 
 ## Preparing the environment
 
@@ -103,6 +109,8 @@ writing no file at all, and that still needs asking.
 - **Do not mock what you own.** Mock the network, the clock, the filesystem, and third-party services. Mocking
   your own function under test means asserting the mock works.
 - If the tests reveal a bug in the code, report it — do not write the test to match the bug.
+- When the request asks only which cases are missing, list cases and evidence without writing files unless the
+  user also asks you to add tests.
 
 ## Output format
 
@@ -116,11 +124,16 @@ writing no file at all, and that still needs asking.
 - boundary: <case>
 
 ## Files written
-- `tests/test_config.py` — 11 tests
+- `tests/test_config.py` — 11 tests (or "none — advice only")
 
 ## Result
 $ pytest tests/test_config.py
-11 passed
+<pass count> passed, <fail count> failed (include the relevant failure when nonzero)
+
+For advice only: "not run — no tests written".
+
+## Production bugs exposed
+- `<file>:<line>` — <documented contract and failing case, or "none">
 
 ## Not covered
 - <what, and why>
