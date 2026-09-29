@@ -481,6 +481,55 @@ def check_materialized():
                 fail("materialize", line.strip())
 
 
+def check_merge_markers():
+    """Reject unresolved conflicts in the instructions installed with a plugin."""
+    start = re.compile(r"^<<<<<<<(?: .*)?$")
+    middle = re.compile(r"^=======[ \t]*$")
+    end = re.compile(r"^>>>>>>>(?: .*)?$")
+    for root in (PLUGINS, os.path.join(REPO, "shared")):
+        for dirpath, _, filenames in os.walk(root):
+            for filename in filenames:
+                if not filename.endswith(".md"):
+                    continue
+                path = os.path.join(dirpath, filename)
+                try:
+                    content = read(path)
+                except OSError as exc:
+                    fail(rel(path), "cannot be read (%s)" % exc)
+                    continue
+                lines = content.splitlines()
+                # Examples of conflict syntax inside Markdown fences are data, not
+                # unresolved changes to the installed instructions.
+                visible = []
+                fence = None
+                for line in lines:
+                    marker = re.match(r"^[ \t]*(" + "`" + r"{3,}|~{3,})", line)
+                    if marker:
+                        token = marker.group(1)
+                        if fence is None:
+                            fence = token
+                        elif token[0] == fence[0] and len(token) >= len(fence):
+                            fence = None
+                        visible.append("")
+                    else:
+                        visible.append(line if fence is None else "")
+                for i, line in enumerate(visible):
+                    if not start.fullmatch(line):
+                        continue
+                    separator = False
+                    for later in visible[i + 1:]:
+                        if start.fullmatch(later):
+                            break
+                        if middle.fullmatch(later):
+                            separator = True
+                        elif separator and end.fullmatch(later):
+                            fail(rel(path), "unresolved merge marker at line %d" % (i + 1))
+                            break
+                    else:
+                        continue
+                    break
+
+
 def main():
     names = plugin_names()
     if not names:
@@ -497,6 +546,7 @@ def main():
     check_skill_collisions()
     check_readme(names)
     check_repo_links()
+    check_merge_markers()
     check_tracked()
     check_materialized()
 

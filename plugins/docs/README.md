@@ -1,6 +1,6 @@
 # docs
 
-Write a repository's architecture documentation from its real dependency graph, not from what the model
+Write a repository's architecture documentation or product manual from its real dependency graph, not from what the model
 remembers reading.
 
 The shape is what makes the result checkable:
@@ -59,7 +59,7 @@ invocation. Each component answers one kind of question and hands the next a fil
 | | `validate_flow_diagrams.py` | Reads the drawing back, because a `.puml` is a text file |
 | | `build_document_model.py` | Turns verified claims and statements into pages and blocks, with no markup in them |
 | `render` | `prepare_stage.py`, `render_docs.py`, `snapshot_draft.py` | Copies existing docs into staging, renders/checks there, and binds the draft to `doc.json` |
-| `review` | `validate_draft.py`, `check_prose.py`, `quality_docs.py`, `seal_draft.py` | Rejects direct draft edits, requires fresh model review, runs the final gate, and seals the exact revision |
+| `review` | `validate_draft.py`, `check_prose.py`, `release_hygiene.py`, `quality_docs.py`, `seal_draft.py` | Rejects direct draft edits, requires fresh model review and a direct P4 response for queued prose, checks the staging tree, runs the final gate, and seals the exact revision |
 | `publish` | `promote_docs.py` | Verifies the seal and atomically promotes only the reviewed draft |
 
 **MyST needs `myst_parser` enabled in the project it lands in.** Sphinx does not read `.md` without it, so

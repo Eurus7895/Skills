@@ -35,31 +35,33 @@ code that does not match the codebase.
    `CONTRIBUTING.md`, `.editorconfig`, and any `.cursorrules` or similar. **Never overwrite one without
    asking.** If a rules file exists, propose a diff instead of a replacement.
 
-2. **Detect the stack.** Run `python3 scripts/detect_stack.py <repo-root>` for the ecosystem, test framework,
-   and runner.
+2. **Detect the stack.** Run `python3 scripts/detect_stack.py <repo-root> <target-package>` for each package
+   with its own manifest. Record its ecosystem, test framework and runner separately; do not generalize the
+   first package's result to the whole repository.
 
 3. **Find the real commands.** Read `package.json` scripts, `Makefile`/`Justfile` targets, `pyproject.toml`
-   tool sections, and `.github/workflows/`. Extract the actual build, test, lint, and format commands. **The CI
-   workflow is authoritative** — it defines what has to pass.
+   tool sections, and `.github/workflows/`. Extract the actual build, test, lint, and format commands with
+   each command's working directory and package. **The CI workflow is authoritative** about what has to pass.
 
-4. **Infer the conventions from the code, not from taste.** Sample several files and record what is true:
+4. **Observe conventions from the code, not from taste.** Sample several files per package and record what is true:
    naming style, file layout, error-handling idiom, whether comments are sparse or dense, how tests are named
    and organized, import ordering. Write down what the repo does, not what you would prefer.
 
 5. **Read the git history for process conventions.** `git log --oneline -30` shows the commit message style
    (Conventional Commits or not), and branch names show the naming pattern. State what is observed.
 
-6. **Confirm anything you had to guess.** List the inferences that were not clear-cut and ask before writing
-   them as rules. A guessed rule becomes a binding rule.
+6. **Separate observations from policy.** A sample or recent commit shows a pattern, not an owner's mandate.
+   Verify proposed hard rules, definition of done and any convention you would state as binding against
+   existing written policy or get the owner's answer before writing them. Leave unsupported items out.
 
 7. **Write the files.**
 
    **`AGENTS.md`** — the operating instructions:
    - What the project is, in two sentences.
    - The commands: build, test, lint, format, and how to run a single test.
-   - Conventions observed in step 4, stated as rules.
-   - Hard rules — things that must never happen in this repo.
-   - Definition of done, as a checklist.
+   - Package-scoped conventions supported by written policy or confirmed by the owner; label unconfirmed
+     observations as observations rather than instructions.
+   - Hard rules and definition of done only where supported by written policy or the owner's answer.
 
    **`.github/copilot-instructions.md`** — deliberately short, pointing at `AGENTS.md`. Two copies of the same
    rules drift apart; one is the source of truth.
@@ -74,8 +76,8 @@ code that does not match the codebase.
 ## Hard rules
 
 - **Never overwrite an existing rules file without explicit confirmation.** Show what would change first.
-- **Never state a convention you did not observe.** If the repo has no commit convention, say so rather than
-  imposing Conventional Commits.
+- **Never turn an observed pattern into a mandatory convention without authority.** If the repo has no commit
+  convention, say so rather than imposing Conventional Commits.
 - **Never invent commands.** Every command in the output must be one you found declared in the repo. If there
   is no lint command, the file says there is no lint command.
 - Keep `AGENTS.md` short enough to be read every session. Detail belongs in the files it points to.
@@ -85,10 +87,12 @@ code that does not match the codebase.
 
 ```markdown
 ## Detected
-- Stack: <ecosystem>, <test framework>
-- Build: `<command>`      (source: <where found>)
-- Test: `<command>`       (source: <where found>)
-- Lint: `<command|none>`  (source: <where found>)
+- Package: `<path>` (repeat this block for every package, or `.` for a single-package repo)
+  - Stack: <ecosystem>, <test framework>
+  - Working directory: `<path>`
+  - Build: `<command|none>` (source: <where found>)
+  - Test: `<command|none>` (source: <where found>)
+  - Lint: `<command|none>` (source: <where found>)
 - Commit style: <observed|none observed>
 
 ## Inferred — confirm these

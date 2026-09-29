@@ -1,18 +1,18 @@
 ---
 name: debug-failing-test
-description: Diagnose one failing or intermittently failing test and decide whether the test or the production code is wrong before fixing either. Use whenever a specific test fails, errors, or breaks in CI — "this test is failing", "why is this red", "CI is broken", "the test passes locally but not in CI", "this test fails intermittently", "this assertion started failing after my change", or a pasted stack trace or assertion diff. Also use when the user is tempted to delete or skip a failing test. For auditing a whole suite's quality rather than diagnosing one failure, use review-tests instead.
+description: Diagnose one failing or intermittently failing test, distinguish code, test, environment and unresolved causes before editing. Use whenever a specific test fails, errors, or breaks in CI — "this test is failing", "why is this red", "CI is broken", "the test passes locally but not in CI", "this test fails intermittently", "this assertion started failing after my change", or a pasted stack trace or assertion diff. Also use when the user is tempted to delete or skip a failing test. For auditing a whole suite's quality rather than diagnosing one failure, use review-tests instead.
 ---
 
 # Debug a failing test
 
 ## Overview
 
-A failing test is a claim that behavior and expectation disagree. The job is to find out **which one is wrong**
-before changing anything. Getting this backwards is how real bugs get committed: the fastest way to green is to
-weaken the assertion, and that is usually the wrong fix.
+A failing test can mean a behavior disagreement or a broken environment. Identify the cause before changing
+anything. Getting this backwards is how real bugs get committed: the fastest way to green is to weaken the
+assertion, and that is usually the wrong fix.
 
-The deliverable is an explicit verdict — *the test is wrong* or *the code is wrong* — the evidence for it, the
-fix applied to the correct side, and a passing run.
+The deliverable is an explicit verdict, the evidence for it, the appropriate fix when one is supported, and
+the observed run. A failure outside the code or test may remain unresolved pending access to its environment.
 
 ## When to use this skill
 
@@ -33,9 +33,10 @@ fix applied to the correct side, and a passing run.
 ## Steps
 
 1. **Reproduce.** Detect the runner via `references/framework-detection.md` and
-   `python3 scripts/detect_stack.py <repo-root> --check-env`, then run the single failing test. If it does not
-   fail, do not proceed on assumption — find the condition that makes it fail (ordering, environment, seed,
-   parallelism) before going further.
+   `python3 scripts/detect_stack.py <repo-root> <target-test-or-package> --check-env`, then run the single
+   failing test. If it does not fail, do not proceed on assumption — find the condition (ordering, environment, seed,
+   parallelism) before going further. If CI alone fails, compare its OS, runtime, dependencies, services and
+   setup commands with the local run; record what cannot be reproduced.
 
    If `env.available` is false, **that may be the whole bug.** A suite that cannot start does not have a
    failing test; it has a missing runner, and the report says so. Settle the environment under **Preparing the
@@ -63,12 +64,16 @@ fix applied to the correct side, and a passing run.
    | **Test is wrong** | The intended behavior changed, or the test asserted something never promised | Fix the test, and say what changed to make it obsolete. |
    | **Both wrong** | Test asserts the wrong thing *and* code does a third thing | Fix both, separately, and say so. |
    | **Neither — the test is flaky** | Non-determinism, not a behavior disagreement | Remove the non-determinism: fix the clock, seed the RNG, isolate the state. Not a retry. |
+   | **Environment or tooling** | A reproducible mismatch in runtime, dependency, service, configuration or CI setup | Fix the declared environment or CI setup if the cause is evidenced and in scope; do not rewrite a correct assertion or implementation. |
+   | **Unresolved** | The failure cannot be reproduced or its cause cannot yet be established | Preserve the evidence, state what is missing and stop without speculative edits. |
 
-6. **Fix the correct side.** One change at a time.
+6. **Fix the evidenced cause when possible.** One change at a time. For an unresolved case, do not edit.
 
-7. **Re-run** the single test, then the full suite. Both must pass. Confirm you have not broken a neighbour.
+7. **Re-run** the single test, then the full suite where available. Record actual results; if CI or a required
+   service is inaccessible, state that the affected environment was not verified. Do not claim a passing fix
+   on the basis of a local run that never reproduced the failure.
 
-8. **Report** the verdict, the evidence, the change, and the run output.
+8. **Report** the verdict, the evidence, any change, and the run output or verification limit.
 
 ## Preparing the environment
 
@@ -113,22 +118,23 @@ takes. **Read `consent`; do not re-derive it** from `action` or `modifies`.
 ```markdown
 ## Failure
 $ <command>
-<the actual assertion diff or traceback, quoted>
+<the actual assertion diff or traceback, quoted; for CI-only failures quote the available log>
 
 ## Isolation
-- Alone: <pass|fail>   With suite: <pass|fail>   Repeated: <n/n>
+- Alone: <pass|fail|not run|unavailable>   With suite: <pass|fail|not run|unavailable>
+- Repeated: <n/n | not run | unavailable> (state why a run was unavailable)
 
 ## Verdict
-**<Code is wrong | Test is wrong | Both | Flaky>**
+**<Code is wrong | Test is wrong | Both | Flaky | Environment or tooling | Unresolved>**
 
 <Evidence: the intended behavior, its source, and how the observed behavior differs.>
 
 ## Fix
-`path/to/file:line` — <what changed and why>
+`path/to/file:line` — <what changed and why, or "no edit" and the missing evidence>
 
 ## Result
 $ <command>
-<output — the single test, then the full suite>
+<output — the single test, then the full suite when available; name environments not verified>
 ```
 
 ## Bundled resources

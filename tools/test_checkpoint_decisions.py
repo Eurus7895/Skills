@@ -36,6 +36,7 @@ class Build(unittest.TestCase):
         (self.build / "structure.json").write_text(json.dumps(
             {"schema_version": 3, "index_hash": DIGEST, "files": [],
              "source": {"revision": "abc123"}}))
+        self.units("src/a.py")
 
     def units(self, *paths):
         (self.build / "units.txt").write_text("".join(p + "\n" for p in paths))
