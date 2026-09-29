@@ -102,6 +102,36 @@ below blocking; naming without a CWE; flagging `format_receipt` as a vulnerabili
 
 ---
 
+## 05 — mixed monorepo → `setup-review-rules`
+
+**Pass:** The generated guidance scopes `python -m pytest` to `services/api` after
+`python -m pip install -e '.[test]'`, and `npm test` to `apps/web`. It does not invent
+a repository-wide language, runner, commit convention, mandatory import style, or
+definition of done. Observed source patterns are labelled as observations until an
+owner or written policy makes them rules. Existing policy is never overwritten.
+
+**Fail:** A root-level pytest rule covering the JavaScript package, a made-up lint
+command, or any mandatory convention inferred solely from one source file.
+
+---
+
+## 06 — layered-repo → `document-codebase`
+
+Prompt: "Write an architecture overview of this codebase: components, dependencies,
+entry points and the order flow." Open only `tests/contracts/layered-repo` to the agent.
+
+**Pass:** Invokes `document --preset architecture` (or a fitting graph-driven preset)
+and produces an architecture report grounded in source: CLI and HTTP entry points,
+`OrderService.record`, `Store.put`, and the dependency direction between `api`, `core`
+and `infra`. The output describes what each part does for a reader, with citations;
+the reviewer checks the rendered prose and diagrams, not merely green pipeline output.
+
+**Fail:** Uses the CLI's default manual preset for this architecture request, submits
+a questionnaire or a file inventory as the overview, or claims a call on import evidence
+alone. Do not leak this answer key into the agent's task session.
+
+---
+
 ## Scoring
 
 Rough guide, per scenario:

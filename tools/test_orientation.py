@@ -43,10 +43,13 @@ class OrientationTests(unittest.TestCase):
         (self.build / "units.txt").write_text("\n".join(paths) + "\n")
 
     def decided(self, checkpoint, index_hash="sha256:abcdef123456789"):
+        if checkpoint in ("P2", "P3"):
+            (self.build / "module-analysis.jsonl").touch(exist_ok=True)
         directory = self.build / "checkpoints"
         directory.mkdir(parents=True, exist_ok=True)
         (directory / ("%s.json" % checkpoint)).write_text(json.dumps(
             {"checkpoint": checkpoint, "state": "decided", "index_hash": index_hash,
+             "input_hash": pipeline.checkpoint_input_hash(str(self.build), checkpoint),
              "note": "recorded", "ask": "?"}))
 
     def opened(self, checkpoint, index_hash="sha256:abcdef123456789"):

@@ -111,6 +111,7 @@ Visual Studio, and JetBrains IDEs.
 └── plugins/
     ├── _template/                     # copy this to start a new plugin
     ├── testing/
+    ├── docs/
     └── code-review/
         ├── .github/plugin/plugin.json
         ├── shared.manifest            # which shared/ paths this plugin pulls, and where
