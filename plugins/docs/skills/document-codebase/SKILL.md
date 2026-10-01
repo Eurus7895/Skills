@@ -21,14 +21,21 @@ run bundled scripts without reading their implementation.
 
 | Request | Preset and required reading before scoping | Output |
 | --- | --- | --- |
-| Architecture overview, dependency map, flow, or codebase onboarding | `--preset architecture` or a matching graph-driven preset; read [presets](references/presets.md) and [three analyses](references/three-analyses.md). | A cited architecture report. |
+| Architecture overview, dependency map, flow, or codebase onboarding | `--preset architecture` or a matching graph-driven preset; read [presets](references/presets.md). | A cited architecture report. |
 | Product or user manual, including installation, usage, and troubleshooting | `--preset manual`; read [manual](references/manual.md) and its [question template](references/documentation-template.md). | A question-driven, project-specific manual. |
 
 For a generic "document this repo", settle the intended reader and deliverable before scoping. Pass the
 preset explicitly: the CLI's `auto` defaults to `manual` and is unsuitable for an architecture request.
 For `onboarding`, `outside-in`, or `handbook`, use [presets](references/presets.md) to choose deliberately.
-Do not invoke this skill for a single file, docstring API reference, prose corpus, or a repository outside
-the scanner's supported languages. Repository size does not change the verification path.
+Repository size does not change the verification path.
+
+## When not to use this skill
+
+- For a single file or function, read it and answer directly.
+- For API reference from docstrings, use a documentation generator.
+- For logs, tickets, contracts, or other prose corpora, use a prose analysis workflow; there is no source
+  graph for this skill to verify. For a codebase entirely outside the scanner's supported languages, use
+  source reading and language-specific tooling instead of claiming this pipeline verified its structure.
 
 ## Rules that apply to every run
 
@@ -54,9 +61,11 @@ the scanner's supported languages. Repository size does not change the verificat
 
 ## Plan and run
 
-For a plan-only request, read the [detailed-plan contract](references/pipeline.md#detailed-plan-contract).
+Whenever the user requests a plan, proposed sequence, or preview, read the
+[detailed-plan contract](references/pipeline.md#detailed-plan-contract).
 Present Survey, Analyze, Analysis Review, Prose Generation, Diagram Generation, Render, Final Review, and
-Publish in that order. Include model work, checkpoints, repair loops, and outputs. Do not run the plan.
+Publish in that order. Include model work, checkpoints, repair loops, and outputs. If only a plan was
+requested, do not run it or modify the target repository.
 
 For execution, run one component per invocation of `python3 scripts/pipeline.py`; never chain past a
 checkpoint. The driver checks order, prints the current state, and returns `0` for success, `1` for a policy
@@ -67,9 +76,9 @@ permit exit `1` while their component continues; see [pipeline](references/pipel
 | --- | --- | --- |
 | Survey | `survey --root . --top 25` | Select scope; read [survey](references/survey.md). P1 follows. |
 | Analyze | `analyze` | Read source and write `module-analysis.jsonl`, `fragments.jsonl`, and call claims; read [analyze](references/analyze.md), [context policy](references/context-policy.md), and relevant sections of [schemas](references/schemas.md). P2 follows. |
-| Check | `check` | Repair named findings; read [check](references/check.md). Write architecture, flow, and operations analyses using [three analyses](references/three-analyses.md); P3 follows. |
+| Check | `check` | Repair named findings; read [check](references/check.md). For an unfamiliar finding code, read `scripts/findings.py` as a catalog; do not run it. Write architecture, flow, and operations analyses using [three analyses](references/three-analyses.md); P3 follows. |
 | Document | `document --preset <chosen-preset>` | Read [document](references/document.md) and the chosen deliverable's references above. A manual's first run may stop at exit `1` with an answer draft: complete and compose its pages, then rerun. |
-| Render | `render --docs docs` | Inspect the isolated draft and read [rendering](references/rendering.md). |
+| Render | `render --docs docs` | Inspect the isolated draft and read [rendering](references/rendering.md). Run `python3 scripts/publish/readability.py .docs-build/rendered-docs --for-review` and judge the flagged passages before accepting any rendered page, for architecture and manual alike. |
 | Final review | `review`, then `review --review` | Write `prose-review.jsonl` under [prose rules](references/prose-rules.md); show queued readings and evidence for P4 before the reviewed pass. |
 | Publish | `publish --docs docs` | Promote only the sealed draft; read [publish](references/publish.md). |
 
@@ -112,5 +121,12 @@ it. Only `publish` replaces `docs/` or the chosen target, after validating the c
 before replacing existing documentation.
 
 The scripts read the working tree, use `git ls-files` where available, and may invoke installed `ruff`,
-Sphinx, or docutils for local checks. They do not install packages or access the network. Use relative paths
-inside this skill. Report what ran, what failed, what remains pending, and the actual output of failures.
+Sphinx, or docutils for local checks. They do not install packages or access the network.
+
+## Conventions
+
+- Use paths relative to this skill folder for bundled resources.
+- Match the surrounding document's naming, structure, and idioms; prefer editing existing material over
+  generating a parallel document.
+- Report what ran, what failed, and what remains pending. Quote the actual failure output instead of
+  claiming an unverified step succeeded.
