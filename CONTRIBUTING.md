@@ -89,8 +89,11 @@ python3 tools/validate.py
 
 It verifies: every JSON parses; `plugin.json` and skill frontmatter `name`s match their folders; every
 `skills[]` path resolves to a `SKILL.md`; no skill folder is missing from `skills[]`; `marketplace.json` agrees
-with each `plugin.json` on `description` and `version`; no dead or plugin-escaping links; skills stay under the
-500-line budget; every plugin has a README catalog row; and no materialized file has drifted.
+with each `plugin.json` on `description` and `version`; no dead or plugin-escaping links, and no in-file anchor
+that no heading produces; skills stay under the 500-line budget; every skill has a "When not to use" section;
+every reference over 300 lines opens with a `## Contents`; every plugin has a README catalog row; and no
+materialized file has drifted. It warns — without failing — when a skill's description hands nothing off to a
+sibling skill in the same plugin, or overlaps one.
 
 The same check runs in CI on every pull request
 ([`.github/workflows/validate.yml`](.github/workflows/validate.yml)), against Python 3.9 and 3.13. CI is the

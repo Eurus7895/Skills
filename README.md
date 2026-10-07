@@ -135,9 +135,10 @@ re-run the script.
 ```bash
 python3 tools/validate.py        # manifests, frontmatter, links, catalog, drift
 python3 tools/materialize.py     # regenerate copies after editing shared/
+for t in tools/test_*.py; do python3 "$t" || break; done   # behavioural tests
 ```
 
-Both run in CI on every pull request, against Python 3.9 and 3.13 — the floor proves the bundled scripts do
+All three run in CI on every pull request, against Python 3.9 and 3.13 — the floor proves the bundled scripts do
 not depend on newer syntax, since they run on a stranger's machine with no install step. Run them locally
 anyway; a red pull request is a slower way to learn the same thing.
 

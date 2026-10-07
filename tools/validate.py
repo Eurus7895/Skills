@@ -185,6 +185,13 @@ def check_skill(plugin, skill_dir, skill_md):
         fail(where, "is %d lines, over the %d-line budget -- move detail to references/"
              % (lines, SKILL_LINE_BUDGET))
 
+    # A skill that cannot say when it does not apply fires on routine work. CONTRIBUTING
+    # requires the section, and its presence is a fact rather than a judgement, so it fails.
+    if not WHEN_NOT.search(text):
+        fail(where, "has no \"When not to use\" section -- name the adjacent cases that "
+                    "should not trigger it, and where they go instead")
+
+    check_reference_tocs(skill_dir)
     check_anchors(where, text)
 
     plugin_root = os.path.join(PLUGINS, plugin)
@@ -214,6 +221,36 @@ def local_links(text):
         if target and not target.startswith(("http://", "https://", "mailto:", "#")):
             links.append(target)
     return links
+
+
+WHEN_NOT = re.compile(r"^#{2,3}\s+When not to use", re.M | re.I)
+TOC_THRESHOLD = 300
+TOC_WINDOW = 40
+TOC_HEADING = re.compile(r"^#{2,3}\s+(Table of )?Contents\s*$", re.I)
+
+
+def check_reference_tocs(skill_dir):
+    """A long reference opens with a table of contents.
+
+    A reference is read whole once opened, and an agent told to read "the relevant
+    section" of a 750-line file with no contents reads all of it. CONTRIBUTING sets the
+    line at ~300; the anchors the contents link to are checked like any other.
+    """
+    references = os.path.join(skill_dir, "references")
+    if not os.path.isdir(references):
+        return
+    for name in sorted(os.listdir(references)):
+        if not name.endswith(".md"):
+            continue
+        path = os.path.join(references, name)
+        lines = read(path).splitlines()
+        if len(lines) <= TOC_THRESHOLD:
+            continue
+        if not any(TOC_HEADING.match(line) for line in lines[:TOC_WINDOW]):
+            fail(rel(path), "is %d lines with no `## Contents` in its first %d -- a reference "
+                            "over %d lines opens with a table of contents"
+                 % (len(lines), TOC_WINDOW, TOC_THRESHOLD))
+        check_anchors(rel(path), "\n".join(lines))
 
 
 def strip_emphasis(title):
@@ -350,6 +387,21 @@ def check_skill_collisions():
             fail("plugins/", "skill name %r is defined in %d places (%s) -- names are "
                              "global once installed, so both entries compete and cost "
                              "listing budget twice" % (name, len(paths), ", ".join(paths)))
+
+    # A sibling in the same plugin is the skill most likely to compete for a request, and
+    # the hand-off clause is what keeps them apart. Its absence is a judgement call about
+    # whether the two could collide, so it warns.
+    by_plugin = {}
+    for name, path, desc in skills:
+        by_plugin.setdefault(path.split(os.sep)[1], []).append((name, path, desc))
+    for siblings in by_plugin.values():
+        if len(siblings) < 2:
+            continue
+        for name, path, desc in siblings:
+            others = [n for n, _, _ in siblings if n != name]
+            if "instead" not in desc.lower() and not any(o in desc for o in others):
+                warn(path, "description hands nothing off to its sibling(s) %s -- add a "
+                           "\"for X, use Y instead\" clause" % ", ".join(others))
 
     # Trigger similarity is a judgement call, so it only ever warns.
     # Keyed by path, not name: duplicate names would otherwise collapse into one entry
