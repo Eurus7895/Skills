@@ -35,6 +35,20 @@ generates one, and only when the directory has none. Do not hand-write one eithe
 and the rest are in [`rendering.md`](rendering.md); read it before rendering into a
 project that already has documentation in it.
 
+## What publish checks besides the seal
+
+**The template must be chosen.** A provisional template — the survey's recommendation, recorded because
+nobody chose — gets a run as far as review; `publish` refuses it and names the recommendation and why it was
+made. It also refuses when the document was built from a different template than the one now recorded:
+confirming a different choice after `document` means rebuilding, not relabelling.
+
+**Approvals may have to be signed.** When the repository commits `.github/docs-allowed-signers`, `publish`
+runs `approvals.py verify` before promoting anything: the template choice, the P4 answer and each authored
+page settled as `complete` or `waived` need a signature from a listed key over a payload naming exactly what
+was approved. Run `pipeline.py approve`, give the user the printed `ssh-keygen -Y sign` commands to run with
+their own key, and never sign one yourself or touch the signers file. A changed page, queue or template
+invalidates its signature. Without the file the approvals report says *unverified* and promotion goes on.
+
 ## Final review happens before publish
 
 Every check before this asks whether a statement had evidence; none asks whether the sentence a reader sees

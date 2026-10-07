@@ -41,8 +41,11 @@ python3 scripts/pipeline.py template --use ./docs-template.md --note "user's com
 ```
 
 `--sections` keeps only the pages it names and `--drop` removes pages; both take page ids, or a group such as
-`appendix/`. `document` refuses until a choice is recorded. Recording a new one later is allowed, but answers
-drafted for a different template are refused by name: move `manual-analysis.json` aside and rerun `document`.
+`appendix/`. When nothing is recorded, `document` records the survey's recommendation — `handbook` for a
+handbook-shaped `docs/`, `manual` for a repository with an entry point, `architecture` otherwise — marked
+`provisional`, and builds it; `publish` refuses until the user confirms it with `--use` or records another.
+Recording a new one later is allowed, but answers drafted for a different template are refused by name: move
+`manual-analysis.json` aside and rerun `document`.
 
 ### The user's own template
 
@@ -53,7 +56,7 @@ A **Markdown outline** is the usual form — the template a team already has:
 
 ## Overview                           <- a heading with items under it is a page
 - What does the product do, and for whom?     <- each item is a question the page must answer
-- What are its main limitations?
+- (ask) What is the business justification?   <- the user answers this one, not the source
 
 ## Setup                              <- a heading holding only headings is a group (nav caption, id prefix)
 ### Installation (Linux)              <- ordinary parentheses stay in the title
@@ -69,9 +72,14 @@ Describe every setting the product reads.     <- prose under a heading is the pa
 ```
 
 Page ids come from the headings (`setup/installation_linux`); a heading with nothing under it gets one
-question, "What does a reader need to know about …?". A **JSON** template is a list of pages in the
-`manual_questions.json` shape — `{"id", "title", "questions": [{"id", "text"}]}` plus optional `authored`,
-`review` and `diagram` — or an object with `pages` and `groups`. Run `template --show <path>` and confirm the
+question, "What does a reader need to know about …?". **`(ask)` (or `[ask]`) before a question** says only a
+person can answer it: the draft tells you to ask the user, their answer is recorded `asserted` with their name
+as reviewer, and it is reported as asked rather than counted against the 20% assertion ceiling — that ceiling
+exists to stop assertions standing in for evidence nobody looked for, not to penalise a question the template
+declared up front. `template --show` warns about unmarked questions that look like something only a person
+knows: business justification, owners, SLAs, sign-off. A **JSON** template is a list of pages in the
+`manual_questions.json` shape — `{"id", "title", "questions": [{"id", "text", "ask"?}]}` plus optional
+`authored`, `review` and `diagram` — or an object with `pages` and `groups`. Run `template --show <path>` and confirm the
 outline with the user before recording it: what they meant by a heading is theirs to say.
 
 ### Validating a document against a template

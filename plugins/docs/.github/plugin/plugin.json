@@ -1,7 +1,7 @@
 {
   "name": "docs",
   "description": "Write architecture documentation, a product manual, or a document following your own template from repository source, verified dependency and call evidence, and reviewed prose \u2014 you choose the outline, none is mandatory \u2014 and check existing docs against a template. Produces multi-page docs with file:line citations and a human checkpoint for the final readings.",
-  "version": "2.0.0",
+  "version": "1.3.0",
   "keywords": [
     "documentation",
     "architecture",

@@ -25,6 +25,7 @@ what the fields mean.
 - [`prose-review.jsonl` — review_version 2](#prose-reviewjsonl--review_version-2)
 - [`authored.jsonl` — authored_version 1](#authoredjsonl--authored_version-1)
 - [`template.json` — template_version 1](#templatejson--template_version-1)
+- [Approval payloads and `approvals-report.json` — payload_version 1](#approval-payloads-and-approvals-reportjson--payload_version-1)
 - [`asserted` and `brevity` — the two bounded exceptions](#asserted-and-brevity--the-two-bounded-exceptions)
 
 ## Entity ids
@@ -721,6 +722,9 @@ What the document follows, recorded by `pipeline.py template --use` and read by 
  "note": "user wants the dense architecture report for the platform team"}
 ```
 
+Recorded by `document` when nobody has chosen, the survey's recommendation carries
+`"provisional": true`, `"recommended_because": [...]` and a `null` note; `publish` refuses it.
+
 A question template — the built-in manual, a selection of it, or the user's own file:
 
 ```json
@@ -736,12 +740,47 @@ A question template — the built-in manual, a selection of it, or the user's ow
 ```
 
 Page ids are lowercase words joined by `_` or `-`, with `/` between groups, unique, and never `index`. Question
-ids are unique across the template. A page may carry `authored: true` (a person writes it), `review: true`
+ids are unique across the template, and a question may carry `ask: true` (the user answers it; see
+`manual_coverage.asked`). A page may carry `authored: true` (a person writes it), `review: true`
 (at most one; it is moved to the end of the document), and `diagram: "class"` or `"data_flow"` (at most one
 page each). `template_hash` covers `pages` and `groups` only, so the whole built-in manual hashes the same
 whether or not it was recorded; `manual-analysis.json` carries the hash it was drafted against, and a
 mismatch is refused by name. `doc.json` carries the question template under `template`, and the gate
 validates the document against that copy.
+
+## Approval payloads and `approvals-report.json` — payload_version 1
+
+Required only when the documented repository commits `.github/docs-allowed-signers`. `approvals.py payloads`
+writes one file per approval to `.docs-build/approvals/<name>.payload`; the user signs it with
+`ssh-keygen -Y sign -n docs-approval`, which writes `<name>.payload.sig` beside it.
+
+```text
+docs-approval v1
+approval: authored--appendix__faq
+what: authored page appendix/faq (complete)
+subject: sha256:<hash of the canonical subject JSON>
+
+{"approval": "authored", "content_hash": "sha256:...", "owner": "Dana", ...}
+```
+
+| Name | Subject |
+| --- | --- |
+| `template` | kind, name, `template_hash`, selection, whether provisional |
+| `p4` | `review_queue_hash` and `input_hash` of the accepted P4 decision |
+| `authored--<page id, / as __>` | page id, status, owner, waiver reason, and for `complete` the draft page's content hash |
+
+A default waiver (`appendix/compliance`) needs no signature: it names nobody. `verify` regenerates every
+payload from the current state, so a signature over material that has since changed fails. It writes:
+
+```json
+{"payload_version": 1, "namespace": "docs-approval", "policy": "signed",
+ "signers": ".github/docs-allowed-signers", "signers_commit": "<sha> <author> <subject>",
+ "verified": false, "reason": "1 approval(s) not verified: p4 (missing)",
+ "approvals": [{"name": "p4", "what": "...", "status": "missing", "signed_by": []}]}
+```
+
+`status` is `verified`, `missing`, `unlisted key` or `does not match`. With no signers file, `policy` is
+`unsigned`, every row is `unverified`, and the exit code is `0`.
 
 ## `asserted` and `brevity` — the two bounded exceptions
 

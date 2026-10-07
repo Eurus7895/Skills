@@ -8,6 +8,7 @@ written document follows it. Stdlib only; no network, no package installation.
     python3 template.py --use NAME|PATH [--sections ID,...] [--drop ID,...]
                         --note "<the user's choice and why>" --out .docs-build/template.json
     python3 template.py --check-docs DIR (--template PATH | --use NAME|PATH)
+    python3 template.py --recommend --index structure.json --root . [--out template.json]
 
 **No outline is mandatory.** The built-in manual template is one choice among several, not
 the shape every document is forced into. The choices are:
@@ -20,6 +21,9 @@ the shape every document is forced into. The choices are:
                           questions or guidance under each, or JSON in the manual schema
 
 Whichever is chosen is written to one file, `template.json`, which every later stage reads.
+When nobody has chosen, `--recommend` writes the survey's recommendation there marked
+`provisional`: the run goes on with it, and publication waits until the user confirms it or
+picks another.
 A question template is then validated the way the built-in manual always was: every
 question answered or recorded as unknown, every section composed and evidenced.
 
@@ -87,6 +91,7 @@ MARKER = re.compile(r"\s*\(([^()]*)\)\s*$")
 HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*\S)\s*$")
 FENCE = re.compile(r"^\s*(```|~~~)")
+ASK = re.compile(r"^\s*[\[(]ask[\])]\s*", re.I)
 
 
 def heading_markers(title):
@@ -191,6 +196,11 @@ def parse_outline(text):
     for number, page in enumerate(pages, 1):
         for q_number, question in enumerate(page["questions"], 1):
             question["id"] = "%d.%d" % (number, q_number)
+            # `(ask)` before a question: the user answers it, not the source.
+            asked = ASK.match(question["text"])
+            if asked:
+                question["text"] = question["text"][asked.end():].strip()
+                question["ask"] = True
     return {"pages": pages, "groups": groups}
 
 
@@ -292,6 +302,9 @@ def validate(body):
             if not isinstance(question, dict) or not str(question.get("text") or "").strip():
                 problems.append("%s has an empty question" % where)
                 continue
+            if "ask" in question and not isinstance(question["ask"], bool):
+                problems.append("%s: question %r has a non-boolean `ask`"
+                                % (where, question.get("id")))
             qid = question.get("id")
             if not isinstance(qid, str) or not qid.strip():
                 problems.append("%s has a question with no id" % where)
@@ -361,6 +374,69 @@ def load(path):
     elif data.get("kind") != "preset":
         raise TemplateError("%s: kind must be `questions` or `preset`" % path)
     return data
+
+
+# What a person knows and a repository does not say. Deliberately narrow: this only warns,
+# and a warning that fires on every second question is one nobody reads.
+PERSON_TERMS = re.compile(
+    r"\b(business|justification|budget|cost|pric(e|ing)|revenue|stakeholders?|market|"
+    r"competitors?|roadmap|strateg(y|ic)|SLAs?|service.level|owners?|ownership|contacts?|"
+    r"escalat\w*|on-call|support hours|legal|regulat\w*|complian\w*|audit\w*|risk appetite|"
+    r"headcount|team members?|sign-?off|approv\w*|KPIs?|OKRs?|personas?|customers? say|"
+    r"user feedback|why was .* chosen)\b", re.I)
+
+
+def person_questions(record):
+    """(page, id, text) for unmarked questions that look like something a person knows.
+
+    Only for templates the user brought: the built-in one was written against this skill's
+    evidence rules. A question here is answered `unknown` or `asserted` unless it is marked
+    `(ask)` or its page `(authored)`, and the asserted ones count against a ceiling.
+    """
+    if record.get("kind") != "questions" or record.get("source") == "built-in":
+        return []
+    out = []
+    for page in record["pages"]:
+        if page.get("authored"):
+            continue
+        for question in page["questions"]:
+            if not question.get("ask") and PERSON_TERMS.search(question["text"]):
+                out.append((page["id"], question["id"], question["text"]))
+    return out
+
+
+def recommend(index, root):
+    """(name, reasons): the template a survey suggests when the user has not chosen one.
+
+    Three signals, in order: a documentation tree already shaped like a handbook is updated
+    in place; a repository with an entry point is something people run, so it gets a
+    manual; one with none is read for its shape. A recommendation, never a decision -- it
+    is recorded `provisional`, and nothing is published until the user confirms or changes
+    it.
+    """
+    docs = Path(root) / "docs"
+    shaped = [d for d in ("getting_started", "usage", "development") if (docs / d).is_dir()]
+    if len(shaped) >= 2:
+        return "handbook", ["docs/ already has %s" % ", ".join(d + "/" for d in shaped)]
+    entry = index.get("entry_points") or []
+    kinds = ((index.get("coverage") or {}).get("assets") or {}).get("by_kind") or {}
+    if entry:
+        reasons = ["%d entry point(s), such as %s" % (len(entry), entry[0].get("path"))]
+        if kinds.get("readme"):
+            reasons.append("a README")
+        if kinds.get("packaging"):
+            reasons.append("packaging metadata")
+        return "manual", reasons
+    return "architecture", ["no entry point, so it is read for its shape rather than "
+                            "run by a user"]
+
+
+def provisional(index, root):
+    """The recommendation as a template record nobody has confirmed."""
+    name, reasons = recommend(index, root)
+    record = resolve(name)
+    record.update(provisional=True, recommended_because=reasons, note=None)
+    return record
 
 
 # ---------------------------------------------------------------------------
@@ -503,6 +579,9 @@ def print_choices():
 
 
 def show(record):
+    if record.get("provisional"):
+        print("PROVISIONAL -- recommended because: %s. Nobody has chosen it yet."
+              % "; ".join(record.get("recommended_because") or ()))
     if record["kind"] == "preset":
         print("preset %s: %s" % (record["name"], PRESETS[record["name"]]))
         return
@@ -516,7 +595,11 @@ def show(record):
         print("  %-40s %s%s" % (page["id"], page["title"],
                                 " [%s]" % ", ".join(flags) if flags else ""))
         for question in page["questions"]:
-            print("      %-8s %s" % (question["id"], question["text"]))
+            print("      %-8s %s%s" % (question["id"], "[ask] " if question.get("ask") else "",
+                                      question["text"]))
+    for page_id, qid, text in person_questions(record):
+        print("WARN %s %r looks like something a person knows -- mark it (ask), or its "
+              "section (authored)" % (qid, text[:70]))
 
 
 def main(argv=None):
@@ -529,6 +612,10 @@ def main(argv=None):
     action.add_argument("--use", metavar="NAME|PATH", help="record the chosen template")
     action.add_argument("--check-docs", metavar="DIR",
                         help="check a written document against a template")
+    action.add_argument("--recommend", action="store_true",
+                        help="the survey's recommendation, as a provisional record")
+    parser.add_argument("--index", help="--recommend: structure.json from the survey")
+    parser.add_argument("--root", default=".", help="--recommend: the repository")
     parser.add_argument("--sections", help="comma-separated page ids or groups to keep")
     parser.add_argument("--drop", help="comma-separated page ids or groups to leave out")
     parser.add_argument("--template", help="--check-docs: a recorded template.json, or a "
@@ -542,6 +629,20 @@ def main(argv=None):
     try:
         if args.list:
             print_choices()
+            return 0
+        if args.recommend:
+            if not args.index:
+                raise TemplateError("--recommend needs --index")
+            try:
+                index = json.loads(Path(args.index).read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise TemplateError("cannot read %s: %s" % (args.index, exc))
+            record = provisional(index, args.root)
+            text = json.dumps(record, indent=2, ensure_ascii=False) + "\n"
+            if args.out:
+                Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+                Path(args.out).write_text(text, encoding="utf-8")
+            print(text, end="")
             return 0
         if args.show:
             show(resolve(args.show, sections, drop))

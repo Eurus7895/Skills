@@ -4,9 +4,10 @@ A preset fixes the skeleton: which pages exist, in what order, and which may not
 about what is true — that comes entirely from the verified claims. Two documents built from the same preset
 against different repositories share a shape and nothing else.
 
-**None is the default.** Recommend one, let the user choose, and record it with
-`pipeline.py template --use <name>`; `document` builds the recorded choice and refuses until there is one.
-`--preset <name>` on `document` names a preset directly. Alongside the four graph-driven presets below sit
+**None is mandatory.** Recommend one, let the user choose, and record it with
+`pipeline.py template --use <name>`; `document` builds the recorded choice. With nothing recorded it builds
+the survey's recommendation marked provisional, and `publish` refuses until the user confirms or replaces it.
+`--preset <name>` on `document` names a preset directly and records it as the choice. Alongside the four graph-driven presets below sit
 the `manual` question template, a selection of its sections, and the user's own template — see
 [manual.md](manual.md#choosing-and-writing-a-template).
 

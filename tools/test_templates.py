@@ -21,6 +21,7 @@ sys.path[:0] = component_paths()
 import authored  # noqa: E402
 import build_document_model as model  # noqa: E402
 import manual  # noqa: E402
+import pipeline  # noqa: E402
 import quality_docs  # noqa: E402
 import template  # noqa: E402
 
@@ -296,6 +297,158 @@ class AuthoredCompleteTests(unittest.TestCase):
                 fh.write("# References\n\nThe RFCs this tool implements.\n")
             self.assertEqual(quality_docs.authored_unwritten(doc, draft),
                              ["appendix/faq", "appendix/glossary"])
+
+
+class RecommendationTests(unittest.TestCase):
+    """Nobody chose: the survey recommends, the run goes on, publication waits."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name) / "repo"
+        self.build = self.root / ".docs-build"
+        self.build.mkdir(parents=True)
+
+    def index(self, entry_points=(), kinds=None):
+        return {"entry_points": [{"path": p, "reason": "main_guard"} for p in entry_points],
+                "coverage": {"assets": {"by_kind": kinds or {}}}}
+
+    def test_something_people_run_gets_a_manual(self):
+        name, reasons = template.recommend(
+            self.index(["src/cli.py"], {"readme": 1, "packaging": 1}), self.root)
+        self.assertEqual(name, "manual")
+        self.assertEqual(reasons, ["1 entry point(s), such as src/cli.py", "a README",
+                                   "packaging metadata"])
+
+    def test_a_library_gets_an_architecture_report(self):
+        self.assertEqual(template.recommend(self.index(), self.root)[0], "architecture")
+
+    def test_a_handbook_shaped_tree_is_updated_in_place(self):
+        for part in ("getting_started", "usage"):
+            (self.root / "docs" / part).mkdir(parents=True)
+        self.assertEqual(template.recommend(self.index(["a.py"]), self.root)[0], "handbook")
+
+    def test_the_recommendation_is_recorded_provisional(self):
+        index = self.build / "structure.json"
+        index.write_text(json.dumps(self.index()))
+        out = self.build / "template.json"
+        code, text = run(script("template.py"), "--recommend", "--index", index,
+                         "--root", self.root, "--out", out)
+        self.assertEqual(code, 0, text)
+        record = template.load(str(out))
+        self.assertTrue(record["provisional"])
+        self.assertEqual(record["name"], "architecture")
+        self.assertIsNone(record["note"])
+
+    def args(self, preset="auto", dry_run=False):
+        class Args(object):
+            pass
+        args = Args()
+        args.build, args.root, args.preset, args.dry_run = (str(self.build), str(self.root),
+                                                            preset, dry_run)
+        return args
+
+    def test_an_explicit_preset_is_recorded_as_the_choice(self):
+        record = pipeline.record_default_choice(self.args("architecture"))
+        self.assertEqual(record["name"], "architecture")
+        self.assertFalse(record.get("provisional"))
+        self.assertIn("--preset architecture", record["note"])
+
+    def test_publish_waits_for_a_choice_and_for_the_document_to_match_it(self):
+        self.assertIn("nobody chose it", pipeline.template_mismatch(str(self.build)))
+        (self.build / "structure.json").write_text(json.dumps(self.index(["a.py"])))
+        pipeline.record_default_choice(self.args())
+        held = pipeline.template_mismatch(str(self.build))
+        self.assertIn("provisional", held)
+        self.assertIn("recommended: manual", held)
+
+        (self.build / "template.json").write_text(json.dumps(
+            template.resolve("onboarding")))
+        (self.build / "doc.json").write_text(json.dumps({"preset": "architecture"}))
+        self.assertIn("built from the architecture preset",
+                      pipeline.template_mismatch(str(self.build)))
+        (self.build / "doc.json").write_text(json.dumps({"preset": "onboarding"}))
+        self.assertIsNone(pipeline.template_mismatch(str(self.build)))
+
+        chosen = template.resolve("manual", drop=["appendix/"])
+        (self.build / "template.json").write_text(json.dumps(chosen))
+        (self.build / "doc.json").write_text(json.dumps(
+            {"preset": "manual", "template": template.resolve("manual")}))
+        self.assertIn("Rerun document", pipeline.template_mismatch(str(self.build)))
+        (self.build / "doc.json").write_text(json.dumps({"preset": "manual",
+                                                         "template": chosen}))
+        self.assertIsNone(pipeline.template_mismatch(str(self.build)))
+
+
+class AskTests(unittest.TestCase):
+    """Questions only a person can answer, declared as such by the template."""
+
+    ASKING = ("## Overview\n- What does the product do?\n- (ask) What is the business "
+              "justification?\n- [ask] Who signs off a release?\n- Who owns the SLA?\n")
+
+    def setUp(self):
+        self.addCleanup(model.use_template, None)
+
+    def test_the_marker_is_read_and_stripped(self):
+        questions = template.parse_outline(self.ASKING)["pages"][0]["questions"]
+        self.assertEqual([q.get("ask", False) for q in questions], [False, True, True, False])
+        self.assertEqual(questions[1]["text"], "What is the business justification?")
+
+    def test_an_unmarked_person_question_is_warned_about(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            outline = Path(tmp) / "outline.md"
+            outline.write_text(self.ASKING)
+            record = template.resolve(str(outline))
+            flagged = [qid for _, qid, _ in template.person_questions(record)]
+            self.assertEqual(flagged, ["1.4"])
+            code, text = run(script("template.py"), "--show", outline)
+            self.assertIn("[ask] What is the business justification?", text)
+            self.assertIn("WARN 1.4", text)
+        # The built-in template is not second-guessed.
+        self.assertEqual(template.person_questions(template.resolve("manual")), [])
+
+    def test_asked_answers_sit_outside_the_assertion_ceiling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "README.md").write_text("Line one.\nLine two.\n")
+            outline = root / "outline.md"
+            outline.write_text("## Purpose\n- What does it do?\n- What does it read?\n"
+                               "- (ask) What is the business justification?\n"
+                               "- (ask) Who signs off a release?\n")
+            model.use_template(template.resolve(str(outline)))
+            index = {"schema_version": 3, "index_hash": "scan", "files": [], "coverage": {}}
+            draft = manual.scaffold(index)
+            self.assertIn("Ask the user", draft["answers"]["1.3"]["next_check"])
+            for qid in ("1.1", "1.2"):
+                draft["answers"][qid].update(
+                    basis="inferred", completeness="complete",
+                    text="The README describes item %s plainly." % qid,
+                    evidence=[{"path": "README.md", "line_start": 1, "line_end": 2}])
+            for qid, said in (("1.3", "It replaces a manual weekly report."),
+                              ("1.4", "The release manager signs off each release.")):
+                draft["answers"][qid].update(basis="asserted", completeness="complete",
+                                             text=said, reviewer="Dana")
+            draft["pages"]["purpose"] = {"sections": [{
+                "heading": "What it is for",
+                "body": " ".join(["Composed prose about what the tool is for."] * 4),
+                "answers": ["1.1", "1.2", "1.3", "1.4"]}]}
+            doc = model.build(index, [], [], "manual", analysis=model.Analysis(),
+                              extra={"manual": draft, "root": str(root),
+                                     "diagram_directory": str(root / "d")})
+            # Two of four answers asserted would be 50% -- far over the 20% ceiling --
+            # but both were asked for, so neither counts.
+            self.assertEqual(doc["manual_coverage"]["asserted"], [])
+            self.assertEqual(doc["manual_coverage"]["asked"], ["1.3", "1.4"])
+
+            # An unmarked assertion still counts, and one of two is over the line.
+            draft["answers"]["1.2"].update(basis="asserted", reviewer="Dana", evidence=[],
+                                           text="It reads nothing at all.")
+            with self.assertRaises(ValueError) as caught:
+                model.build(index, [], [], "manual", analysis=model.Analysis(),
+                            extra={"manual": draft, "root": str(root),
+                                   "diagram_directory": str(root / "d")})
+            self.assertIn("mark the ones only a person can answer `(ask)`",
+                          str(caught.exception))
 
 
 class RootRelativeTests(unittest.TestCase):

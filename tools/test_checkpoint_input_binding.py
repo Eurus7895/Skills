@@ -118,6 +118,11 @@ class CheckpointBindingTests(unittest.TestCase):
             "text": "Read the repository configuration before starting the application.",
             "claim_refs": [], "analysis_refs": []}]
         self.write("doc.json", doc)
+        # The user's template choice, which a real run records before `document`; publish
+        # refuses a document whose template nobody chose.
+        self.write("template.json", {"template_version": 1, "kind": "preset",
+                                     "name": "onboarding", "source": "built-in",
+                                     "note": "the user chose the onboarding tour"})
         staging = self.build / "rendered-docs"
         self.assertEqual(self.run_script("render_docs.py", "--doc", self.build / "doc.json",
                                          "--out", staging).returncode, 0)

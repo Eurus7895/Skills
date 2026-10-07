@@ -540,6 +540,8 @@ def main():
                         help="lowest status that still exits 0 (default: partial)")
     parser.add_argument("--draft", help="the rendered draft, so an authored page marked "
                                         "complete is checked for an actual page")
+    parser.add_argument("--signers", help="the repository's allowed-signers file, so the "
+                                          "report says whether approvals are verified")
     parser.add_argument("--out", help="where to write the report; stdout either way")
     args = parser.parse_args()
 
@@ -679,6 +681,16 @@ def main():
             status = FAILED
             reasons.append("%d claim(s) were rejected" % by_status["rejected"])
 
+    if args.signers:
+        # Verified at publish, against the committed file; the report only states which
+        # standard the approvals in this run are held to.
+        report["approvals"] = (
+            {"policy": "signed", "signers": args.signers,
+             "note": "every user decision must carry an SSH signature; checked at publish"}
+            if os.path.isfile(args.signers) else
+            {"policy": "unsigned", "signers": args.signers,
+             "note": "approvals are recorded as text and are not verified"})
+
     if args.doc:
         doc, error = load_json(args.doc, "document model")
         if error:
@@ -766,7 +778,15 @@ def main():
             asserted = coverage.get("asserted") or []
             answered = coverage.get("answered") or 0
             excused = coverage.get("brevity_exceptions") or []
+            asked = coverage.get("asked") or []
             report["manual"]["asserted"] = len(asserted)
+            report["manual"]["asked"] = len(asked)
+            if asked:
+                # Not a failure, and not an assertion: the template said a person answers
+                # these. Named so a reader knows which sentences rest on someone's word.
+                reasons.append(
+                    "manual has %d answer(s) given by a person for questions the template "
+                    "marks (ask): %s" % (len(asked), ", ".join(asked[:5])))
             report["manual"]["brevity_exceptions"] = [e["block"] for e in excused]
             if asserted:
                 # Not a failure: the ceiling is the verdict and this is under it. But an

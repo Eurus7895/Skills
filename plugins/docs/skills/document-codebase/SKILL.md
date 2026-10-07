@@ -10,9 +10,10 @@ run bundled scripts without reading their implementation.
 
 ## Choose the template with the user
 
-**No outline is mandatory.** The document follows whichever template the user picks, and `document` refuses
-to run until a choice is recorded. Run `python3 scripts/pipeline.py template` to list the choices, recommend
-the one that fits, and ask:
+**No outline is mandatory.** The document follows whichever template the user picks. When nobody has picked,
+`document` builds the survey's recommendation and marks it **provisional**, and `publish` refuses until the user
+confirms it or picks another. Run `python3 scripts/pipeline.py template` to list the choices, recommend the one
+that fits, and ask:
 
 | The reader needs | Recommend |
 | --- | --- |
@@ -26,7 +27,9 @@ the one that fits, and ask:
 Record the answer with
 `pipeline.py template --use <preset|manual|path> [--sections <ids>] [--drop <ids>] --note "<their choice and why>"`.
 `--sections` and `--drop` take page ids or whole groups such as `appendix/`. For the user's own file, run
-`template --show <path>` first and confirm it parsed into the sections they meant. Read
+`template --show <path>` first and confirm it parsed into the sections they meant; it warns about questions
+that look like something only a person knows. Mark those `(ask)` — the user answers them, by name, outside
+the 20% assertion ceiling — or mark the section `(authored)`. Read
 [manual](references/manual.md#choosing-and-writing-a-template) for the outline format. Choose with P1 at the
 latest: the template decides what the analysis has to cover.
 
@@ -68,7 +71,10 @@ present, empty, still holding placeholder text, or a copy of the template's ques
    with its owner's name, waived with an owner and a reason, or dropped from the template with their
    agreement. Unattended execution may record P1–P3 and the template choice with its reasons, but leaves P4
    and the authored pages pending. Changed material invalidates its decision; a content-changing repair
-   requires a fresh final review and P4 answer.
+   requires a fresh final review and P4 answer. **When the repository commits
+   `.github/docs-allowed-signers`**, each of these decisions must also carry the user's SSH signature: run
+   `pipeline.py approve` and give the user the `ssh-keygen -Y sign` commands it prints to run with their own
+   key; `publish` verifies them. Never sign an approval, and never create or edit the allowed-signers file.
 7. Run every command from the repository being documented, invoking `scripts/pipeline.py` by its path in
    this skill's folder. Relative `--build`, `--docs`, `--staging` and `--review` paths resolve against
    `--root`.
@@ -95,7 +101,7 @@ permit exit `1` while their component continues; see [pipeline](references/pipel
 | Document | `document` | Builds the recorded choice. Read [document](references/document.md); for a preset, [presets](references/presets.md); for a question template, [manual](references/manual.md). A question template's first run stops at exit `1` with an answer draft: complete and compose its pages, then rerun. |
 | Render | `render --docs docs` | Inspect the isolated draft and read [rendering](references/rendering.md). Run `python3 scripts/publish/readability.py .docs-build/rendered-docs --for-review` and judge the flagged passages before accepting any rendered page. Show the user the authored pages still owed. |
 | Final review | `review`, then `review --review` | Write `prose-review.jsonl` under [prose rules](references/prose-rules.md); show queued readings and evidence for P4 before the reviewed pass. |
-| Publish | `publish --docs docs` | Promote only the sealed draft; read [publish](references/publish.md). |
+| Publish | `approve` if signatures are required, then `publish --docs docs` | Promote only the sealed draft, once the template is chosen and any required signatures verify; read [publish](references/publish.md). |
 
 After `check`, write the three analyses before completing the P3 decision; do not treat a green check as
 architecture approval. For a question template, answer and compose rather than copying the questionnaire or
@@ -135,14 +141,14 @@ scan revision. See [pipeline](references/pipeline.md) for hashes, flags, stage o
 ## Outputs and side effects
 
 The driver stores intermediate artifacts in `.docs-build/` under the documented repository, including the
-template choice, graph, analyses, claims, draft, review records, rendered pages, diagrams, findings, and
-timings. It creates an ignoring `.gitignore` there on first use and leaves an edited one alone. Report that
+template choice, approval payloads, graph, analyses, claims, draft, review records, rendered pages,
+diagrams, findings, and timings. It creates an ignoring `.gitignore` there on first use and leaves an edited one alone. Report that
 the build directory remains and offer to remove it. Only `publish` replaces `docs/` or the chosen target,
 after validating the current review seal; confirm before replacing existing documentation.
 `template --check-docs` only reads.
 
-The scripts read the working tree, use `git ls-files` where available, and may invoke installed `ruff`,
-Sphinx, or docutils for local checks. They do not install packages or access the network.
+The scripts read the working tree, use `git` where available, and may invoke installed `ruff`, Sphinx,
+docutils, or `ssh-keygen` (to verify signed approvals) for local checks. They do not install packages or access the network.
 
 ## Conventions
 

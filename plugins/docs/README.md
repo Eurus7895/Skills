@@ -46,7 +46,15 @@ copilot plugin install docs@CopilotBox
 | your own file | A Markdown outline (headings are sections, list items the questions each must answer) or JSON |
 
 The choice is recorded with `pipeline.py template --use … --note "<why>"`, and every later stage validates
-the document against it. `pipeline.py template --check-docs docs --use <template>` checks a documentation
+the document against it. If nobody chooses, the run builds the survey's recommendation marked *provisional*,
+and publishing waits until you confirm it or pick another. In your own outline, `(ask)` before a question
+means you answer it — by name, without counting against the cap on unevidenced answers.
+
+**Your decisions can be signed.** Commit `.github/docs-allowed-signers` (OpenSSH's allowed_signers format)
+and the template choice, the final sign-off on the readings, and each authored page you settle must carry
+your SSH signature over exactly what you approved; `pipeline.py approve` prints the `ssh-keygen -Y sign`
+commands, and `publish` verifies them. Without that file, approvals are recorded as text and reported as
+unverified. `pipeline.py template --check-docs docs --use <template>` checks a documentation
 tree that already exists — written by you or by an earlier run — and reports each section as present,
 incomplete or missing, without editing anything.
 
@@ -77,7 +85,7 @@ invocation. Each component answers one kind of question and hands the next a fil
 | | `build_document_model.py` | Turns verified claims and statements into pages and blocks, with no markup in them |
 | `render` | `prepare_stage.py`, `render_docs.py`, `snapshot_draft.py` | Copies existing docs into staging, renders/checks there, and binds the draft to `doc.json` |
 | `review` | `validate_draft.py`, `check_prose.py`, `release_hygiene.py`, `quality_docs.py`, `seal_draft.py` | Rejects direct draft edits, requires fresh model review and a direct P4 response for queued prose, checks the staging tree, runs the final gate, and seals the exact revision |
-| `publish` | `promote_docs.py` | Verifies the seal and atomically promotes only the reviewed draft |
+| `publish` | `approvals.py`, `promote_docs.py` | Verifies any signatures the repository requires, then the seal, and atomically promotes only the reviewed draft |
 
 **MyST needs `myst_parser` enabled in the project it lands in.** Sphinx does not read `.md` without it, so
 `render_docs.py --format myst` refuses to write into a `conf.py` that does not enable it rather than leaving a
@@ -114,6 +122,8 @@ misconfigure and is written to normally.
 - Bundled scripts are Python 3, stdlib only. Intermediates go to `.docs-build/`; the document goes to `docs/`.
   Nothing else in the working tree is written. No network, no installs. `ruff`, `sphinx-build` and `docutils`
   are used when present and reported as absent when not — an absent checker reports `skipped`, never `passed`.
+  `ssh-keygen` verifies signed approvals when the repository requires them, and its absence then fails
+  publication rather than skipping the check.
 - Every script exits `0` on success, `1` when it ran but the result does not meet policy, `2` on an input or
   schema-version error, and `3` on an internal error. The `1`/`2` split matters: one means the repository or
   the claims are wrong, the other means the invocation was.

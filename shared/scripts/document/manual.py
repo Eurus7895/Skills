@@ -58,6 +58,9 @@ AUTHORED = [page for page in QUESTIONS if page.get("authored")]
 # template's first page is its introduction, and moving that to the end would be wrong.
 REVIEW_PAGE = next((p["id"] for p in GENERATED if p.get("review")), None)
 
+# Questions the template marks `(ask)`: the user answers them, because the source cannot.
+ASKED = {q["id"] for p in GENERATED for q in p["questions"] if q.get("ask")}
+
 
 def template_order():
     """Every page id to its place in the delivered document, generated and authored alike.
@@ -88,7 +91,7 @@ def configure(record):
     Every module-level name the build reads is rebound here and nowhere else, so a process
     that configured once sees one template throughout. `None` restores the built-in.
     """
-    global QUESTIONS, GENERATED, AUTHORED, REVIEW_PAGE, DIAGRAMS, TEMPLATE
+    global QUESTIONS, GENERATED, AUTHORED, REVIEW_PAGE, DIAGRAMS, TEMPLATE, ASKED
     if record is None:
         builtin = templates.builtin_manual()
         pages = builtin["pages"]
@@ -108,6 +111,7 @@ def configure(record):
     GENERATED = [page for page in pages if not page.get("authored")]
     AUTHORED = [page for page in pages if page.get("authored")]
     REVIEW_PAGE = next((p["id"] for p in GENERATED if p.get("review")), None)
+    ASKED = {q["id"] for p in GENERATED for q in p["questions"] if q.get("ask")}
     DIAGRAMS = {p["id"]: templates.DIAGRAM_KINDS[p["diagram"]] for p in pages
                 if p.get("diagram") in templates.DIAGRAM_KINDS}
     TEMPLATE = meta
@@ -146,8 +150,12 @@ def scaffold(index, extra=None, claims=(), analysis=None):
     answers = {q["id"]: {"basis": "unknown", "completeness": "unanswered",
                          "content_review": "pending",
                          "text": "TODO — not yet answered.",
-                         "next_check": "Read the source for this before answering "
-                                       "`unknown`.",
+                         "next_check": ("Ask the user: the template marks this question "
+                                        "(ask). Record their answer as `asserted` with "
+                                        "their name as reviewer."
+                                        if q.get("ask") else
+                                        "Read the source for this before answering "
+                                        "`unknown`."),
                          "evidence": [], "verified_ids": [], "facets_missing": []}
                for page in GENERATED for q in page["questions"]}
     facts = {}
@@ -805,13 +813,22 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
     # And before any page is built: a manual that rests mostly on assertions documents
     # nobody's codebase. The basis is for the minority of questions the source cannot
     # settle, and the ceiling is what keeps it that.
-    asserted = [n["id"] for n in all_notes if n["basis"] == "asserted"]
-    if answered_total and len(asserted) > ASSERTED_LIMIT * answered_total:
+    #
+    # A question the template marks `(ask)` is outside the ceiling. The ceiling exists to
+    # stop the model reaching for an assertion when evidence was hard to find; a question
+    # the template said up front only a person can answer is not that, and counting it
+    # would push a template with honest `(ask)` questions over the line.
+    asked = sorted(n["id"] for n in all_notes if n["id"] in ASKED and composable(n))
+    asserted = [n["id"] for n in all_notes
+                if n["basis"] == "asserted" and n["id"] not in ASKED]
+    ceiling_base = answered_total - len(asked)
+    if ceiling_base and len(asserted) > ASSERTED_LIMIT * ceiling_base:
         raise ValueError(
             "%d of %d answered question(s) are `asserted` -- above the %.0f%% ceiling. "
             "That basis carries no repository evidence, so a manual leaning on it is not "
-            "documenting this repository. Evidence the ones that can be evidenced (%s%s)"
-            % (len(asserted), answered_total, ASSERTED_LIMIT * 100,
+            "documenting this repository. Evidence the ones that can be evidenced, or mark "
+            "the ones only a person can answer `(ask)` in the template (%s%s)"
+            % (len(asserted), ceiling_base, ASSERTED_LIMIT * 100,
                ", ".join(sorted(asserted)[:DUPLICATE_SAMPLE]),
                ", ..." if len(asserted) > DUPLICATE_SAMPLE else ""))
 
@@ -933,6 +950,9 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
                                 # reads the report is owed the number rather than the
                                 # silence that means it was under a threshold.
                                 "asserted": sorted(asserted),
+                                # Answered by the user because the template asked them to:
+                                # reported apart from `asserted`, never counted against it.
+                                "asked": asked,
                                 "answered": answered_total,
                                 "brevity_exceptions": excused,
                                 "prose_words": body_total,

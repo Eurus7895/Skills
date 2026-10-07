@@ -372,13 +372,14 @@ def driver_tests(tmp, root):
           text.count("-- skip ") == 5, text)
     check("document says why it skipped each one", "will say so" in text, text)
 
-    # No outline is the default. Nothing chosen means nothing built, and the refusal says
-    # how to make the choice rather than quietly handing over the manual questionnaire.
+    # No outline is mandatory, and none is silently imposed: with nothing chosen, document
+    # builds the survey's recommendation and says it is provisional.
     code, text = run("pipeline.py", "document", "--root", root, "--build", build,
                      "--docs", os.path.join(tmp, "docs"), "--dry-run")
-    check("document without a chosen template is an input error", code == 2, text[-400:])
-    check("the refusal says none is mandatory and how to choose",
-          "none is mandatory" in text and "template --use" in text, text[-400:])
+    check("document without a choice builds a recommendation labelled provisional",
+          code == 0 and "PROVISIONAL" in text and "template --use" in text, text[:600])
+    check("a dry run records no choice",
+          not os.path.exists(os.path.join(build, "template.json")), text[:300])
 
     # Listing the choices writes nothing, and recording one needs a reason.
     code, text = run("pipeline.py", "template", "--root", root, "--build", build)

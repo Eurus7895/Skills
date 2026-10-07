@@ -19,7 +19,8 @@ class graph and its diagrams, draws any traced flow as a sequence, and builds `d
 connects to what, or set its own scope. See [`diagram-policy.md`](diagram-policy.md).
 
 **`document` builds the template the user chose** — recorded with `pipeline.py template --use`, or named
-with `--preset` — and refuses when there is none. For a question template it renders the sections you
+with `--preset` — or, when there is none, the survey's recommendation marked provisional, which `publish`
+will not promote until the user confirms or replaces it. For a question template it renders the sections you
 composed from the answers — never the template questions themselves, which are the prompt and not the
 document. Read [the manual guide](manual.md) before building one.
 
