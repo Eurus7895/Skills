@@ -1,5 +1,19 @@
 # The components, and the driver that runs them
 
+## Contents
+
+- [Detailed-plan contract](#detailed-plan-contract)
+- [`template` — what the document follows](#template--what-the-document-follows)
+- [`approve` — what the user signs](#approve--what-the-user-signs)
+- [`status` — where the run is](#status--where-the-run-is)
+- [What each component runs](#what-each-component-runs)
+- [Stopping, skipping, and the codes](#stopping-skipping-and-the-codes)
+- [Flags](#flags)
+- [Timing the workflow](#timing-the-workflow)
+- [Why `analyze` can refuse to run](#why-analyze-can-refuse-to-run)
+- [Where the boundaries leak, and why](#where-the-boundaries-leak-and-why)
+- [What is still yours to run](#what-is-still-yours-to-run)
+
 `scripts/` holds one directory per component. Each answers one kind of question, owns the scripts that answer
 it, and hands the next one a file rather than a call:
 
@@ -141,6 +155,44 @@ reopens them — the scope approved against the old tree says nothing about the 
 file bypasses it, in the same way deleting `claims.jsonl` bypasses the claims: the mechanism is against
 forgetting, not against intent.
 
+## `template` — what the document follows
+
+```bash
+python3 scripts/pipeline.py template                    # the choices, and the one recorded
+python3 scripts/pipeline.py template --use <preset|manual|path> [--sections …] [--drop …] --note "<why>"
+python3 scripts/pipeline.py template --check-docs docs [--use <template>]
+```
+
+**No outline is mandatory.** `document` builds what `.docs-build/template.json` records — a graph-driven
+preset, the manual question template or a selection of its pages, or the user's own Markdown or JSON
+template. With nothing recorded, an explicit `--preset` is recorded as the choice; otherwise the survey's
+recommendation is recorded with `provisional: true` and built, and `publish` refuses until the user confirms
+it or records another, and also refuses when the document on disk was built from a different template than
+the one now chosen. The choice is the user's, so `--use` needs a note of at least five words saying whose it
+is and why. A question template reaches `manual.py` and
+`build_document_model.py` as `--template`, and `doc.json` carries a copy, so the gate in `review` judges the
+document by the template it was built against. `--check-docs` reads a documentation tree and reports each
+template page as present, incomplete or missing; it writes nothing. The format is in
+[`manual.md`](manual.md#choosing-and-writing-a-template).
+
+## `approve` — what the user signs
+
+```bash
+python3 scripts/pipeline.py approve
+```
+
+**Only when the repository commits `.github/docs-allowed-signers`** (OpenSSH's allowed_signers format) does
+this matter: then the template choice, the P4 answer and every authored page settled as `complete` or
+`waived` must each carry an SSH signature by a key listed there, over a payload naming exactly what was
+approved. `approve` writes the payloads to `.docs-build/approvals/` and prints one
+`ssh-keygen -Y sign -f <their key> -n docs-approval <payload>` per approval for the user to run with their
+own key. `publish` verifies them with `ssh-keygen -Y verify` before promoting anything, and fails on a missing
+signature, a key not on the list, or a payload that changed after it was signed. The signers file counts only
+when committed and unmodified; the report names the commit that last changed it.
+
+Without the file, approvals stay text: `publish` reports them as unverified and promotes as before. The
+guarantee is as strong as the key's protection — a passphrase or hardware key the model cannot use.
+
 ## `status` — where the run is
 
 ```bash
@@ -157,7 +209,8 @@ reported by something that might decline to report it. A session whose context w
 modules had no way to ask what was left: `quality_docs.py` names the unread modules, but that runs in
 `publish`, and a partial analysis fails `check` first.
 
-It prints the scan identity and revision, each checkpoint's state, the module budget, the manual's answered
+It prints the scan identity and revision, the recorded template choice (and whether it is provisional),
+whether approvals must be signed, each checkpoint's state, the module budget, the manual's answered
 and composed counts, the authored ledger, and the review queue — then one line naming the next action.
 
 **Modules are reported in three states, not two:**
@@ -191,7 +244,7 @@ whether Ruff runs — it is a flag with a default, not a rule hidden in the driv
 | `document` | `validate_architecture` → `validate_flows` → `validate_operations` → `build_class_graph` → `build_diagrams` → `validate_diagrams` → `build_flow_diagrams` → `validate_flow_diagrams` → `build_document_model` |
 | `render` | `prepare_stage` → `render_docs` → `snapshot_draft` |
 | `review` | `validate_draft` → `check_prose` → `release_hygiene` → `quality_docs` → `seal_draft` |
-| `publish` | `promote_docs` |
+| `publish` | `approvals` → `promote_docs` |
 
 Stages are named `component/script` as they run, so the line that reports a failure also says which component
 owns the thing that failed.
@@ -226,13 +279,17 @@ the prose check and the gate. A run without them is a visibly thinner document, 
 | Flag | Component | Default | Effect |
 | --- | --- | --- | --- |
 | `--root` | all | `.` | the repository being documented |
-| `--build` | all | `.docs-build` | where intermediates go |
+| `--build` | all | `.docs-build` | where intermediates go; relative paths here and in `--docs`, `--staging` and `--review` resolve against `--root` |
 | `--docs` | `render`, `publish` | `docs` | existing/target documentation tree; render reads it, publish replaces it |
 | `--staging` | `render`, `review`, `publish` | `.docs-build/rendered-docs` | isolated rendered draft |
 | `--top` | `survey` | `25` | the fan-in cutoff for `units.txt` |
 | `--policy` | `survey` | `optional` | `disabled` drops the Ruff stage entirely |
 | `--force` | `analyze` | off | re-derive `claims.jsonl` over hand-written claims |
-| `--preset` | `document` | `auto` | `auto` selects `manual`; name another preset explicitly for a graph-driven report |
+| `--preset` | `document` | `auto` | `auto` builds the recorded choice, or records the survey's recommendation as provisional; a name builds that preset and records it when nothing is recorded |
+| `--use` | `template` | — | record the chosen preset, `manual`, or a template file (needs `--note`) |
+| `--sections`, `--drop` | `template` | — | page ids or `group/` prefixes to keep or leave out of a question template |
+| `--show` | `template` | — | print one choice's outline and questions |
+| `--check-docs` | `template` | — | check a written documentation directory against the chosen template; read-only |
 | `--detail` | `document` | `public` | class-diagram detail level |
 | `--format` | `render` | `rst` | `rst` or `myst` |
 | `--review` | `review` | — | your `prose-review.jsonl` verdicts |

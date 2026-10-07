@@ -1,6 +1,6 @@
 ---
 name: debug-failing-test
-description: Diagnose one failing or intermittently failing test, distinguish code, test, environment and unresolved causes before editing. Use whenever a specific test fails, errors, or breaks in CI — "this test is failing", "why is this red", "CI is broken", "the test passes locally but not in CI", "this test fails intermittently", "this assertion started failing after my change", or a pasted stack trace or assertion diff. Also use when the user is tempted to delete or skip a failing test. For auditing a whole suite's quality rather than diagnosing one failure, use review-tests instead.
+description: Diagnose one failing or intermittently failing test, deciding whether the code, the test, the environment or an unresolved cause is at fault before editing anything. Use whenever a specific test fails, errors, or breaks in CI — "this test is failing", "why is this red", "a test fails in CI", "the test passes locally but not in CI", "this test fails intermittently", "this assertion started failing after my change", or a pasted stack trace or assertion diff. Also use when the user is tempted to delete or skip a failing test. For auditing a whole suite's quality rather than diagnosing one failure, use review-tests instead; for a broken build or compile step with no failing test, debug it directly.
 ---
 
 # Debug a failing test
@@ -46,7 +46,9 @@ the observed run. A failure outside the code or test may remain unresolved pendi
 2. **Read the actual failure.** The assertion diff, the exception type, the line. Not the test name, not a
    guess from the summary. Quote it in your report.
 
-3. **Isolate.** Run the test alone. Compare against running it with the full suite.
+3. **Isolate.** Run the test alone, using the one-test command for its runner in
+   `references/framework-detection.md`. Compare against running it with the full suite, and repeat it to
+   expose intermittency.
    - Fails alone and together → deterministic; go to step 4.
    - Passes alone, fails together → shared state or ordering. The defect is leaked state, not the assertion.
    - Fails intermittently either way → non-determinism: clock, network, randomness, concurrency, iteration
@@ -64,7 +66,7 @@ the observed run. A failure outside the code or test may remain unresolved pendi
    | **Test is wrong** | The intended behavior changed, or the test asserted something never promised | Fix the test, and say what changed to make it obsolete. |
    | **Both wrong** | Test asserts the wrong thing *and* code does a third thing | Fix both, separately, and say so. |
    | **Neither — the test is flaky** | Non-determinism, not a behavior disagreement | Remove the non-determinism: fix the clock, seed the RNG, isolate the state. Not a retry. |
-   | **Environment or tooling** | A reproducible mismatch in runtime, dependency, service, configuration or CI setup | Fix the declared environment or CI setup if the cause is evidenced and in scope; do not rewrite a correct assertion or implementation. |
+   | **Environment or tooling** | A reproducible mismatch in runtime, dependency, service, configuration or CI setup | Propose the change to the declared environment or CI setup, with its evidence. Make it only after the user agrees — a dependency or version change is theirs to decide. Do not rewrite a correct assertion or implementation. |
    | **Unresolved** | The failure cannot be reproduced or its cause cannot yet be established | Preserve the evidence, state what is missing and stop without speculative edits. |
 
 6. **Fix the evidenced cause when possible.** One change at a time. For an unresolved case, do not edit.
@@ -141,7 +143,7 @@ $ <command>
 
 | Path | Load when |
 | ---- | --------- |
-| `references/framework-detection.md` | Step 1, to find the runner command and how to run one test in isolation. |
+| `references/framework-detection.md` | Step 1, to find the runner command. Step 3, for how to run one test alone, repeatedly, or in another order. |
 | `scripts/detect_stack.py` | Step 1, with `--check-env`. Run it; you do not need to read it. Filesystem only, no network, no writes -- it reports what an install would cost, it never installs. |
 
 ## Side effects
@@ -153,10 +155,12 @@ Nothing else is installed.
 
 ## Conventions
 
-- Reference bundled files by paths relative to this skill folder.
+- Run commands from the repository under test. `scripts/` and `references/` paths are inside this skill's
+  folder: invoke and read them by that location, not relative to the repository.
 - Report the verdict before the fix, always. A fix without a stated verdict hides which side was judged wrong.
 - Never claim a test passes without running it; quote the real output.
 - Confirm before disabling, deleting, or weakening any test.
 - Installing the project's test runner is the one exception to "no network, no package installation", and only
   under **Preparing the environment** above. Nothing else may be installed.
-- Produce exactly the output format above, with no commentary wrapped around it.
+- The final report is exactly the output format above, with no commentary wrapped around it. Questions about
+  intent and consent requests are separate messages before it.

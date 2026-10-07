@@ -316,8 +316,12 @@ GROUPS = (("getting_started/", "Getting Started"),
           ("appendix/", "Appendix"))
 
 
-def grouped(entries):
+def grouped(entries, groups=None):
     """(caption, ids) per navigation group, in `GROUPS` order, then whatever is left.
+
+    `groups` is the chosen template's own `[prefix, caption]` list, carried in the
+    document; a template built from the user's outline names its groups there, and the
+    built-in captions apply only when it does not.
 
     Derived from the page id prefix rather than from a new field: the template already
     encodes the group in the id, and a second declaration of the same fact is one that can
@@ -325,7 +329,7 @@ def grouped(entries):
     unnamed group, which is what every non-manual preset does today.
     """
     remaining, out = list(entries), []
-    for prefix, caption in GROUPS:
+    for prefix, caption in (groups or GROUPS):
         holds = [e for e in remaining if e.startswith(prefix)]
         if holds:
             out.append((caption, holds))
@@ -333,6 +337,12 @@ def grouped(entries):
     if remaining:
         out.append(("Contents", remaining))
     return out
+
+
+def template_groups(doc):
+    """The navigation groups the document's template declares, if it declares any."""
+    groups = (doc.get("template") or {}).get("groups")
+    return [tuple(g) for g in groups] if groups else None
 
 
 def render_index(doc, pages, emitter, authored=()):
@@ -348,7 +358,7 @@ def render_index(doc, pages, emitter, authored=()):
     # unreachable. Grouping changes how they are presented, never which ones appear.
     ordered = [page["id"] for page in sorted(list(pages) + list(authored),
                                              key=lambda p: p.get("order", 0))]
-    for caption, entries in grouped(ordered):
+    for caption, entries in grouped(ordered, template_groups(doc)):
         parts.append(emitter.toctree(entries, caption))
     return "\n".join(parts)
 
@@ -565,7 +575,7 @@ def main():
             try:
                 text = wire_toctree.read_index(index_path)
                 notes, changed = [], False
-                for caption, group in grouped(entries):
+                for caption, group in grouped(entries, template_groups(doc)):
                     text, one, note = wire_toctree.plan(text, group, caption, index_name)
                     changed = changed or one
                     notes.append(note)

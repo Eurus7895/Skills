@@ -11,20 +11,20 @@
     {
       "name": "testing",
       "source": "plugins/testing",
-      "description": "Write, review, and debug automated tests in whatever framework a repository already uses. Detects the stack at runtime rather than imposing a framework. With your agreement, will install the project's own test runner when it is missing \u2014 never anything else, and never unattended.",
-      "version": "0.2.1"
+      "description": "Write, review, and debug automated tests in whatever framework a repository already uses. Detects the stack at runtime rather than imposing a framework. With your agreement, it installs the project's own test runner when it is missing, and review-tests may run the project's documented setup \u2014 never anything else, and never unattended.",
+      "version": "0.3.0"
     },
     {
       "name": "code-review",
       "source": "plugins/code-review",
-      "description": "Review code against Google's Standard of Code Review, reporting findings with Conventional Comments labels and CWE-named security categories. Also generates a repository's agent and review rules files.",
-      "version": "0.1.2"
+      "description": "Review code against Google's Standard of Code Review and the repository's own rules files and review checklist, reporting findings with Conventional Comments labels and CWE-named security categories. Also generates those rules files and the checklist the review reads.",
+      "version": "0.2.0"
     },
     {
       "name": "docs",
       "source": "plugins/docs",
-      "description": "Write a project-specific product manual or architecture documentation from repository source, verified dependency and call evidence, and reviewed prose. Produces multi-page docs with file:line citations and a human checkpoint for the final readings.",
-      "version": "1.2.1"
+      "description": "Write architecture documentation, a product manual, or a document following your own template from repository source, verified dependency and call evidence, and reviewed prose \u2014 you choose the outline, none is mandatory \u2014 and check existing docs against a template. Produces multi-page docs with file:line citations and a human checkpoint for the final readings.",
+      "version": "1.3.0"
     }
   ]
 }

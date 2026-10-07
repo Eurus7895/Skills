@@ -1,6 +1,6 @@
 ---
 name: write-tests
-description: Write automated tests for code that already exists — unit tests, edge cases, error paths, and boundary conditions — in whatever framework the repository already uses. Use whenever the user says "write tests", "add unit tests", "cover this function", "this needs test coverage", "test this file", mentions low or missing coverage, asks what cases they should be testing, or hands over a function or module and asks for a test suite. Also use when a change is finished and tests are the remaining work.
+description: Write automated tests for code that already exists — unit tests, edge cases, error paths, and boundary conditions — in whatever framework the repository already uses. Use whenever the user says "write tests", "add unit tests", "cover this function", "this needs test coverage", "test this file", mentions low or missing coverage, asks which cases untested code should be tested for, or hands over a function or module and asks for a test suite. Also use when a change is finished and tests are the remaining work. To judge tests that already exist, including which cases they miss, use review-tests instead; for a failing or flaky test, use debug-failing-test instead.
 ---
 
 # Write tests
@@ -12,12 +12,12 @@ happy path, the edge cases, the error paths, and the boundaries. The suite match
 framework and idioms — you adopt what is there rather than introducing what you prefer.
 
 For a request to add tests, deliver test files, the command and its actual result. For a request asking only
-which cases are missing, deliver the cases with evidence without editing files.
+which cases to cover, deliver the cases with evidence without editing files.
 
 ## When to use this skill
 
 - "Write tests for `parse_config`" / "add unit tests for this module".
-- "What cases am I missing?" for existing code.
+- "Which cases should this function be tested for?" for code with little or no test coverage.
 - Coverage is low or a file has no tests, and the user wants that fixed.
 - A feature is implemented and the tests are the remaining work.
 
@@ -25,7 +25,8 @@ which cases are missing, deliver the cases with evidence without editing files.
 
 - **A test is failing and you need to know why** — use `debug-failing-test`. Writing more tests will not
   diagnose a failure.
-- **Tests already exist and the question is whether they are any good** — use `review-tests`.
+- **Tests already exist and the question is whether they are any good**, or which cases they miss — use
+  `review-tests`.
 - **The user wants the implementation written too** — that is ordinary work; do it directly. This skill assumes
   the code under test already exists.
 - **Test-first / TDD**, where the test is written before the code — this skill reads existing behavior to
@@ -60,14 +61,25 @@ which cases are missing, deliver the cases with evidence without editing files.
    `test_rejects_negative_quantity`, not `test_add_item_2`.
 
 6. **Run them.** Use the runner command for the target package from step 1. Report the actual result, including
-   failures. A failing test that proves a documented contract is violated is a useful result: retain it,
-   identify the production bug and do not edit code under test or weaken the assertion to get green. Fix
-   mistakes in the new tests, such as invalid setup or unsupported expectations, and run them again. A test
-   you did not run is not a test you wrote.
+   failures. Fix mistakes in the new tests, such as invalid setup or unsupported expectations, and run them
+   again. A test you did not run is not a test you wrote.
 
-7. **Verify they can fail.** For at least the most important assertions, confirm the test actually detects a
-   regression — break the behavior mentally or temporarily and check the test would catch it. A test that
-   passes against broken code is worse than no test, because it reports safety that does not exist.
+   A failing test that proves a documented contract is violated is a useful result: keep it, identify the
+   production bug, and do not edit the code under test or weaken the assertion to get green. A kept failing
+   test turns the suite red, so ask the user which they want:
+   - **leave it failing**, so the suite stays red until the bug is fixed; or
+   - **mark it as a strict expected failure that names the bug** — `@pytest.mark.xfail(strict=True,
+     reason="<bug>")`, Jest `test.failing`, Vitest `test.fails` — so it fails the moment the bug is fixed and
+     the marker becomes stale. Never `skip` it: a skipped test stops reporting anything.
+
+   With no one to ask, leave it failing and report it.
+
+7. **Verify they can fail.** For the most important assertions, make the smallest change to the code under test
+   that breaks the behavior — flip a comparison, return early — run the test and watch it fail, then revert.
+   Copy the file before changing it, and confirm the revert against that copy (`cmp <file> <copy>`) before
+   going on; `git diff` cannot tell your revert from the user's own uncommitted edits. If the original cannot
+   be restored exactly, skip this step and say so in the report. A test that passes against broken code is
+   worse than no test, because it reports safety that does not exist.
 
 8. **Report.** State the files written, the command, the pass/fail counts, any documented behavior the code
    violates, and anything you deliberately did not cover with the reason.
@@ -101,15 +113,16 @@ writing no file at all, and that still needs asking.
 
 ## Hard rules
 
-- **Do not modify the code under test.** If it cannot be tested without changing it — a hard-coded dependency,
-  a hidden global, an untestable constructor — say so, explain what change would make it testable, and stop.
-  Silently refactoring the subject of a test is how a passing suite starts lying.
+- **Do not modify the code under test.** The one exception is the temporary mutation in step 7, reverted and
+  confirmed reverted before you report. If the code cannot be tested without changing it — a hard-coded
+  dependency, a hidden global, an untestable constructor — say so, explain what change would make it testable,
+  and stop. Silently refactoring the subject of a test is how a passing suite starts lying.
 - **Do not assert on things the code does not promise.** Testing incidental output — key order, exact
   whitespace, log text — produces tests that break on harmless changes and get deleted.
 - **Do not mock what you own.** Mock the network, the clock, the filesystem, and third-party services. Mocking
   your own function under test means asserting the mock works.
 - If the tests reveal a bug in the code, report it — do not write the test to match the bug.
-- When the request asks only which cases are missing, list cases and evidence without writing files unless the
+- When the request asks only which cases to cover, list cases and evidence without writing files unless the
   user also asks you to add tests.
 
 ## Output format
@@ -133,7 +146,8 @@ $ pytest tests/test_config.py
 For advice only: "not run — no tests written".
 
 ## Production bugs exposed
-- `<file>:<line>` — <documented contract and failing case, or "none">
+- `<file>:<line>` — <documented contract and failing case, and whether the test was left failing or marked
+  as a strict expected failure; or "none">
 
 ## Not covered
 - <what, and why>
@@ -154,9 +168,11 @@ the consent rules in **Preparing the environment** — that command can reach th
 
 ## Conventions
 
-- Reference bundled files by paths relative to this skill folder.
+- Run commands from the repository under test. `scripts/` and `references/` paths are inside this skill's
+  folder: invoke and read them by that location, not relative to the repository.
 - Report what was done and what was skipped; never claim a test passes without running it.
 - Confirm before anything destructive or irreversible — overwriting an existing test file needs a look first.
 - Installing the project's test runner is the one exception to "no network, no package installation", and only
   under **Preparing the environment** above. Nothing else may be installed.
-- Produce exactly the output format above, with no commentary wrapped around it.
+- The final report is exactly the output format above, with no commentary wrapped around it. The case list in
+  step 4, consent requests and the question in step 6 are separate messages before it.

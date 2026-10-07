@@ -57,7 +57,9 @@ scripts/render/snapshot_draft.py           -> skills/document-codebase/scripts/r
 scripts/review/seal_draft.py               -> skills/document-codebase/scripts/review/seal_draft.py
 scripts/review/validate_draft.py            -> skills/document-codebase/scripts/review/validate_draft.py
 scripts/publish/promote_docs.py             -> skills/document-codebase/scripts/publish/promote_docs.py
+scripts/publish/approvals.py                -> skills/document-codebase/scripts/publish/approvals.py
 
 scripts/document/manual.py -> skills/document-codebase/scripts/document/manual.py
+scripts/document/template.py -> skills/document-codebase/scripts/document/template.py
 scripts/document/authored.py -> skills/document-codebase/scripts/document/authored.py
 scripts/document/manual_questions.json -> skills/document-codebase/scripts/document/manual_questions.json

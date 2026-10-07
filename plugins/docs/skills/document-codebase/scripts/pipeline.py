@@ -350,21 +350,102 @@ def check(args):
     ]
 
 
+TEMPLATE_FILE = "template.json"
+# Committed in the documented repository, never in the build: whoever can edit it decides
+# whose signature counts, so it is read from the tree and must be tracked and unmodified.
+SIGNERS_FILE = os.path.join(".github", "docs-allowed-signers")
+
+
+def chosen_template(build):
+    """The recorded template choice, or None when nobody has made one."""
+    record = _json(os.path.join(build, TEMPLATE_FILE))
+    return record if isinstance(record, dict) and record.get("kind") else None
+
+
 def preset_for(args, *analyses):
-    """`manual` is the default deliverable; `--preset` picks any other.
+    """(preset, template.json or None) -- what `document` builds, and against what.
 
-    The older behaviour inferred the preset from which analyses happened to be on disk --
-    `outside-in` if any existed, `onboarding` otherwise -- so the shape of the delivered
-    document was a side effect of what the run got around to writing. A default is a
-    decision and reads better as one.
+    **No outline is mandatory.** The run used to fall back to the built-in manual template,
+    so a user who wanted an architecture report, or had their own documentation template,
+    got a 26-page questionnaire because nobody chose. Now the choice is recorded with
+    `template --use` -- a preset, the manual template or a selection from it, or the user's
+    own outline. When nobody has chosen, `document` records the survey's recommendation as
+    *provisional* and builds that, so a run is never stopped for want of a choice -- and
+    `publish` holds until the user confirms it or picks another.
 
-    The graph-driven presets are still here and still the right answer for an
-    architecture report; they are one flag away. What they are no longer is the thing you
-    get by not choosing.
+    The behaviour before that inferred the preset from which analyses happened to be on
+    disk, so the delivered document was a side effect of what the run wrote. A choice is a
+    decision and reads better as one; a recommendation is labelled as one.
     """
+    record = chosen_template(args.build)
+    template_path = os.path.join(args.build, TEMPLATE_FILE)
     if args.preset != "auto":
-        return args.preset
-    return "manual"
+        if args.preset == "manual" and record and record.get("kind") == "questions":
+            return "manual", template_path
+        return args.preset, None
+    if record is None:
+        return None, None
+    if record.get("kind") == "questions":
+        return "manual", template_path
+    return record.get("name"), None
+
+
+def record_default_choice(args):
+    """Make sure a choice is on record before `document` builds; return it, or an exit code.
+
+    With nothing recorded, an explicit `--preset` is the caller's choice and is recorded as
+    such; with neither, the survey's recommendation is recorded as provisional. Either way
+    `publish` can then compare what was built with what was chosen.
+    """
+    existing = chosen_template(args.build)
+    if existing:
+        return existing
+    script = os.path.join(HERE, "document", "template.py")
+    out = os.path.join(args.build, TEMPLATE_FILE)
+    if args.preset != "auto":
+        argv = [sys.executable, script, "--use", args.preset, "--out", out, "--note",
+                "named with --preset %s on the document command" % args.preset]
+    else:
+        argv = [sys.executable, script, "--recommend",
+                "--index", os.path.join(args.build, "structure.json"), "--root", args.root]
+        if not args.dry_run:
+            argv.extend(["--out", out])
+    if args.dry_run and args.preset != "auto":
+        return {"kind": "preset", "name": args.preset}
+    proc = subprocess.run(argv, capture_output=True, text=True)
+    if proc.returncode:
+        return fail("could not record the template choice: %s"
+                    % (proc.stderr.strip() or proc.stdout.strip()), proc.returncode)
+    if args.preset == "auto":
+        return json.loads(proc.stdout)
+    return chosen_template(args.build) or {}
+
+
+def template_mismatch(build):
+    """Why the document on disk is not what the user chose, or None when it is."""
+    record = chosen_template(build)
+    if record is None or record.get("provisional"):
+        return ("the template is provisional: nobody chose it%s. Show the user the "
+                "choices, then confirm it with `template --use <name> --note \"<their "
+                "choice and why>\"` -- or record another and rerun document, render and "
+                "review" % (" (recommended: %s, because %s)"
+                            % (record.get("name"),
+                               "; ".join(record.get("recommended_because") or ()))
+                            if record else ""))
+    doc = _json(os.path.join(build, "doc.json"), {}) or {}
+    if record.get("kind") == "questions":
+        built = (doc.get("template") or {}).get("template_hash") \
+            if doc.get("preset") == "manual" else None
+        if built != record.get("template_hash"):
+            return ("the document was built from %s, but the chosen template is %s. Rerun "
+                    "document, render and review to build what was chosen"
+                    % ((doc.get("template") or {}).get("name") or doc.get("preset"),
+                       record.get("name")))
+    elif doc.get("preset") != record.get("name"):
+        return ("the document was built from the %s preset, but the chosen template is %s. "
+                "Rerun document, render and review to build what was chosen"
+                % (doc.get("preset"), record.get("name")))
+    return None
 
 
 def document(args):
@@ -379,9 +460,26 @@ def document(args):
     config = os.path.join(build, "config-analysis.json")
     report = os.path.join(build, "flow-report.json")
     graph = os.path.join(build, "class-graph.json")
-    preset = preset_for(args, architecture, operations, flows)
-    print("preset: %s%s" % (preset, "" if args.preset != "auto"
-                            else " (the default; --preset overrides)"))
+    recorded = record_default_choice(args)
+    if isinstance(recorded, int):
+        return recorded
+    preset, template = preset_for(args, architecture, operations, flows)
+    if preset is None:
+        # A dry run records nothing, so its recommendation lives only in this process.
+        preset = recorded.get("name") if recorded.get("kind") == "preset" else "manual"
+        template = None
+    record = chosen_template(args.build) or recorded or {}
+    if record.get("provisional"):
+        print("preset: %s (PROVISIONAL -- recommended by the survey: %s. Confirm it with "
+              "`template --use %s --note ...`, or choose another; publish waits until "
+              "one is chosen)" % (preset, "; ".join(record.get("recommended_because") or ()),
+                                  record.get("name")))
+    else:
+        print("preset: %s%s" % (
+            preset,
+            " (template %s, chosen: %s)" % (record.get("name"), record.get("note"))
+            if template else " (recorded choice: %s)" % record.get("note")
+            if record.get("note") else ""))
 
     if preset == "manual":
         answers = os.path.join(build, "manual-analysis.json")
@@ -390,13 +488,15 @@ def document(args):
             print("would write %s and stop: a manual cannot be built before it is "
                   "answered" % answers)
         elif not os.path.exists(answers):
-            # Now that `manual` is what you get by not choosing, reaching `document`
+            # Once a question template is chosen, reaching `document`
             # without an answer artifact is the ordinary first run, not a mistake. Write
             # the draft here rather than failing with a command to go and type -- `--init`
             # refuses to overwrite, so this can never eat answers that already exist.
             argv = [sys.executable, os.path.join(HERE, "document", "manual.py"),
                     "--init", answers, "--index", index,
                     "--authored", os.path.join(build, "authored.jsonl")]
+            if template:
+                argv.extend(["--template", template])
             # The two largest sources of citable ids. Left off, the reading list held only
             # what the three optional analyses contributed -- an end-to-end run offered 2
             # facts where 15 existed -- and an answer cannot be `observed` or `declared`
@@ -429,6 +529,8 @@ def document(args):
         model.extend(["--manual-analysis", os.path.join(build, "manual-analysis.json"),
                       "--root", args.root,
                       "--authored", os.path.join(build, "authored.jsonl")])
+        if template:
+            model.extend(["--template", template])
     for flag, path in (("--architecture", architecture), ("--flows", flows),
                        ("--operations", operations), ("--config", config)):
         if os.path.exists(path):
@@ -513,6 +615,8 @@ def review(args):
             "--doc", doc, "--diagrams", diagrams, "--prose", prose,
             "--checkpoints", os.path.join(build, "checkpoints"),
             "--hygiene", os.path.join(build, "hygiene-report.json"),
+            "--draft", staging,
+            "--signers", os.path.join(args.root, SIGNERS_FILE),
             "--out", os.path.join(build, "generation-report.json")]
     for flag, path in (("--architecture", architecture), ("--flows", flows),
                        ("--operations", operations)):
@@ -559,11 +663,25 @@ def review(args):
 
 def publish(args):
     """Promote only the sealed draft; perform no generation or review."""
-    return [Stage("publish", "promote_docs.py",
+    # The one place a recommendation stops. A provisional template got the run this far
+    # without anyone choosing; it does not get to reach readers that way.
+    mismatch = template_mismatch(args.build)
+    if mismatch and not args.dry_run:
+        return fail(mismatch, 1)
+    return [
+        # With an allowed-signers file committed, every user decision has to carry a
+        # signature over exactly what it approved; without one this reports the approvals
+        # as unverified and lets promotion go ahead, which is the behaviour it replaces.
+        Stage("publish", "approvals.py",
+              ["verify", "--build", args.build, "--draft", staging_of(args),
+               "--root", args.root, "--signers", SIGNERS_FILE,
+               "--out", os.path.join(args.build, "approvals-report.json")]),
+        Stage("publish", "promote_docs.py",
                   ["--draft", staging_of(args), "--target", args.docs,
                    "--doc", os.path.join(args.build, "doc.json"),
                    "--report", os.path.join(args.build, "generation-report.json"),
-                   "--seal", os.path.join(args.build, "publish-seal.json")])]
+                   "--seal", os.path.join(args.build, "publish-seal.json")]),
+    ]
 
 
 COMPONENTS = {"survey": survey, "analyze": analyze, "check": check,
@@ -1064,6 +1182,62 @@ def analysis_progress(build):
     return scope, read, touched, untouched
 
 
+def template_command(args):
+    """List the choices, record the user's pick, or check a document against it.
+
+    A thin pass-through to `document/template.py`, which owns the format; the driver adds
+    only where the record lives, so every later component finds the same file.
+    """
+    script = os.path.join(HERE, "document", "template.py")
+    record = os.path.join(args.build, TEMPLATE_FILE)
+    if args.check_docs:
+        # An explicit template wins; otherwise the recorded choice; otherwise the built-in.
+        argv = [script, "--check-docs", args.check_docs, "--template",
+                args.use or (record if os.path.isfile(record) else "manual")]
+    elif args.use:
+        argv = [script, "--use", args.use, "--note", args.note or "", "--out", record]
+    elif args.show:
+        argv = [script, "--show", args.show]
+    else:
+        argv = [script, "--list"]
+        current = chosen_template(args.build)
+        if current and current.get("provisional"):
+            line = ("PROVISIONAL %s %s -- recommended because %s; confirm it or choose "
+                    "another" % (current.get("kind"), current.get("name"),
+                                 "; ".join(current.get("recommended_because") or ())))
+        elif current:
+            line = "%s %s -- %s" % (current.get("kind"), current.get("name"),
+                                    current.get("note"))
+        else:
+            line = ("none yet -- `document` will record the survey's recommendation as "
+                    "provisional, and publish waits until one is chosen")
+        print("current choice: %s\n" % line)
+    for flag, value in (("--sections", args.sections), ("--drop", args.drop)):
+        if value and (args.use or args.show or args.check_docs):
+            argv.extend([flag, value])
+    if args.dry_run:
+        print("would run: python3 %s" % " ".join(argv))
+        return 0
+    code = subprocess.call([sys.executable] + argv)
+    if code == 0 and args.use and os.path.isfile(
+            os.path.join(args.build, "manual-analysis.json")):
+        print("note: manual-analysis.json already exists. If it answers a different "
+              "template, `document` will refuse it -- move it aside and rerun `document` "
+              "to draft against this one.")
+    return code
+
+
+def approve_command(args):
+    """Write the payloads the user signs, and print the command for each."""
+    argv = [sys.executable, os.path.join(HERE, "publish", "approvals.py"), "payloads",
+            "--build", args.build, "--draft", staging_of(args), "--root", args.root,
+            "--signers", SIGNERS_FILE]
+    if args.dry_run:
+        print("would run: %s" % " ".join(argv[1:]))
+        return 0
+    return subprocess.call(argv)
+
+
 def status(args, build):
     """Where the run is, read-only, and never blocked by anything.
 
@@ -1084,6 +1258,30 @@ def status(args, build):
     print("           revision %s%s"
           % (source.get("revision") or "untracked",
              " (uncommitted changes when scanned)" if source.get("dirty") else ""))
+
+    record = chosen_template(build)
+    if record:
+        pages = record.get("pages") or ()
+        print("template   %s%s %s%s -- %s"
+              % ("PROVISIONAL " if record.get("provisional") else "",
+                 record.get("kind"), record.get("name"),
+                 " (%d page(s))" % len(pages) if pages else "",
+                 "recommended because %s; publish waits until the user chooses"
+                 % "; ".join(record.get("recommended_because") or ())
+                 if record.get("provisional") else record.get("note")))
+    else:
+        print("template   not chosen -- `document` will record the survey's "
+              "recommendation as provisional; `%s template` lists the choices"
+              % os.path.basename(__file__))
+    if os.path.isfile(os.path.join(args.root, SIGNERS_FILE)):
+        signed = [n for n in os.listdir(os.path.join(build, "approvals"))
+                  if n.endswith(".payload.sig")] \
+            if os.path.isdir(os.path.join(build, "approvals")) else []
+        print("approvals  signed approvals required by %s; %d signature(s) on disk -- "
+              "`approve` writes what the user signs" % (SIGNERS_FILE, len(signed)))
+    else:
+        print("approvals  recorded as text, unverified -- commit %s to require "
+              "signatures" % SIGNERS_FILE)
 
     print("\ncheckpoints")
     for checkpoint in CHECKPOINTS:
@@ -1196,6 +1394,10 @@ def next_step(build, digest, remaining):
     if remaining:
         return ("write the analysis for %d remaining module(s), appending one scope at a "
                 "time, then run check" % len(remaining))
+    record = chosen_template(build)
+    if record and record.get("provisional"):
+        return ("confirm the provisional template (%s) with the user, or record their "
+                "choice: `template --use ... --note ...`" % record.get("name"))
     manual = _json(os.path.join(build, "manual-analysis.json"))
     if isinstance(manual, dict):
         answers = manual.get("answers") or {}
@@ -1355,9 +1557,19 @@ def blocking_checkpoint(build, component, digest, review_file=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("component", choices=ORDER + ["decide", "measure", "status"],
+    parser.add_argument("component",
+                        choices=ORDER + ["decide", "measure", "status", "template",
+                                         "approve"],
                         metavar="COMPONENT",
-                        help="one of: %s, decide, measure, or status" % ", ".join(ORDER))
+                        help="one of: %s, decide, measure, status, template, or approve"
+                             % ", ".join(ORDER))
+    parser.add_argument("--use", help="template: record the chosen preset, `manual`, or a "
+                                      "template file")
+    parser.add_argument("--show", help="template: print one choice's outline")
+    parser.add_argument("--sections", help="template: page ids or groups/ to keep")
+    parser.add_argument("--drop", help="template: page ids or groups/ to leave out")
+    parser.add_argument("--check-docs", help="template: check a written document "
+                                             "directory against the chosen template")
     parser.add_argument("--checkpoint", help="decide: which checkpoint (P1, P2, P3, P4)")
     parser.add_argument("--note", help="decide: what was decided, and by whom -- this is "
                                        "what the closing report carries")
@@ -1399,6 +1611,15 @@ def main():
 
     if not os.path.isdir(args.root):
         return fail("no such directory: %s" % args.root)
+    # The build, the documentation and the draft belong to the repository being documented,
+    # not to wherever the command was typed. Resolved against the current directory, a run
+    # started from this skill's own folder wrote `.docs-build/` -- and would have published
+    # `docs/` -- into the installed plugin.
+    if os.path.abspath(args.root) != os.getcwd():
+        for name in ("build", "docs", "staging", "review"):
+            value = getattr(args, name)
+            if value and not os.path.isabs(value):
+                setattr(args, name, os.path.join(args.root, value))
     if args.top < 0:
         return fail("--top must not be negative")
     if args.review and not os.path.isfile(args.review):
@@ -1410,8 +1631,18 @@ def main():
     if args.component == "status":
         return status(args, args.build)
 
+    if args.component == "template":
+        # Listing the choices or checking a document must not create a build directory;
+        # recording one is the first thing that needs it.
+        if args.use and not args.dry_run:
+            build_dir.ensure(args.build)
+        return template_command(args)
+
     build_dir.ensure(args.build)
     digest = index_hash_of(args.build)
+
+    if args.component == "approve":
+        return approve_command(args)
 
     if args.component == "measure":
         if args.dry_run:

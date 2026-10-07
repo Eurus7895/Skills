@@ -66,6 +66,9 @@ JS_FRAMEWORKS = [
 
 PY_FRAMEWORKS = [("pytest", "pytest", "pytest")]
 
+# `node --test` (with or without flags or paths between) in a package.json test script.
+NODE_TEST = re.compile(r"(?:^|[\s;&|(])node\b[^;&|]*?\s--test\b")
+
 
 def read(path):
     try:
@@ -143,7 +146,7 @@ RUBY_RUNNERS = {"rspec": "bundle exec rspec", "minitest": "bundle exec rake test
 
 TEST_FILE_PATTERNS = {
     "python": [r"^test_.*\.py$", r".*_test\.py$"],
-    "javascript": [r"\.(test|spec)\.[jt]sx?$"],
+    "javascript": [r"\.(test|spec)\.[cm]?[jt]sx?$"],
     "go": [r"_test\.go$"],
     # Rust has no test-file naming convention: tests live in tests/ or in inline
     # #[cfg(test)] modules. Matching *.rs would count every source file as a test.
@@ -177,6 +180,11 @@ def detect_javascript(path, notes):
             return framework, runner, "high"
     scripts = data.get("scripts")
     if isinstance(scripts, dict) and "test" in scripts:
+        # Node's built-in runner has no package to find in dependencies -- it ships with
+        # node itself, so the test script is the only place it is declared. Missing it
+        # reported a package whose `npm test` passes as having no runner at all.
+        if NODE_TEST.search(str(scripts.get("test") or "")):
+            return "node:test", "npm test", "high"
         notes.append("no known framework in dependencies; using the declared test script")
         return None, "npm test", "low"
     return None, "npm test", "low"
@@ -261,6 +269,10 @@ BUILTIN_TOOLCHAIN = {"go": "go", "rust": "cargo", "swift": "swift"}
 # nothing to look for on PATH -- `pip install unittest` would fetch an unrelated package
 # abandoned in 2007.
 STDLIB_FRAMEWORKS = {"unittest"}
+
+# Frameworks built into a runtime rather than published as a package: the runtime's own
+# executable is the runner, and there is no dependency to declare or install.
+TOOLCHAIN_FRAMEWORKS = {"node:test": "node"}
 
 # Ecosystems where installing a test framework means hand-editing a build file (pom.xml,
 # build.gradle, CMakeLists.txt, a .csproj) or driving a package manager whose failure
@@ -674,6 +686,20 @@ def check_env(root, repo_root, ecosystem, framework, marker_path):
                 "what is missing." % (tool, ecosystem))
         return env
 
+    if framework in TOOLCHAIN_FRAMEWORKS:
+        tool = TOOLCHAIN_FRAMEWORKS[framework]
+        path = shutil.which(tool)
+        env["declared"] = True
+        if path:
+            env.update(available=True, invocation=path, action="none", consent="none")
+            env["notes"].append("%s ships with %s; nothing to install" % (framework, tool))
+        else:
+            env["notes"].append(
+                "%r is not on PATH, so %s cannot run here. Installing a language runtime is "
+                "outside what this script proposes -- tell the user what is missing."
+                % (tool, framework))
+        return env
+
     if framework in STDLIB_FRAMEWORKS:
         env.update(declared=True, available=True, action="none", consent="none",
                    invocation="%s -m %s" % (sys.executable, framework))
@@ -869,6 +895,15 @@ def detect(root, target=None, with_env=False, repo_root=None):
             others = sorted(k for k in markers if k != name)
             notes.append("other ecosystem markers present: %s" % ", ".join(others))
 
+        # A marker below the root is one package's, not the repository's. Reporting it with
+        # high confidence named the first fixture's pytest as this whole repository's runner.
+        package_dir = os.path.dirname(path)
+        if os.path.abspath(package_dir) != os.path.abspath(root):
+            notes.append("the marker is in %s, not at the root; pass a target to scope "
+                         "detection to one package" % os.path.relpath(package_dir, root))
+            if confidence == "high":
+                confidence = "low"
+
         result = {
             "ecosystem": ecosystem,
             "test_framework": framework,
@@ -879,7 +914,9 @@ def detect(root, target=None, with_env=False, repo_root=None):
             "notes": notes,
         }
         if with_env:
-            result["env"] = check_env(root, repo_root, ecosystem, framework, path)
+            # The package that owns the marker is where its runner lives and where an
+            # install has to run -- not the root the caller happened to name.
+            result["env"] = check_env(package_dir, repo_root, ecosystem, framework, path)
         return result
 
     result = {

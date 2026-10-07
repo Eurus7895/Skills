@@ -5,7 +5,9 @@ repository's conventions.
 
 Findings follow [Google's *Standard of Code Review*](https://google.github.io/eng-practices/review/reviewer/standard.html)
 — approve when the change definitely improves overall code health — labelled with Conventional Comments
-(`issue:`, `suggestion:`, `nit:`, `question:`) and named with CWE identifiers for security issues.
+(`issue:`, `suggestion:`, `nit:`, `question:`, `praise:`) and named with CWE identifiers for security issues.
+The two skills connect: the review checklist `setup-review-rules` writes is linked from `AGENTS.md`, and
+`review-code` reads it — with the rest of the repository's rules files — before reviewing.
 
 ## Install
 
@@ -17,8 +19,9 @@ copilot plugin install code-review@CopilotBox
 ## Skills
 
 - **`review-code`** — review a diff, PR, branch, or working tree for correctness, security, error handling,
-  concurrency, test coverage, and maintainability. Severity-ordered findings, each with `file:line` and a
-  concrete failure scenario. Fires on "review this", "check before I merge", "any security problems".
+  concurrency, test coverage, maintainability, and the repository's own rules. Severity-ordered findings, each
+  with `file:line` and, above a nit, a concrete failure scenario. Fires on "review this", "check before I
+  merge", "any security problems".
 - **`setup-review-rules`** — generate `AGENTS.md`, `.github/copilot-instructions.md`, and a project-specific
   review checklist from what the repo actually does. Fires on "set up rules for this repo", "add AGENTS.md",
   "onboard this repo for agents".

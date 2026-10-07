@@ -1,7 +1,7 @@
 {
   "name": "code-review",
-  "description": "Review code against Google's Standard of Code Review, reporting findings with Conventional Comments labels and CWE-named security categories. Also generates a repository's agent and review rules files.",
-  "version": "0.1.2",
+  "description": "Review code against Google's Standard of Code Review and the repository's own rules files and review checklist, reporting findings with Conventional Comments labels and CWE-named security categories. Also generates those rules files and the checklist the review reads.",
+  "version": "0.2.0",
   "keywords": [
     "code-review",
     "pull-request",

@@ -372,21 +372,83 @@ def driver_tests(tmp, root):
           text.count("-- skip ") == 5, text)
     check("document says why it skipped each one", "will say so" in text, text)
 
-    # The default is a decision, not an inference from which files happen to exist.
+    # No outline is mandatory, and none is silently imposed: with nothing chosen, document
+    # builds the survey's recommendation and says it is provisional.
     code, text = run("pipeline.py", "document", "--root", root, "--build", build,
                      "--docs", os.path.join(tmp, "docs"), "--dry-run")
-    check("document defaults to the manual preset",
-          "preset: manual (the default" in text, text[:300])
+    check("document without a choice builds a recommendation labelled provisional",
+          code == 0 and "PROVISIONAL" in text and "template --use" in text, text[:600])
+    check("a dry run records no choice",
+          not os.path.exists(os.path.join(build, "template.json")), text[:300])
+
+    # Listing the choices writes nothing, and recording one needs a reason.
+    code, text = run("pipeline.py", "template", "--root", root, "--build", build)
+    check("template lists presets, the manual template and external files",
+          code == 0 and "architecture" in text and "manual" in text and "<path>" in text,
+          text[:400])
+    code, text = run("pipeline.py", "template", "--root", root, "--build", build,
+                     "--use", "manual", "--note", "ok")
+    check("a template choice without a reason is refused",
+          code == 2 and not os.path.exists(os.path.join(build, "template.json")), text[-300:])
+
+    code, text = run("pipeline.py", "template", "--root", root, "--build", build,
+                     "--use", "manual", "--drop", "appendix/",
+                     "--note", "user picked the manual without its appendix pages")
+    check("the manual template can be recorded as a selection", code == 0, text[-300:])
+    code, text = run("pipeline.py", "document", "--root", root, "--build", build,
+                     "--docs", os.path.join(tmp, "docs"), "--dry-run")
+    check("document builds the recorded manual template",
+          "preset: manual (template manual" in text, text[:300])
     check("a first run says the draft would be written and writes nothing",
           "would write" in text
           and not os.path.exists(os.path.join(build, "manual-analysis.json")), text[:400])
+    check("the chosen template reaches the model build",
+          "--template %s" % os.path.join(build, "template.json") in text, text[-600:])
     write(os.path.join(build, "architecture-analysis.json"), "{}")
     code, text = run("pipeline.py", "document", "--root", root, "--build", build,
                      "--docs", os.path.join(tmp, "docs"), "--dry-run")
-    # An analysis appearing on disk no longer changes the deliverable under the reader's
-    # feet. It is material the chosen preset may use, not a vote for a different preset.
-    check("an analysis on disk does not change the default",
-          "preset: manual (the default" in text, text[:300])
+    # An analysis appearing on disk does not change the deliverable under the reader's
+    # feet. It is material the chosen template may use, not a vote for a different one.
+    check("an analysis on disk does not change the recorded choice",
+          "preset: manual (template manual" in text, text[:300])
+
+    # A preset is a choice like any other, and an external outline is one too.
+    code, text = run("pipeline.py", "template", "--root", root, "--build", build,
+                     "--use", "onboarding",
+                     "--note", "user wants the file-by-file onboarding tour")
+    code, text = run("pipeline.py", "document", "--root", root, "--build", build,
+                     "--docs", os.path.join(tmp, "docs"), "--dry-run")
+    check("a recorded preset is what document builds",
+          "preset: onboarding" in text and "--template" not in text, text[:300])
+    outline = os.path.join(tmp, "outline.md")
+    write(outline, "# Manual\n\n## Install\n- What must be installed?\n\n"
+                   "## Configure\nEvery setting and its default.\n")
+    code, text = run("pipeline.py", "template", "--root", root, "--build", build,
+                     "--use", outline, "--note", "user supplied their own two-page outline")
+    check("an external outline can be recorded", code == 0, text[-300:])
+    code, text = run("pipeline.py", "document", "--root", root, "--build", build,
+                     "--docs", os.path.join(tmp, "docs"), "--dry-run")
+    check("document builds against the external outline",
+          "preset: manual (template outline" in text, text[:300])
+
+    # Checking a written tree needs no run, and judges it by the recorded outline unless
+    # another template is named explicitly.
+    written = os.path.join(tmp, "written-docs")
+    os.makedirs(written, exist_ok=True)
+    write(os.path.join(written, "install.md"),
+          "# Install\n\n%s\n" % " ".join(["Run make install from the checkout."] * 5))
+    code, text = run("pipeline.py", "template", "--root", root, "--build", build,
+                     "--check-docs", written)
+    check("check-docs reports the recorded outline's missing page",
+          code == 1 and "present    install" in text and "missing    configure" in text,
+          text[-400:])
+    code, text = run("pipeline.py", "template", "--root", root, "--build", build,
+                     "--check-docs", written, "--use", "manual",
+                     "--sections", "getting_started/introduction")
+    check("an explicit template wins over the recorded one",
+          code == 1 and "getting_started/introduction" in text and "install " not in text,
+          text[-400:])
+    os.remove(os.path.join(build, "template.json"))
     code, text = run("pipeline.py", "document", "--root", root, "--build", build,
                      "--docs", os.path.join(tmp, "docs"), "--preset", "outside-in",
                      "--dry-run")

@@ -17,9 +17,10 @@ copilot plugin install testing@CopilotBox
 - **`write-tests`** — produce a suite for existing code: happy path, edge cases, error paths, boundaries.
   Fires on "write tests", "add unit tests", "cover this function", coverage gaps.
 - **`review-tests`** — audit an existing suite for assertions that cannot fail, missing cases, over-mocking,
-  and flakiness. Fires on "are these tests any good", "why didn't the tests catch this", flaky failures.
-- **`debug-failing-test`** — decide whether the test or the code is wrong, then fix the correct side. Fires on
-  any failing test, CI breakage, or "passes locally but not in CI".
+  and flakiness. Fires on "are these tests any good", "why didn't the tests catch this", suite-wide flakiness.
+  Running the project's documented setup, beyond the runner, needs your yes.
+- **`debug-failing-test`** — decide whether the test, the code or the environment is wrong, then fix the
+  correct side. Fires on a failing or flaky test, a test failing in CI, or "passes locally but not in CI".
 
 ## Installing packages
 

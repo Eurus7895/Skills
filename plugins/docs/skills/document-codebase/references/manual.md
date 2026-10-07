@@ -1,8 +1,25 @@
 # Question-driven manual
 
-Read [documentation-template.md](documentation-template.md) before selecting scope and before writing
-`.docs-build/manual-analysis.json`. The template's 25 sections are the content contract; the documentation-wide
-review is an additional appendix page.
+## Contents
+
+- [Choosing and writing a template](#choosing-and-writing-a-template)
+- [Workflow](#workflow)
+- [Map the template to this repository](#map-the-template-to-this-repository)
+- [Review and repair the draft](#review-and-repair-the-draft)
+- [The pages the run does not answer](#the-pages-the-run-does-not-answer)
+- [Answer contract](#answer-contract)
+- [Composition contract — `pages`](#composition-contract--pages)
+- [`verified_ids`](#verified_ids--what-separates-observed-or-declared-support-from-inference)
+- [Facts](#facts--verified-inputs-available-to-the-model)
+- [Diagrams](#diagrams)
+- [Migration](#migration)
+
+This file covers every **question template**: the built-in manual, a selection of its sections, or the
+user's own outline. The chosen one is recorded in `.docs-build/template.json`, and that file — not any
+particular template — is the content contract. For the built-in manual, read
+[documentation-template.md](documentation-template.md) before selecting scope and before writing
+`.docs-build/manual-analysis.json`; its 25 sections plus the documentation-wide review are what the user
+chooses from, not what every manual must contain.
 
 **The questions are the prompt, never the document.** They exist to make the run cover a subject and to say
 what evidence each part rests on. A page that renders them as headings, with an answer under each, is a
@@ -10,9 +27,80 @@ filled-in questionnaire — which is what a reader gets handed instead of a manu
 `.docs-build/`, and the delivered page is *composed* from them: your headings, your prose, one section over
 as many answers as it takes.
 
+## Choosing and writing a template
+
+**No template is mandatory, and the choice is the user's.** List the options, recommend one, and record what
+they pick — with their reason, because the closing report has to be able to say whose choice it was:
+
+```bash
+python3 scripts/pipeline.py template                              # presets, the manual, a file of theirs
+python3 scripts/pipeline.py template --show manual                # one choice's outline and questions
+python3 scripts/pipeline.py template --use manual --drop appendix/,development/api_reference \
+  --note "user wants the manual without the appendix or API pages"
+python3 scripts/pipeline.py template --use ./docs-template.md --note "user's company manual outline"
+```
+
+`--sections` keeps only the pages it names and `--drop` removes pages; both take page ids, or a group such as
+`appendix/`. When nothing is recorded, `document` records the survey's recommendation — `handbook` for a
+handbook-shaped `docs/`, `manual` for a repository with an entry point, `architecture` otherwise — marked
+`provisional`, and builds it; `publish` refuses until the user confirms it with `--use` or records another.
+Recording a new one later is allowed, but answers drafted for a different template are refused by name: move
+`manual-analysis.json` aside and rerun `document`.
+
+### The user's own template
+
+A **Markdown outline** is the usual form — the template a team already has:
+
+```markdown
+# Acme Product Manual                 <- one heading over everything is the title, not a section
+
+## Overview                           <- a heading with items under it is a page
+- What does the product do, and for whom?     <- each item is a question the page must answer
+- (ask) What is the business justification?   <- the user answers this one, not the source
+
+## Setup                              <- a heading holding only headings is a group (nav caption, id prefix)
+### Installation (Linux)              <- ordinary parentheses stay in the title
+- What must be installed first?
+### Configuration
+Describe every setting the product reads.     <- prose under a heading is the page's one question
+
+## Architecture (diagram: class)      <- this page must carry the class diagram; also (diagram: data flow)
+- Which components exist?
+
+## Changelog (authored)               <- written by a person, never generated; see the authored pages below
+- What changed in each release?
+```
+
+Page ids come from the headings (`setup/installation_linux`); a heading with nothing under it gets one
+question, "What does a reader need to know about …?". **`(ask)` (or `[ask]`) before a question** says only a
+person can answer it: the draft tells you to ask the user, their answer is recorded `asserted` with their name
+as reviewer, and it is reported as asked rather than counted against the 20% assertion ceiling — that ceiling
+exists to stop assertions standing in for evidence nobody looked for, not to penalise a question the template
+declared up front. `template --show` warns about unmarked questions that look like something only a person
+knows: business justification, owners, SLAs, sign-off. A **JSON** template is a list of pages in the
+`manual_questions.json` shape — `{"id", "title", "questions": [{"id", "text", "ask"?}]}` plus optional
+`authored`, `review` and `diagram` — or an object with `pages` and `groups`. Run `template --show <path>` and confirm the
+outline with the user before recording it: what they meant by a heading is theirs to say.
+
+### Validating a document against a template
+
+The pipeline validates a question-template manual as it builds: every question answered or recorded as
+unknown, every answer composed, every section evidenced — against the recorded template, which `doc.json`
+carries so the gate judges by the same one. For a document that already exists, written by a person or by an
+earlier run, no scan is needed:
+
+```bash
+python3 scripts/pipeline.py template --check-docs docs --use ./docs-template.md
+```
+
+Each template page gets a verdict: `present`, `incomplete` (fewer than 20 words of prose, placeholder text
+such as `TODO` or the authored-page scaffold, or the template's questions copied in as headings), or
+`missing`. A section found as a heading inside another page counts, and is noted. Exit `1` means something is
+owed; nothing is edited.
+
 ## Workflow
 
-1. Select `--preset manual` explicitly. Survey the product purpose, actors, entry points and configuration as
+1. Record the template choice above. Survey the product purpose, actors, entry points and configuration as
    well as the dependency graph. Select evidence needed to answer the template, not merely high-fan-in files.
 2. Run the existing survey, analyze and check components. Read source, configuration, tests and repository
    documentation to answer questions the structural index cannot answer. Keep module, architecture, flow
@@ -46,14 +134,15 @@ as many answers as it takes.
    reader needs: a heading that says what the section is about, and prose that reads as documentation. One
    section may draw on several answers, and should where the answers overlap — three questions about
    configuration are usually one section, not three.
-6. Run `python3 scripts/pipeline.py document --preset manual`, then `render`. The builder checks complete
+6. Run `python3 scripts/pipeline.py document`, then `render`. The builder checks complete
    question IDs, scan identity, repository-relative evidence line ranges, that every answer with an
    `observed` or `declared` basis names a `verified_ids` entry some validator already passed, and that every
    composed section stays inside
    what its answers cite. It does not prove that a sentence is true or sufficient: deterministic prose
    checks examine every composed section, and **every manual section enters the model review queue**.
-7. **Settle the six authored pages** (see below). Fill each scaffold `render` wrote into the draft, or waive it
-   with an owner and a reason. The gate holds publication until every one is `complete` or `waived`.
+7. **Have the user settle the authored pages** (see below). Each is written — by them, or with them — and
+   marked `complete` with its owner, waived with an owner and a reason, or dropped from the template with
+   their agreement. The gate holds publication until every one is settled. Never settle one yourself.
 8. Review `.docs-build/rendered-docs/`: does it read as a manual, and does each section still say what its answers said?
    Correct the notes or the composition in `manual-analysis.json` and rebuild; do not patch generated RST
    because the next build replaces it. Review verdicts apply to section blocks
@@ -105,10 +194,11 @@ scope, specific uncertainties and limitations. Pipeline execution counts, Sphinx
 summaries belong in the generation report. Do not use them as answers about the product or as filler in
 `documentation_review.rst`.
 
-## The six pages the run does not answer
+## The pages the run does not answer
 
-`appendix/troubleshooting`, `faq`, `glossary`, `references`, `compliance` and `changelog` carry 38 template
-questions between them that **no repository answers**. What users actually ask, which terms need defining,
+A template may mark pages `authored`: a person writes them, and the run never does. In the built-in manual
+these are `appendix/troubleshooting`, `faq`, `glossary`, `references`, `compliance` and `changelog`, which
+carry 38 template questions between them that **no repository answers**. What users actually ask, which terms need defining,
 what a compliance position is — none of that is in the source, and asking the run for it would buy 38 more
 `unknown`s and drag `answer_mode` down for gaps that were never the run's to fill.
 
@@ -123,7 +213,13 @@ They are not silent, though. Each carries a row in **`.docs-build/authored.jsonl
 `status` is `scaffolded`, `drafted`, `complete` or `waived`. **Only `complete` and `waived` release the
 publication gate** — `drafted` deliberately does not, because a draft is what gets reviewed and treating it
 as done would publish the review's input as its output. A waiver names an owner and a reason: "we looked,
-and this page is not needed here" is an answer, and an answer has somebody behind it.
+and this page is not needed here" is an answer, and an answer has somebody behind it. `complete` names an
+owner too, and the gate checks the draft actually holds the page and that it is no longer the scaffold — a
+one-word ledger edit used to clear the gate with nothing written.
+
+**These are the user's decisions.** Show them which pages are owed after `render`; never mark one `complete`
+or `waived` on their behalf. When a page should not exist at all, the honest fix is a template without it —
+`template --use manual --drop appendix/faq` — recorded with their agreement.
 
 The file holds only what a person owns. The evidence a page is offered is recomputed on every build against
 that run's index, so a stale reading list never sits in a file somebody is editing.
@@ -160,9 +256,10 @@ usually goes wrong would arrive looking finished, and that is the failure this s
 
 ## Answer contract
 
-`manual_version` is `2`; `index_hash` must match the current scan. `answers` maps every stable question ID
-(`1.1.1`, `1.1.2`, ..., `5.7.6`, and `review.1` ... `review.8`) to one answer. The bundled
-`manual_questions.json` is the machine-readable mapping; the initializer writes all IDs.
+`manual_version` is `2`; `index_hash` must match the current scan, and `template_hash` the recorded template.
+`answers` maps every question ID of the chosen template to one answer — for the whole built-in manual
+`1.1.1`, `1.1.2`, ..., `5.7.6`, and `review.1` ... `review.8`. The initializer writes every ID the chosen
+template asks; `manual_questions.json` is the built-in template's machine-readable form.
 
 ```json
 {

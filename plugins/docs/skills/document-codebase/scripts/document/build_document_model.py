@@ -55,6 +55,7 @@ import re
 import sys
 
 import manual
+import template as template_module
 
 FORMAT_VERSION = 2
 GENERATOR_VERSION = "0.2.0-dev"
@@ -212,9 +213,7 @@ PRESETS = {
     # Generated pages carry the `manual` builder; the authored ones carry `None`, which
     # is what makes the renderer leave them alone and the report name them as not
     # generated. Same shape `handbook` uses for the pages a graph cannot write.
-    "manual": [(page["id"], page["title"], True, "manual")
-               for page in manual.GENERATED[1:] + manual.GENERATED[:1]]
-              + [(page["id"], page["title"], True, None) for page in manual.AUTHORED],
+    "manual": [],
     "handbook": [
         ("getting_started/introduction", "Introduction", True, None),
         ("getting_started/installation_integrators", "Installation", True, None),
@@ -242,6 +241,28 @@ PRESETS = {
         ("appendix/output_structure", "Output structure", False, None),
     ],
 }
+
+
+def manual_rows():
+    """The manual preset's pages, from whichever template `manual` is configured with.
+
+    Generated pages carry the `manual` builder and authored ones `None`, in the template's
+    own reading order. Recomputed after `manual.configure`, because the preset is the
+    chosen template's shape and not a fixed list.
+    """
+    places = manual.template_order()
+    rows = [(page["id"], page["title"], True, "manual") for page in manual.GENERATED]
+    rows += [(page["id"], page["title"], True, None) for page in manual.AUTHORED]
+    return sorted(rows, key=lambda row: places[row[0]])
+
+
+def use_template(record):
+    """Point the manual preset at `record` -- a template.json or a document's copy."""
+    manual.configure(record)
+    PRESETS["manual"] = manual_rows()
+
+
+PRESETS["manual"] = manual_rows()
 
 
 def load_rows(path, label):
@@ -1396,6 +1417,9 @@ def main():
     parser.add_argument("--manual-analysis", help="question answers for the manual preset")
     parser.add_argument("--root", default=".", help="repository root for manual evidence")
     parser.add_argument("--authored", help="authored-page ledger, JSONL")
+    parser.add_argument("--template", help="template.json the user chose for the manual "
+                                           "preset; the built-in question template when "
+                                           "absent")
     parser.add_argument("--preset", default="onboarding", choices=sorted(PRESETS))
     parser.add_argument("--diagrams", metavar="DIR",
                         help="rendered diagram directory; pages reference what is there "
@@ -1478,6 +1502,19 @@ def main():
                              % (option, stated, index.get("index_hash")))
             return 2
         extra[key] = loaded
+
+    if args.preset == "manual" and args.template:
+        try:
+            record = template_module.load(args.template)
+        except ValueError as exc:
+            sys.stderr.write("FAIL %s\n" % exc)
+            return 2
+        if record.get("kind") != "questions":
+            sys.stderr.write("FAIL %s records the %s preset, not a question template; "
+                             "build with --preset %s\n"
+                             % (args.template, record.get("name"), record.get("name")))
+            return 2
+        use_template(record)
 
     if args.preset == "manual":
         if not args.manual_analysis:

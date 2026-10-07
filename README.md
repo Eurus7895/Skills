@@ -12,7 +12,7 @@ agent. Nothing in this repo uses Copilot-only syntax.
 | ------ | ------ | ------------- |
 | [`testing`](plugins/testing/) | `write-tests`, `review-tests`, `debug-failing-test` | Write, audit, and debug automated tests in whatever framework the repo already uses. **Can install your project's test runner** — with your agreement, never unattended |
 | [`code-review`](plugins/code-review/) | `review-code`, `setup-review-rules` | Review code against Google's Standard of Code Review, and generate a repo's agent/review rules files |
-| [`docs`](plugins/docs/) | `document-codebase` | Write a repository's architecture documentation from its real dependency graph, or a delivered product manual from an answered question template, with every structural claim checked against that graph before it ships |
+| [`docs`](plugins/docs/) | `document-codebase` | Write a repository's architecture documentation, a product manual, or a document following your own template — you choose the outline, none is mandatory — with every claim checked against the real dependency graph; and check existing docs against a template |
 
 > Adding a plugin means adding a row here **and** an entry in
 > [`.github/plugin/marketplace.json`](.github/plugin/marketplace.json).
@@ -135,9 +135,10 @@ re-run the script.
 ```bash
 python3 tools/validate.py        # manifests, frontmatter, links, catalog, drift
 python3 tools/materialize.py     # regenerate copies after editing shared/
+for t in tools/test_*.py; do python3 "$t" || break; done   # behavioural tests
 ```
 
-Both run in CI on every pull request, against Python 3.9 and 3.13 — the floor proves the bundled scripts do
+All three run in CI on every pull request, against Python 3.9 and 3.13 — the floor proves the bundled scripts do
 not depend on newer syntax, since they run on a stranger's machine with no install step. Run them locally
 anyway; a red pull request is a slower way to learn the same thing.
 

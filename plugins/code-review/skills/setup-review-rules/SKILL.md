@@ -1,6 +1,6 @@
 ---
 name: setup-review-rules
-description: Generate a repository's agent and review rules files — AGENTS.md, .github/copilot-instructions.md, and a review checklist — tuned to the stack, test framework, and conventions the repository actually uses. Use whenever the user says "set up rules for this repo", "add AGENTS.md", "create copilot instructions", "onboard this repo for AI agents", "we need coding standards", "make a review checklist", or asks how to make an agent follow their project's conventions.
+description: Generate a repository's agent and review rules files — AGENTS.md, .github/copilot-instructions.md, and a review checklist — tuned to the stack, test framework, and conventions the repository actually uses. Use whenever the user says "set up rules for this repo", "add AGENTS.md", "create copilot instructions", "onboard this repo for AI agents", "we need coding standards", "make a review checklist", or asks how to make an agent follow their project's conventions. To review a change against rules that already exist, use review-code instead.
 ---
 
 # Set up review rules
@@ -69,7 +69,10 @@ code that does not match the codebase.
    **The review checklist** — project-specific items only. Do not restate generic advice; the `review-code`
    skill already carries the general standard. This file is for what is peculiar to *this* repo: the module
    that must not gain dependencies, the migration that must accompany a schema change, the API whose contract
-   is public.
+   is public. Write it to `docs/review-checklist.md` unless the repository already keeps such documents
+   elsewhere, and point to it from `AGENTS.md` with one line that names its path ("Review changes against
+   `docs/review-checklist.md`.") so reviewers, agents and `review-code` find it. A checklist nothing points to
+   is never read.
 
 8. **Report** the files written, and every inference you made, so the user can correct them.
 
@@ -101,7 +104,7 @@ code that does not match the codebase.
 ## Files written
 - `AGENTS.md` — new
 - `.github/copilot-instructions.md` — new
-- `docs/review-checklist.md` — new
+- `docs/review-checklist.md` — new, linked from `AGENTS.md`
 
 ## Skipped
 - <existing file left alone, and why>
@@ -116,8 +119,10 @@ code that does not match the codebase.
 
 ## Conventions
 
-- Reference bundled files by paths relative to this skill folder.
+- Run commands from the target repository. `scripts/` and `references/` paths are inside this skill's
+  folder: invoke and read them by that location, not relative to the repository.
 - Report every inference made, so wrong guesses are cheap to correct.
 - Confirm before overwriting any existing file; look at it first.
 - Assume no network access and no package installation.
-- Produce exactly the output format above, with no commentary wrapped around it.
+- The final report is exactly the output format above, with no commentary wrapped around it. Questions to
+  the owner in step 6 and overwrite confirmations are separate messages before it.

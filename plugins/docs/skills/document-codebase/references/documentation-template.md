@@ -1,5 +1,10 @@
 # Project Documentation Template
 
+> **This is the built-in `manual` template, one choice among several — not a mandatory outline.** The user
+> may pick it whole, pick only some of its sections, choose a graph-driven preset, or bring their own
+> template; see [manual.md](manual.md#choosing-and-writing-a-template). Answer the questions of the
+> sections that were chosen.
+
 > A reusable, question-driven documentation template for any software, hardware, data, infrastructure, or mixed-technology project.
 >
 > **Model instruction:** Answer every question in this file using evidence from the project repository, source code, configuration, tests, issue tracker, and deployment artifacts where available. Do not invent facts. If evidence is unavailable, write `Unknown — evidence required` and identify what must be checked.
