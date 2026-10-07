@@ -223,6 +223,17 @@ def build(tmp):
     write(root, os.path.join(".venv", "bin", "pytest"))
     os.chmod(os.path.join(root, ".venv", "bin", "pytest"), 0o644)
 
+    # Node's built-in runner: declared only by the test script, provided by node itself.
+    root = tree("node-test")
+    write(root, "package.json", '{"scripts": {"test": "node --test"}}')
+    write(root, "status.test.js", "")
+
+    # No marker at the root, one package below it. Its runner is that package's, and an
+    # install for it has to run there rather than at the root the caller named.
+    root = tree("nested-only")
+    write(root, os.path.join("pkg", "pyproject.toml"), PYPROJECT_WITH_PYTEST)
+    write(root, os.path.join("pkg", "tests", "test_x.py"))
+
     return roots
 
 
@@ -318,6 +329,29 @@ def main():
         check("the unittest invocation runs the module, not a bare interpreter",
               (out["env"]["invocation"] or "").endswith("-m unittest"),
               "got %r" % out["env"]["invocation"])
+
+        # `node --test` has no dependency to find. Missing it reported a package whose
+        # `npm test` passes as having no runner, and the skills stopped on a working repo.
+        _, out = run(roots["node-test"], "--check-env")
+        node = shutil.which("node") is not None
+        check("node --test -> detected as node:test",
+              out.get("test_framework") == "node:test" and out.get("confidence") == "high",
+              "got %r / %r" % (out.get("test_framework"), out.get("confidence")))
+        check("node --test -> availability tracks whether node is on PATH",
+              out["env"]["available"] is node,
+              "node present: %s, reported available: %s" % (node, out["env"]["available"]))
+        _, out = run(roots["node-test"], "--check-env", path="")
+        check("node --test -> no node means nothing is proposed for install",
+              out["env"]["available"] is False and out["env"]["command"] is None,
+              "got %r / %r" % (out["env"]["available"], out["env"]["command"]))
+
+        # A marker below the root names one package, not the repository.
+        _, out = run(roots["nested-only"], "--check-env")
+        check("a nested marker without a target is low confidence",
+              out.get("confidence") == "low", "got %r" % out.get("confidence"))
+        check("a nested marker's environment is checked in its own package",
+              out["env"]["working_directory"] == "pkg",
+              "got %r" % out["env"]["working_directory"])
 
         # A Windows .cmd shim is the installed runner on that platform.
         _, out = run(roots["windows-shim"], "--check-env")
