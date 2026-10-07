@@ -59,7 +59,7 @@ A queued block you did not decide is reported as undecided, never as passed, and
 If a repair changes the queue, render and run the unreviewed `review` again, show the updated readings,
 and collect a new P4 response before running `review --review`.
 
-## 8. Read the report against your own run
+## Read the report against your own run
 
 `review` ends with the quality gate and seal, and this is the one number you do not get to argue with. Read
 `analysis_mode` first, then `status` and its `reasons`.

@@ -222,6 +222,12 @@ def read_row(row, known):
         if not reason:
             raise ValueError("%s: a waived page records why, or it is `scaffolded` "
                              "wearing a verdict" % page_id)
+    if status == COMPLETE and not owner:
+        # `complete` releases the publication gate, so it carries a name the same way a
+        # waiver does: whoever wrote the page or accepted it. The gate also checks that the
+        # draft holds the page; the name says who answers for what it says.
+        raise ValueError("%s: a complete page names the owner who wrote or accepted it"
+                         % page_id)
     if claims_default and status not in (WAIVED, COMPLETE, DRAFTED):
         raise ValueError("%s: a default-waived page is waived, drafted or complete"
                          % page_id)

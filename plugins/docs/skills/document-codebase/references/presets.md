@@ -4,8 +4,11 @@ A preset fixes the skeleton: which pages exist, in what order, and which may not
 about what is true — that comes entirely from the verified claims. Two documents built from the same preset
 against different repositories share a shape and nothing else.
 
-Pass one with `--preset`. **`manual` is the default** — the delivered product manual. The four
-graph-driven presets below are one flag away and remain the right answer for an architecture report.
+**None is the default.** Recommend one, let the user choose, and record it with
+`pipeline.py template --use <name>`; `document` builds the recorded choice and refuses until there is one.
+`--preset <name>` on `document` names a preset directly. Alongside the four graph-driven presets below sit
+the `manual` question template, a selection of its sections, and the user's own template — see
+[manual.md](manual.md#choosing-and-writing-a-template).
 
 ## `onboarding`
 
@@ -42,8 +45,8 @@ not the inventory; someone who wants a file-by-file list should generate `onboar
 
 What the thing is, then how to run it, then how it is built, then the inventory. Every other preset here
 opens on structure — the dependency graph, the entry points — which answers the question a reader has
-fourth. This is also the only preset that consumes the architecture and operations analyses, so it is the
-one to use when the three analyses were written.
+fourth. It is the graph-driven preset that renders the architecture and operations analyses as pages of
+their own, so it is the one to use when the three analyses were written.
 
 | Page | Contains | Mandatory |
 | --- | --- | --- |
@@ -73,13 +76,15 @@ build and say the analysis was not supplied — a visibly thinner document, neve
 
 ## `manual`
 
-Follow the [question template](documentation-template.md), with the documentation-wide review in the
-appendix. Read [manual.md](manual.md) for the answer schema, generation steps, review and migration.
+A question template: the built-in [question template](documentation-template.md), with the
+documentation-wide review in the appendix — or the sections of it the user picked, or the user's own
+outline. Read [manual.md](manual.md) for the answer schema, generation steps, review and migration.
 Unlike the graph-driven presets, manual requires `manual-analysis.json`: each question the run is asked gets
 an explicit, evidence-backed answer or a recorded unknown, and the pages are then **composed** from those
 answers. The questions are the prompt and never reach the reader.
 
-**Six of the 26 pages are authored, not generated**, and the run is not asked their questions at all:
+**In the built-in template, six of the 26 pages are authored, not generated**, and the run is not asked
+their questions at all:
 `appendix/glossary`, `faq`, `troubleshooting`, `compliance`, `changelog` and `references`. A glossary, an
 FAQ, a changelog and a troubleshooting table are things a person knows — the same reasoning `handbook`
 already applies. Asking the run for them buys 38 more `unknown`s and drags `answer_mode` down for gaps that
@@ -167,8 +172,8 @@ Presets live in `PRESETS` in `build_document_model.py`, as `(page_id, title, man
 page id and the builder are separate, which is how `architecture/data_flow` is filled by the `flows` builder.
 
 A preset whose tree splits a subject finer than an existing builder does needs its own builders rather than
-the same one on two pages: `manual` splits the operations procedures four ways for that reason, over
-`procedure_page`, which takes the kinds its page is the home of.
+the same one on two pages: `outside-in` splits the operations procedures between `getting-started` and
+`operations` for that reason, over `procedure_page`, which takes the kinds its page is the home of.
 
 `builder` may be `None`. That declares a page the pipeline cannot fill: it is listed in `authored_pages`,
 reported as not generated, and never written. Prefer `None` over a builder that would emit a placeholder —

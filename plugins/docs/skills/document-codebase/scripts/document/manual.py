@@ -27,11 +27,17 @@ import re
 from pathlib import Path
 
 import authored
+import template as templates
 
 
 MANUAL_VERSION = 2
 
 QUESTIONS = json.loads(Path(__file__).with_name("manual_questions.json").read_text())
+# The template this process is building against. The built-in question template until
+# `configure` is handed the one the user chose; nothing here assumes which it is.
+_BUILTIN = templates.builtin_manual()
+TEMPLATE = {"name": "manual", "source": "built-in", "groups": _BUILTIN["groups"],
+            "template_hash": templates.template_hash(_BUILTIN["pages"], _BUILTIN["groups"])}
 
 # Pages whose questions a repository cannot answer: a glossary, an FAQ, a changelog, a
 # troubleshooting table, a compliance statement, a bibliography. `presets.md` already
@@ -51,9 +57,9 @@ GENERATED = [page for page in QUESTIONS if not page.get("authored")]
 AUTHORED = [page for page in QUESTIONS if page.get("authored")]
 
 # The documentation-wide review is first in the template and belongs last in the document.
-# Named once here rather than implied by a `pages[1:] + pages[:1]` slice, because the
-# authored pages need the same answer and a slice cannot give it to them.
-REVIEW_PAGE = GENERATED[0]["id"]
+# Declared by the page (`"review": true`) rather than implied by position: an external
+# template's first page is its introduction, and moving that to the end would be wrong.
+REVIEW_PAGE = next((p["id"] for p in GENERATED if p.get("review")), None)
 
 
 def template_order():
@@ -67,10 +73,58 @@ def template_order():
     `changelog`), and that interleaving is the intended reading order.
     """
     ordered = [page["id"] for page in QUESTIONS if page["id"] != REVIEW_PAGE]
-    ordered.append(REVIEW_PAGE)
+    if REVIEW_PAGE:
+        ordered.append(REVIEW_PAGE)
     return {page_id: position for position, page_id in enumerate(ordered, 1)}
-DIAGRAMS = {"architecture/class_diagram": "diagram-manifest.json",
-            "architecture/data_flow": "flow-diagram-manifest.json"}
+
+
+# A page that must carry a diagram says which kind; the manifest is where the diagram stage
+# recorded what it drew.
+FLOW_MANIFEST = templates.DIAGRAM_KINDS["data_flow"]
+DIAGRAMS = {p["id"]: templates.DIAGRAM_KINDS[p["diagram"]] for p in QUESTIONS
+            if p.get("diagram") in templates.DIAGRAM_KINDS}
+
+
+def configure(record):
+    """Build against `record` -- a template.json, or a document's carried copy of one.
+
+    Every module-level name the build reads is rebound here and nowhere else, so a process
+    that configured once sees one template throughout. `None` restores the built-in.
+    """
+    global QUESTIONS, GENERATED, AUTHORED, REVIEW_PAGE, DIAGRAMS, TEMPLATE
+    if record is None:
+        builtin = templates.builtin_manual()
+        pages = builtin["pages"]
+        meta = {"name": "manual", "source": "built-in", "groups": builtin["groups"],
+                "template_hash": templates.template_hash(builtin["pages"],
+                                                         builtin["groups"])}
+    else:
+        problems = templates.validate(record)
+        if problems:
+            raise ValueError("template %s cannot be used: %s"
+                             % (record.get("name"), "; ".join(problems)))
+        pages = record["pages"]
+        meta = {"name": record.get("name"), "source": record.get("source"),
+                "template_hash": record.get("template_hash"),
+                "groups": record.get("groups") or []}
+    QUESTIONS = pages
+    GENERATED = [page for page in pages if not page.get("authored")]
+    AUTHORED = [page for page in pages if page.get("authored")]
+    REVIEW_PAGE = next((p["id"] for p in GENERATED if p.get("review")), None)
+    DIAGRAMS = {p["id"]: templates.DIAGRAM_KINDS[p["diagram"]] for p in pages
+                if p.get("diagram") in templates.DIAGRAM_KINDS}
+    TEMPLATE = meta
+
+
+def template_record():
+    """The template a document was built against, carried inside it.
+
+    Every later stage -- the gate, the renderer -- validates the document against this
+    copy rather than against whatever template the process happens to have loaded, so a
+    manual built from the user's own outline is never judged by the built-in one.
+    """
+    return dict(TEMPLATE, kind="questions", template_version=templates.TEMPLATE_VERSION,
+                pages=QUESTIONS)
 
 # What a `confirmed` answer may borrow its standing from. These are the statuses the
 # rest of the skill already lets into prose: hard rule 5 admits `verified` claims, and
@@ -107,6 +161,8 @@ def scaffold(index, extra=None, claims=(), analysis=None):
     # step exists to stop producing -- the composing is the work, and a placeholder
     # would arrive looking like it was already done.
     return {"manual_version": MANUAL_VERSION, "index_hash": index.get("index_hash"),
+            "template": TEMPLATE.get("name"),
+            "template_hash": TEMPLATE.get("template_hash"),
             "facts": {k: sorted(v) for k, v in sorted(facts.items())},
             "answers": answers,
             "pages": {page["id"]: {"sections": []} for page in GENERATED}}
@@ -707,10 +763,23 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
                          % MANUAL_VERSION)
     if not index.get("index_hash") or content.get("index_hash") != index["index_hash"]:
         raise ValueError("manual analysis is missing its scan identity or is stale")
+    if content.get("template_hash", TEMPLATE.get("template_hash")) \
+            != TEMPLATE.get("template_hash"):
+        raise ValueError(
+            "manual-analysis.json was drafted against template %r, and the chosen template "
+            "is now %r. Move the old answers aside and rerun `document` to draft against "
+            "the new one; answers to a different template's questions do not carry over"
+            % (content.get("template"), TEMPLATE.get("name")))
     answers = content.get("answers")
     expected = {q["id"] for p in GENERATED for q in p["questions"]}
     if not isinstance(answers, dict) or set(answers) != expected:
-        raise ValueError("manual answers must contain exactly every template question ID")
+        missing = sorted(expected - set(answers or ()))
+        extra_ids = sorted(set(answers or ()) - expected)
+        raise ValueError(
+            "manual answers must contain exactly every question of template %r -- %d "
+            "missing (%s), %d not in the template (%s)"
+            % (TEMPLATE.get("name"), len(missing), ", ".join(missing[:3]) or "none",
+               len(extra_ids), ", ".join(extra_ids[:3]) or "none"))
     composed_pages = content.get("pages") or {}
     if not isinstance(composed_pages, dict):
         raise ValueError("manual `pages` must be a map of page id to its sections")
@@ -774,7 +843,7 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
             found = []
             if manifest and manifest.is_file():
                 data = json.loads(manifest.read_text())
-                if spec["id"] == "architecture/data_flow":
+                if DIAGRAMS[spec["id"]] == FLOW_MANIFEST:
                     if data.get("index_hash") != index["index_hash"] or data.get("validated") is not True:
                         raise ValueError("manual flow diagram manifest is stale or unvalidated")
                 elif data.get("schema_version") != 3:
@@ -842,7 +911,7 @@ def build(index, content, diagrams, root, claims=(), analysis=None, extra=None):
                                     (extra or {}).get("authored") or ())
     authored_by_page = {row["page_id"]: row for row in authored_rows}
     mode, settled, authored_total = authored.authored_mode(authored_rows)
-    return {"preset": "manual", "pages": pages,
+    return {"preset": "manual", "pages": pages, "template": template_record(),
             # `order` comes from the same template map the generated pages use, so the
             # renderer's single sort puts every page where the template says -- the
             # appendix interleaved as written, and the review last of all.
@@ -931,7 +1000,14 @@ if __name__ == "__main__":
                                            "are in the reading list")
     parser.add_argument("--authored", help="where to write the authored-page ledger; "
                                            "an existing one is never overwritten")
+    parser.add_argument("--template", help="template.json the user chose; the built-in "
+                                           "question template when absent")
     args = parser.parse_args()
+    if args.template:
+        try:
+            configure(templates.load(args.template))
+        except ValueError as exc:
+            raise SystemExit("FAIL %s" % exc)
     index = json.loads(Path(args.index).read_text())
     extra = {}
     for key, path in (("architecture", args.architecture), ("flows", args.flows),
@@ -986,8 +1062,9 @@ if __name__ == "__main__":
         json.dump(draft, handle, indent=2, ensure_ascii=False)
         handle.write("\n")
     facts = sum(len(v) for v in draft["facts"].values())
-    print("wrote %s: %d unanswered question(s); %d verified fact(s) available to cite"
-          % (args.init, len(draft["answers"]), facts))
+    print("wrote %s: %d unanswered question(s) from template %r; %d verified fact(s) "
+          "available to cite" % (args.init, len(draft["answers"]), TEMPLATE.get("name"),
+                                 facts))
     # The six pages the run does not answer get their obligation recorded at the same
     # moment the questions it does answer get theirs. Writing this only at build time
     # would leave the first run's report saying six pages are missing with nothing on

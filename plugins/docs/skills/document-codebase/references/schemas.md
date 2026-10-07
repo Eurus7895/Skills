@@ -3,6 +3,30 @@
 Every artefact carries a version. A script given a version it does not know exits `2` rather than guessing
 what the fields mean.
 
+## Contents
+
+- [Entity ids](#entity-ids)
+- [`structure.json` — schema_version 3](#structurejson--schema_version-3)
+- [Context packet — packet_version 1](#context-packet--packet_version-1)
+- [Run identity](#run-identity)
+- [`fragments.jsonl`](#fragmentsjsonl)
+- [`claims.jsonl`](#claimsjsonl)
+- [`module-analysis.jsonl` — analysis_version 1](#module-analysisjsonl--analysis_version-1)
+- [`architecture-analysis.json` — architecture_version 1](#architecture-analysisjson--architecture_version-1)
+- [The verification loop](#the-verification-loop)
+- [`flow-analysis.json` — flow_version 1](#flow-analysisjson--flow_version-1)
+- [`operations-analysis.json` — operations_version 1](#operations-analysisjson--operations_version-1)
+- [Sequence diagrams — flow diagram manifest_version 1](#sequence-diagrams--flow-diagram-manifest_version-1)
+- [`generation-report.json` — schema_version 1](#generation-reportjson--schema_version-1)
+- [`doc.json` — format_version 2](#docjson--format_version-2)
+- [PlantUML diagram artifacts — manifest_version 3](#plantuml-diagram-artifacts--manifest_version-3)
+- [Exit codes](#exit-codes)
+- [`scope.json` — scope_version 1](#scopejson--scope_version-1)
+- [`prose-review.jsonl` — review_version 2](#prose-reviewjsonl--review_version-2)
+- [`authored.jsonl` — authored_version 1](#authoredjsonl--authored_version-1)
+- [`template.json` — template_version 1](#templatejson--template_version-1)
+- [`asserted` and `brevity` — the two bounded exceptions](#asserted-and-brevity--the-two-bounded-exceptions)
+
 ## Entity ids
 
 Claims name things by id, not by prose. Four forms, and nothing else parses:
@@ -648,9 +672,9 @@ result rather than a judgement: the prose and its citations are preserved, and `
 
 ## `authored.jsonl` — authored_version 1
 
-One row per page the manual template names and no repository answers: `appendix/troubleshooting`, `faq`,
-`glossary`, `references`, `compliance`, `changelog`. Written by `manual.py --init`, read by
-`build_document_model.py --authored`, and edited by a person in between.
+One row per page the chosen question template marks `authored` — in the built-in manual,
+`appendix/troubleshooting`, `faq`, `glossary`, `references`, `compliance`, `changelog`. Written by
+`manual.py --init`, read by `build_document_model.py --authored`, and edited by a person in between.
 
 ```json
 {"authored_version": 1, "page_id": "appendix/troubleshooting", "status": "scaffolded",
@@ -661,7 +685,8 @@ One row per page the manual template names and no repository answers: `appendix/
 `status` is `scaffolded`, `drafted`, `complete` or `waived`. **`complete` and `waived` release the publication
 gate; `scaffolded` and `drafted` do not** — a draft is the review's input, not its result. A `waived` row
 names an `owner` and a `waiver_reason`, and a row missing either is refused: a waiver is an answer, and an
-answer has somebody behind it.
+answer has somebody behind it. A `complete` row names its `owner` too, and the gate (`quality_docs.py
+--draft`) fails one whose page is absent from the draft or still carries the scaffold's first line.
 
 `default_waiver` marks the one row a run may waive on nobody's behalf. Only `appendix/compliance` carries it,
 because it asserts a legal position rather than describing behaviour, and its stock reason says in its own
@@ -686,6 +711,37 @@ nor be excused by it.
 
 A run with no ledger file scaffolds every page fresh, so a first run needs nothing on disk. A malformed row
 is an error naming the page; there is no v0 to migrate.
+
+## `template.json` — template_version 1
+
+What the document follows, recorded by `pipeline.py template --use` and read by `document`. A preset:
+
+```json
+{"template_version": 1, "kind": "preset", "name": "architecture", "source": "built-in",
+ "note": "user wants the dense architecture report for the platform team"}
+```
+
+A question template — the built-in manual, a selection of it, or the user's own file:
+
+```json
+{"template_version": 1, "kind": "questions", "name": "company-manual",
+ "source": "docs-template.md", "source_hash": "sha256:...", "template_hash": "sha256:...",
+ "selection": {"sections": [], "drop": ["appendix/"]},
+ "groups": [["setup/", "Setup"]],
+ "pages": [{"id": "setup/installation", "title": "Installation",
+            "questions": [{"id": "2.1", "text": "What must be installed first?"}]},
+           {"id": "changelog", "title": "Changelog", "authored": true,
+            "questions": [{"id": "5.1", "text": "What changed in each release?"}]}],
+ "note": "user supplied the company manual outline"}
+```
+
+Page ids are lowercase words joined by `_` or `-`, with `/` between groups, unique, and never `index`. Question
+ids are unique across the template. A page may carry `authored: true` (a person writes it), `review: true`
+(at most one; it is moved to the end of the document), and `diagram: "class"` or `"data_flow"` (at most one
+page each). `template_hash` covers `pages` and `groups` only, so the whole built-in manual hashes the same
+whether or not it was recorded; `manual-analysis.json` carries the hash it was drafted against, and a
+mismatch is refused by name. `doc.json` carries the question template under `template`, and the gate
+validates the document against that copy.
 
 ## `asserted` and `brevity` — the two bounded exceptions
 

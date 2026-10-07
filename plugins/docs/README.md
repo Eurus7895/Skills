@@ -1,7 +1,8 @@
 # docs
 
-Write a repository's architecture documentation or product manual from its real dependency graph, not from what the model
-remembers reading.
+Write a repository's architecture documentation, a product manual, or a document following your own template,
+from its real dependency graph — not from what the model remembers reading — and check an existing
+documentation tree against a template.
 
 The shape is what makes the result checkable:
 
@@ -30,8 +31,24 @@ copilot plugin install docs@CopilotBox
 - **`document-codebase`** — parses the repository with `scan_repo.py` (Python via `ast`, other languages by
   import regex), ranks modules by fan-in, sends each one to the model in a bounded context packet with its
   real importers supplied, verifies every claim that comes back, and renders a multi-page RST or MyST document
-  under `docs/`. Fires on "document this repo", "write architecture docs", "explain how this codebase fits
-  together", "map the dependencies".
+  under `docs/`. Fires on a request for written documentation — "document this repo", "write architecture
+  docs", "write a user manual", "fill in our documentation template", "check our docs against this
+  template". A question asked in chat about how the code fits together is answered directly instead.
+
+## Choosing the template
+
+**No outline is mandatory.** The skill lists the choices, recommends one, and builds what you pick:
+
+| Choice | What you get |
+| --- | --- |
+| `architecture`, `onboarding`, `outside-in`, `handbook` | Graph-driven presets with fixed pages |
+| `manual` | The built-in question template — whole, or only the sections you keep with `--sections` / `--drop` |
+| your own file | A Markdown outline (headings are sections, list items the questions each must answer) or JSON |
+
+The choice is recorded with `pipeline.py template --use … --note "<why>"`, and every later stage validates
+the document against it. `pipeline.py template --check-docs docs --use <template>` checks a documentation
+tree that already exists — written by you or by an earlier run — and reports each section as present,
+incomplete or missing, without editing anything.
 
 ## Components
 
@@ -105,7 +122,9 @@ misconfigure and is written to normally.
 
 ## Question-driven manual
 
-Use `--preset manual` to follow the 25-section documentation template. Write evidence-backed answers in
-`manual-analysis.json`; all pages render those answers, including usage, development and appendix content.
-Only the class-diagram and data-flow pages require diagrams. Unknown answers keep the manual incomplete.
-See [the manual guide](skills/document-codebase/references/manual.md).
+The `manual` template — or a selection of it, or your own — is answered in `manual-analysis.json` with
+evidence, and its pages are composed from those answers. Pages the template marks `authored` (in the
+built-in manual: troubleshooting, FAQ, glossary, references, compliance, changelog) are written by a person,
+never generated: you write each one or waive it with your name and a reason, and publication waits until
+you have. Only pages marked with a diagram require one. Unknown answers keep the manual incomplete. See
+[the manual guide](skills/document-codebase/references/manual.md).

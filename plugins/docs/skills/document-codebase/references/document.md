@@ -18,9 +18,10 @@ class graph and its diagrams, draws any traced flow as a sequence, and builds `d
 `view-spec.json` may choose detail, layers and emphasis; it may **not** add a class, drop one, change what
 connects to what, or set its own scope. See [`diagram-policy.md`](diagram-policy.md).
 
-**`manual` is the default**, and `--preset` picks any other. It renders the sections you composed from the
-template answers — never the template questions themselves, which are the prompt and not the document. Read
-[the manual guide](manual.md) before building it.
+**`document` builds the template the user chose** — recorded with `pipeline.py template --use`, or named
+with `--preset` — and refuses when there is none. For a question template it renders the sections you
+composed from the answers — never the template questions themselves, which are the prompt and not the
+document. Read [the manual guide](manual.md) before building one.
 
 **On the first run there is no answer artifact, so `document` writes the draft and stops**, exit `1`: a
 verdict, not breakage. It writes unanswered slots and a `facts` inventory from whichever validated inputs
@@ -28,8 +29,7 @@ exist; it writes no answer prose. It tells you to read the source, answer the sl
 and does not overwrite a draft that is already there.
 Rerun `document` once it is answered.
 
-The graph-driven presets are one flag away and are still the right answer for an architecture report rather
-than a manual: `outside-in` opens on what the repository is rather than on its dependency graph,
+The graph-driven presets are the right answer for an architecture report rather than a manual: `outside-in` opens on what the repository is rather than on its dependency graph,
 `onboarding` is the file-by-file tour, `architecture` the dense shape, and `handbook` fits an existing
 documentation tree and preserves its authored pages. All of them are described in
 [`presets.md`](presets.md).

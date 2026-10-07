@@ -35,7 +35,8 @@
     "id": "review.8",
     "text": "Are terminology, links, examples, version references, and commands consistent throughout?"
    }
-  ]
+  ],
+  "review": true
  },
  {
   "id": "getting_started/introduction",
@@ -225,7 +226,8 @@
     "id": "2.2.9",
     "text": "Which diagram or code references prove the described flow?"
    }
-  ]
+  ],
+  "diagram": "data_flow"
  },
  {
   "id": "architecture/module_reference",
@@ -297,7 +299,8 @@
     "id": "2.4.7",
     "text": "What important relationships or lifecycle states are not shown in the diagram?"
    }
-  ]
+  ],
+  "diagram": "class"
  },
  {
   "id": "usage/invoking",

@@ -1,5 +1,18 @@
 # The components, and the driver that runs them
 
+## Contents
+
+- [Detailed-plan contract](#detailed-plan-contract)
+- [`template` — what the document follows](#template--what-the-document-follows)
+- [`status` — where the run is](#status--where-the-run-is)
+- [What each component runs](#what-each-component-runs)
+- [Stopping, skipping, and the codes](#stopping-skipping-and-the-codes)
+- [Flags](#flags)
+- [Timing the workflow](#timing-the-workflow)
+- [Why `analyze` can refuse to run](#why-analyze-can-refuse-to-run)
+- [Where the boundaries leak, and why](#where-the-boundaries-leak-and-why)
+- [What is still yours to run](#what-is-still-yours-to-run)
+
 `scripts/` holds one directory per component. Each answers one kind of question, owns the scripts that answer
 it, and hands the next one a file rather than a call:
 
@@ -141,6 +154,23 @@ reopens them — the scope approved against the old tree says nothing about the 
 file bypasses it, in the same way deleting `claims.jsonl` bypasses the claims: the mechanism is against
 forgetting, not against intent.
 
+## `template` — what the document follows
+
+```bash
+python3 scripts/pipeline.py template                    # the choices, and the one recorded
+python3 scripts/pipeline.py template --use <preset|manual|path> [--sections …] [--drop …] --note "<why>"
+python3 scripts/pipeline.py template --check-docs docs [--use <template>]
+```
+
+**No outline is the default.** `document` builds what `.docs-build/template.json` records — a graph-driven
+preset, the manual question template or a selection of its pages, or the user's own Markdown or JSON
+template — and refuses when nothing is recorded. The choice is the user's, so `--use` needs a note of at
+least five words saying whose it is and why. A question template reaches `manual.py` and
+`build_document_model.py` as `--template`, and `doc.json` carries a copy, so the gate in `review` judges the
+document by the template it was built against. `--check-docs` reads a documentation tree and reports each
+template page as present, incomplete or missing; it writes nothing. The format is in
+[`manual.md`](manual.md#choosing-and-writing-a-template).
+
 ## `status` — where the run is
 
 ```bash
@@ -157,7 +187,7 @@ reported by something that might decline to report it. A session whose context w
 modules had no way to ask what was left: `quality_docs.py` names the unread modules, but that runs in
 `publish`, and a partial analysis fails `check` first.
 
-It prints the scan identity and revision, each checkpoint's state, the module budget, the manual's answered
+It prints the scan identity and revision, the recorded template choice, each checkpoint's state, the module budget, the manual's answered
 and composed counts, the authored ledger, and the review queue — then one line naming the next action.
 
 **Modules are reported in three states, not two:**
@@ -226,13 +256,17 @@ the prose check and the gate. A run without them is a visibly thinner document, 
 | Flag | Component | Default | Effect |
 | --- | --- | --- | --- |
 | `--root` | all | `.` | the repository being documented |
-| `--build` | all | `.docs-build` | where intermediates go |
+| `--build` | all | `.docs-build` | where intermediates go; relative paths here and in `--docs`, `--staging` and `--review` resolve against `--root` |
 | `--docs` | `render`, `publish` | `docs` | existing/target documentation tree; render reads it, publish replaces it |
 | `--staging` | `render`, `review`, `publish` | `.docs-build/rendered-docs` | isolated rendered draft |
 | `--top` | `survey` | `25` | the fan-in cutoff for `units.txt` |
 | `--policy` | `survey` | `optional` | `disabled` drops the Ruff stage entirely |
 | `--force` | `analyze` | off | re-derive `claims.jsonl` over hand-written claims |
-| `--preset` | `document` | `auto` | `auto` selects `manual`; name another preset explicitly for a graph-driven report |
+| `--preset` | `document` | `auto` | `auto` builds the recorded template choice and refuses without one; a name builds that preset directly |
+| `--use` | `template` | — | record the chosen preset, `manual`, or a template file (needs `--note`) |
+| `--sections`, `--drop` | `template` | — | page ids or `group/` prefixes to keep or leave out of a question template |
+| `--show` | `template` | — | print one choice's outline and questions |
+| `--check-docs` | `template` | — | check a written documentation directory against the chosen template; read-only |
 | `--detail` | `document` | `public` | class-diagram detail level |
 | `--format` | `render` | `rst` | `rst` or `myst` |
 | `--review` | `review` | — | your `prose-review.jsonl` verdicts |

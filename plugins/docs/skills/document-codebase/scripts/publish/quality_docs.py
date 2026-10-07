@@ -56,7 +56,7 @@ for _sibling in ("check", "document"):
     sys.path.insert(0, os.path.join(os.path.dirname(_HERE), _sibling))
 
 import validate_analysis  # noqa: E402
-from build_document_model import PRESETS  # noqa: E402
+from build_document_model import PRESETS, use_template  # noqa: E402
 
 REPORT_VERSION = 1
 
@@ -447,6 +447,31 @@ def operations_report(operations):
 
 
 SETTLED_AUTHORED = ("complete", "waived")
+# The first line of every authored-page scaffold `render_docs.py` writes. A page still
+# carrying it was never written, whatever its ledger row says.
+SCAFFOLD_MARKER = "this page is written by a person, not generated"
+DRAFT_SUFFIXES = (".rst", ".md")
+
+
+def authored_unwritten(doc, draft):
+    """Authored pages the ledger calls `complete` that the draft does not actually hold."""
+    out = []
+    for row in doc.get("authored_ledger", ()) or ():
+        if row.get("status") != "complete":
+            continue
+        found = None
+        for suffix in DRAFT_SUFFIXES:
+            path = os.path.join(draft, row.get("page_id", "") + suffix)
+            if os.path.isfile(path):
+                found = path
+                break
+        if found is None:
+            out.append(row.get("page_id"))
+            continue
+        with open(found, encoding="utf-8", errors="replace") as fh:
+            if SCAFFOLD_MARKER in fh.read():
+                out.append(row.get("page_id"))
+    return sorted(out)
 
 
 def page_report(doc):
@@ -513,6 +538,8 @@ def main():
     parser.add_argument("--require", default=STATUS_PARTIAL,
                         choices=(PASSED, STATUS_PARTIAL, REVIEW_REQUIRED, FAILED),
                         help="lowest status that still exits 0 (default: partial)")
+    parser.add_argument("--draft", help="the rendered draft, so an authored page marked "
+                                        "complete is checked for an actual page")
     parser.add_argument("--out", help="where to write the report; stdout either way")
     args = parser.parse_args()
 
@@ -656,21 +683,30 @@ def main():
         doc, error = load_json(args.doc, "document model")
         if error:
             return fail(error)
+        if doc.get("preset") == "manual" and doc.get("template"):
+            # Judge the document by the template it was built against -- the user's own
+            # outline, or a selection from the built-in one -- never by the built-in whole.
+            try:
+                use_template(doc["template"])
+            except ValueError as exc:
+                return fail("the template carried in %s cannot be used: %s"
+                            % (args.doc, exc))
         report["pages"] = page_report(doc)
         if doc.get("preset") == "manual":
-            from manual import validate_document
-            problems = validate_document(doc)
+            import manual
+            problems = manual.validate_document(doc)
             # The counts come from the builder, which is the only thing that saw the
             # answers: the pages carry composed sections now, so counting blocks would
             # count prose rather than the questions the template asked.
             coverage = doc.get("manual_coverage") or {}
             unresolved = list(coverage.get("unresolved") or ())
             uncomposed = list(coverage.get("uncomposed") or ())
-            missing_diagrams = [pid for pid in ("architecture/class_diagram", "architecture/data_flow")
+            missing_diagrams = [pid for pid in sorted(manual.DIAGRAMS)
                                 if not any(b.get("type") == "plantuml"
                                            for p in doc.get("pages", []) if p.get("id") == pid
                                            for b in p.get("blocks", []))]
-            report["manual"] = {"total": coverage.get("total"),
+            report["manual"] = {"template": (doc.get("template") or {}).get("name", "manual"),
+                                "total": coverage.get("total"),
                                 "sections": coverage.get("sections", 0),
                                 "unresolved": unresolved, "uncomposed": uncomposed,
                                 "missing_diagrams": missing_diagrams, "problems": problems}
@@ -770,8 +806,19 @@ def main():
                     status = FAILED
                     reasons.append(
                         "manual has %d authored page(s) nobody has written or waived: "
-                        "%s. Fill the scaffold, or waive it with an owner and a reason"
-                        % (len(owed), ", ".join(owed)))
+                        "%s. The user writes each page or waives it with an owner and a "
+                        "reason; never settle one on their behalf" % (len(owed), ", ".join(owed)))
+                # `complete` is a claim that a page exists. Checked against the draft, because
+                # a ledger edit alone used to clear this gate with nothing written at all.
+                if args.draft:
+                    unwritten = authored_unwritten(doc, args.draft)
+                    if unwritten:
+                        status = FAILED
+                        reasons.append(
+                            "authored page(s) marked complete with no written page in the "
+                            "draft: %s. Write the page, or set the row back to `scaffolded`"
+                            % ", ".join(unwritten))
+                        report["manual"]["authored_unwritten"] = unwritten
         if report["pages"]["missing"]:
             status = FAILED
             reasons.append("the %s preset requires pages that were not generated: %s"
