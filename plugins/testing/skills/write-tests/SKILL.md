@@ -1,6 +1,6 @@
 ---
 name: write-tests
-description: Write automated tests for code that already exists — unit tests, edge cases, error paths, and boundary conditions — in whatever framework the repository already uses. Use whenever the user says "write tests", "add unit tests", "cover this function", "this needs test coverage", "test this file", mentions low or missing coverage, asks what cases they should be testing, or hands over a function or module and asks for a test suite. Also use when a change is finished and tests are the remaining work.
+description: Write automated tests for code that already exists — unit tests, edge cases, error paths, and boundary conditions — in whatever framework the repository already uses. Use whenever the user says "write tests", "add unit tests", "cover this function", "this needs test coverage", "test this file", mentions low or missing coverage, asks which cases untested code should be tested for, or hands over a function or module and asks for a test suite. Also use when a change is finished and tests are the remaining work. To judge tests that already exist, including which cases they miss, use review-tests instead; for a failing or flaky test, use debug-failing-test instead.
 ---
 
 # Write tests
@@ -11,12 +11,13 @@ Given a file, function, class, or module, produce a test suite that would actual
 happy path, the edge cases, the error paths, and the boundaries. The suite matches the repository's existing
 framework and idioms — you adopt what is there rather than introducing what you prefer.
 
-The deliverable is test files written to disk, plus the command that runs them and the result of running it.
+For a request to add tests, deliver test files, the command and its actual result. For a request asking only
+which cases to cover, deliver the cases with evidence without editing files.
 
 ## When to use this skill
 
 - "Write tests for `parse_config`" / "add unit tests for this module".
-- "What cases am I missing?" for existing code.
+- "Which cases should this function be tested for?" for code with little or no test coverage.
 - Coverage is low or a file has no tests, and the user wants that fixed.
 - A feature is implemented and the tests are the remaining work.
 
@@ -24,7 +25,8 @@ The deliverable is test files written to disk, plus the command that runs them a
 
 - **A test is failing and you need to know why** — use `debug-failing-test`. Writing more tests will not
   diagnose a failure.
-- **Tests already exist and the question is whether they are any good** — use `review-tests`.
+- **Tests already exist and the question is whether they are any good**, or which cases they miss — use
+  `review-tests`.
 - **The user wants the implementation written too** — that is ordinary work; do it directly. This skill assumes
   the code under test already exists.
 - **Test-first / TDD**, where the test is written before the code — this skill reads existing behavior to
@@ -32,16 +34,21 @@ The deliverable is test files written to disk, plus the command that runs them a
 
 ## Steps
 
-1. **Detect the framework.** Read `references/framework-detection.md` and follow it. Run
-   `python3 scripts/detect_stack.py <repo-root>` to get the ecosystem, framework, runner, and test-file
-   convention. If `confidence` is `none`, or the result conflicts with what you see, stop and ask — do not
-   pick a framework for the user.
+1. **Detect the framework and check the environment.** Read `references/framework-detection.md` and follow it.
+   Run `python3 scripts/detect_stack.py <repo-root> <target> --check-env` (where `<target>` is the file or
+   package being tested) to get the ecosystem, framework, runner,
+   test-file convention, and whether that runner can actually be invoked. If `confidence` is `none`, or the
+   result conflicts with what you see, stop and ask — do not pick a framework for the user.
+
+   If `env.available` is false, settle it here under **Preparing the environment** below. Step 6 runs the suite;
+   discovering a missing runner there means the tests were written blind.
 
 2. **Read the code under test.** Identify for each unit: the inputs and their valid ranges, the return values,
    the error conditions and how they surface, the side effects, and the dependencies that will need doubles.
 
-3. **Read one existing test file.** It is ground truth for import style, fixtures and setup, assertion style,
-   naming, and file organization. Match it.
+3. **Read one existing test file if there is one in the target package.** It is ground truth for import style,
+   fixtures and setup, assertion style, naming, and file organization. If there are none, use the package's
+   declared framework and idioms without copying tests from an unrelated package.
 
 4. **Enumerate cases before writing any.** For each unit list:
    - **Happy path** — the ordinary call with ordinary input.
@@ -53,26 +60,70 @@ The deliverable is test files written to disk, plus the command that runs them a
 5. **Write the tests.** One behavior per test. Name each for the behavior it pins, not the function it calls —
    `test_rejects_negative_quantity`, not `test_add_item_2`.
 
-6. **Run them.** Use the runner command from step 1. Every test must pass. A test you did not run is not a
-   test you wrote.
+6. **Run them.** Use the runner command for the target package from step 1. Report the actual result, including
+   failures. Fix mistakes in the new tests, such as invalid setup or unsupported expectations, and run them
+   again. A test you did not run is not a test you wrote.
 
-7. **Verify they can fail.** For at least the most important assertions, confirm the test actually detects a
-   regression — break the behavior mentally or temporarily and check the test would catch it. A test that
-   passes against broken code is worse than no test, because it reports safety that does not exist.
+   A failing test that proves a documented contract is violated is a useful result: keep it, identify the
+   production bug, and do not edit the code under test or weaken the assertion to get green. A kept failing
+   test turns the suite red, so ask the user which they want:
+   - **leave it failing**, so the suite stays red until the bug is fixed; or
+   - **mark it as a strict expected failure that names the bug** — `@pytest.mark.xfail(strict=True,
+     reason="<bug>")`, Jest `test.failing`, Vitest `test.fails` — so it fails the moment the bug is fixed and
+     the marker becomes stale. Never `skip` it: a skipped test stops reporting anything.
 
-8. **Report.** State the files written, the command, the pass count, and anything you deliberately did not
-   cover with the reason.
+   With no one to ask, leave it failing and report it.
+
+7. **Verify they can fail.** For the most important assertions, make the smallest change to the code under test
+   that breaks the behavior — flip a comparison, return early — run the test and watch it fail, then revert.
+   Copy the file before changing it, and confirm the revert against that copy (`cmp <file> <copy>`) before
+   going on; `git diff` cannot tell your revert from the user's own uncommitted edits. If the original cannot
+   be restored exactly, skip this step and say so in the report. A test that passes against broken code is
+   worse than no test, because it reports safety that does not exist.
+
+8. **Report.** State the files written, the command, the pass/fail counts, any documented behavior the code
+   violates, and anything you deliberately did not cover with the reason.
+
+## Preparing the environment
+
+You may install the project's test runner, and nothing else. `env.consent` says how much agreement that
+takes. **Read `consent`; do not re-derive it** from `action` or `modifies` — pip can add a dependency while
+writing no file at all, and that still needs asking.
+
+| `env.consent` | Situation | What to do |
+| ------------- | --------- | ---------- |
+| `none` | the runner is installed | proceed |
+| `notify` | the project already depends on this runner and the lockfile pins it; the command installs it and rewrites nothing | say what you are running and why, run `env.command`, continue |
+| `ask` | the command introduces a dependency or writes a tracked file — `env.modifies` names them | quote the command and those files, ask, and wait for a yes |
+
+- **Never install unattended.** If there is no one to ask — CI, a coding agent, `-p` mode, a subagent — report
+  what is missing and stop. Nobody objecting is not consent, and an install in CI lands in someone's pipeline
+  with no one watching.
+- **Install only what `env.command` says.** Not a framework you prefer, not a global install to sidestep a
+  refusal, not an upgrade of something already there.
+- **Run `env.command` in `env.working_directory`.** In a workspace that is the member, not the
+  repository root; an install run from the wrong directory edits the wrong manifest, and the files
+  you quoted are then not the files that changed.
+- **Prefer `env.invocation` over `runner_command`.** A project virtualenv that is not active holds a working
+  `pytest` the bare command will not reach.
+- If the install fails, report its real output and stop. A second framework in a repo that already has one is
+  worse than no tests.
+- When `env.action` is `unknown` the script could not work out a safe command — say what is missing and let the
+  user install it.
 
 ## Hard rules
 
-- **Do not modify the code under test.** If it cannot be tested without changing it — a hard-coded dependency,
-  a hidden global, an untestable constructor — say so, explain what change would make it testable, and stop.
-  Silently refactoring the subject of a test is how a passing suite starts lying.
+- **Do not modify the code under test.** The one exception is the temporary mutation in step 7, reverted and
+  confirmed reverted before you report. If the code cannot be tested without changing it — a hard-coded
+  dependency, a hidden global, an untestable constructor — say so, explain what change would make it testable,
+  and stop. Silently refactoring the subject of a test is how a passing suite starts lying.
 - **Do not assert on things the code does not promise.** Testing incidental output — key order, exact
   whitespace, log text — produces tests that break on harmless changes and get deleted.
 - **Do not mock what you own.** Mock the network, the clock, the filesystem, and third-party services. Mocking
   your own function under test means asserting the mock works.
 - If the tests reveal a bug in the code, report it — do not write the test to match the bug.
+- When the request asks only which cases to cover, list cases and evidence without writing files unless the
+  user also asks you to add tests.
 
 ## Output format
 
@@ -86,11 +137,17 @@ The deliverable is test files written to disk, plus the command that runs them a
 - boundary: <case>
 
 ## Files written
-- `tests/test_config.py` — 11 tests
+- `tests/test_config.py` — 11 tests (or "none — advice only")
 
 ## Result
 $ pytest tests/test_config.py
-11 passed
+<pass count> passed, <fail count> failed (include the relevant failure when nonzero)
+
+For advice only: "not run — no tests written".
+
+## Production bugs exposed
+- `<file>:<line>` — <documented contract and failing case, and whether the test was left failing or marked
+  as a strict expected failure; or "none">
 
 ## Not covered
 - <what, and why>
@@ -101,13 +158,21 @@ $ pytest tests/test_config.py
 | Path | Load when |
 | ---- | --------- |
 | `references/framework-detection.md` | Step 1, always — before choosing any framework or runner. |
-| `scripts/detect_stack.py` | Step 1. Run it; you do not need to read it. Filesystem only, no network, no writes. |
+| `scripts/detect_stack.py` | Step 1, with `--check-env`. Run it; you do not need to read it. Filesystem only, no network, no writes — it reports what an install would cost, it never installs. |
+
+## Side effects
+
+Writes test files to the repository. May run the project's package manager to install its test runner, under
+the consent rules in **Preparing the environment** — that command can reach the network and, when consent is
+`ask`, rewrite the files listed in `env.modifies`. Nothing else is installed.
 
 ## Conventions
 
-- Reference bundled files by paths relative to this skill folder.
+- Run commands from the repository under test. `scripts/` and `references/` paths are inside this skill's
+  folder: invoke and read them by that location, not relative to the repository.
 - Report what was done and what was skipped; never claim a test passes without running it.
 - Confirm before anything destructive or irreversible — overwriting an existing test file needs a look first.
-- Assume no network access and no package installation. If a test framework is genuinely missing, say so
-  rather than installing it.
-- Produce exactly the output format above, with no commentary wrapped around it.
+- Installing the project's test runner is the one exception to "no network, no package installation", and only
+  under **Preparing the environment** above. Nothing else may be installed.
+- The final report is exactly the output format above, with no commentary wrapped around it. The case list in
+  step 4, consent requests and the question in step 6 are separate messages before it.

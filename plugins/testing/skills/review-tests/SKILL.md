@@ -1,6 +1,6 @@
 ---
 name: review-tests
-description: Audit a whole test suite for systemic weakness — assertions that cannot fail, missing edge cases, over-mocking that tests the mock instead of the code, shared state and order-dependence, and tests that pass no matter what the code does. Use whenever the user asks "are these tests any good", "review my tests", "why didn't the tests catch this", "is this suite trustworthy", says coverage is high but bugs still ship, asks whether a test is actually testing anything, or wants the suite audited for flakiness generally. For one specific test that is failing or flaking right now, use debug-failing-test instead.
+description: Audit a whole test suite for systemic weakness — assertions that cannot fail, missing edge cases, over-mocking that tests the mock instead of the code, shared state and order-dependence, and tests that pass no matter what the code does. Use whenever the user asks "are these tests any good", "review my tests", "why didn't the tests catch this", "is this suite trustworthy", says coverage is high but bugs still ship, asks whether a test is actually testing anything, or wants the suite audited for flakiness generally, or asks which cases the existing tests miss. For one specific test that is failing or flaking right now, use debug-failing-test instead; to write new tests for untested code, use write-tests instead.
 ---
 
 # Review tests
@@ -33,16 +33,30 @@ This skill does not rewrite the suite. It tells you what is wrong and what the f
 
 ## Steps
 
-1. **Detect the framework.** Read `references/framework-detection.md` and run
-   `python3 scripts/detect_stack.py <repo-root>`. You need the framework's idioms to judge whether a pattern is
-   a smell or the house style.
+1. **Detect the framework and check the environment.** Read `references/framework-detection.md` and run
+   `python3 scripts/detect_stack.py <repo-root> <target-package> --check-env` for each package under review.
+   You need the framework's idioms to judge whether
+   a pattern is a smell or the house style, and steps 2 and 3 cannot run without the runner.
 
-2. **Run the suite.** Record the pass/fail counts and the runtime. If it does not pass on a clean checkout,
-   that is the first finding.
+   If `env.available` is false, settle it under **Preparing the environment** below before step 2.
 
-3. **Check for order-dependence.** Run the suite in a different order or in isolation if the framework supports
-   it (`pytest -p no:randomly` vs `-p randomly`, `--shuffle`, running a single file alone). Tests that pass
-   together but fail alone share state — a blocking finding.
+2. **Run each package's suite** with the runner from step 1. Record the pass/fail counts and runtime per
+   package.
+
+   If the suite needs more than the runner to pass — the project's documented install, a service, a database —
+   that setup installs more than **Preparing the environment** covers. Quote the documented setup commands and
+   the CI steps they come from, and run them only after an explicit yes. If the user declines, or there is no
+   one to ask, review by reading and say the suite was not executed.
+
+   **`env.action` of `sync` is not itself a finding.** Check the documented and CI setup steps. Report a
+   reproducible setup defect only when following those steps still cannot run the suite; distinguish a clean
+   checkout before setup from a broken documented setup.
+
+3. **Check for order-dependence.** Run single files alone, and the suite in another order where the runner
+   supports it, using the commands in `references/framework-detection.md`. Use only flags the runner already
+   has: a shuffle plugin the project does not have is not installed for this. Tests that pass together but fail
+   alone may share state; reproduce the failure and inspect fixtures or required setup before calling it a
+   blocking finding.
 
 4. **Read the tests against the code they claim to cover.** For each test ask the one question that matters:
    **what change to the production code would make this test fail?** If the honest answer is "none" or "only a
@@ -55,7 +69,8 @@ This skill does not rewrite the suite. It tells you what is wrong and what the f
 ## Audit checklist
 
 **Assertions that cannot fail**
-- No assertion at all — the test only checks that nothing threw.
+- No assertion at all where the promised behavior requires checking an outcome; successfully completing a call
+  can itself be a valid contract when the test names and exercises that contract.
 - Asserting on a literal (`assert 1 == 1`) or on the mock's own return value.
 - `assertTrue(result)` where any non-empty value passes.
 - Snapshot tests regenerated whenever they fail, which asserts only that the code is deterministic.
@@ -80,7 +95,35 @@ This skill does not rewrite the suite. It tells you what is wrong and what the f
 **Maintenance smells**
 - Tests named `test_1`, `test_it_works`, or after the function rather than the behavior.
 - Assertions on incidental output — log text, key order, exact whitespace — that break on harmless changes.
-- Disabled tests: `skip`, `xfail`, `it.only`, `t.Skip`, commented-out blocks. Each is a silent coverage hole.
+- Disabled tests: `skip`, non-strict `xfail`, `it.only`, `t.Skip`, commented-out blocks. Each is a silent
+  coverage hole. A strict expected failure that names an open bug is not silent — check the bug is still open;
+  if it was fixed, the marker is stale.
+
+## Preparing the environment
+
+This skill reports rather than edits, so the bar is higher here than for a skill whose job is to change the
+repository: you are installing only to be able to observe. `env.consent` says how much agreement that takes.
+**Read `consent`; do not re-derive it** from `action` or `modifies`.
+
+| `env.consent` | Situation | What to do |
+| ------------- | --------- | ---------- |
+| `none` | the runner is installed | proceed |
+| `notify` | the project already depends on this runner and the lockfile pins it; the command installs it and rewrites nothing | say what you are running and why, run `env.command`, continue |
+| `ask` | the command introduces a dependency or writes a tracked file — `env.modifies` names them | quote the command and those files, ask, and wait for a yes |
+
+- **Never install unattended.** If there is no one to ask — CI, a coding agent, `-p` mode, a subagent — report
+  what is missing and stop. Nobody objecting is not consent.
+- **A review is not a licence to change the project.** When consent is `ask`, declining is a normal outcome:
+  report the audit you could do by reading, and say plainly that the suite was never executed. A review that
+  states its own limits is worth more than one that quietly changed the repository to finish.
+- **Run `env.command` in `env.working_directory`.** In a workspace that is the member, not the
+  repository root; an install run from the wrong directory edits the wrong manifest, and the files
+  you quoted are then not the files that changed.
+- **Prefer `env.invocation` over `runner_command`.** A project virtualenv that is not active holds a working
+  runner the bare command will not reach.
+- **Anything beyond the runner needs its own yes** — the documented setup in step 2 included. `env.consent`
+  covers the runner only.
+- Never install a framework the repository does not use in order to run tests written for another one.
 
 ## Severity
 
@@ -122,15 +165,26 @@ the author to ignore reviews.
 
 | Path | Load when |
 | ---- | --------- |
-| `references/framework-detection.md` | Step 1, always — you need the framework's idioms to judge smells. |
-| `scripts/detect_stack.py` | Step 1. Run it; you do not need to read it. Filesystem only, no network, no writes. |
+| `references/framework-detection.md` | Step 1, always — you need the framework's idioms to judge smells. Step 3, for the isolation and ordering commands. |
+| `scripts/detect_stack.py` | Step 1, with `--check-env`. Run it; you do not need to read it. Filesystem only, no network, no writes — it reports what an install would cost, it never installs. |
+
+## Side effects
+
+Edits no source or test file. Running the suite may write the runner's own caches and reports. May run the
+project's package manager to install its test runner, under the consent rules in **Preparing the
+environment** — that command can reach the network and, when consent is `ask`, rewrite the files listed in
+`env.modifies`. With the user's explicit yes, may run the project's documented setup commands, which can
+install its dependencies and reach the network. Nothing else is installed.
 
 ## Conventions
 
-- Reference bundled files by paths relative to this skill folder.
+- Run commands from the repository under review. `scripts/` and `references/` paths are inside this skill's
+  folder: invoke and read them by that location, not relative to the repository.
 - Every finding carries `file:line` and a concrete failure scenario. A finding without a location cannot be
   acted on.
 - Report what was reviewed and what was skipped; never imply coverage you did not check.
 - This skill reports; it does not rewrite. Ask before changing any test file.
-- Assume no network access and no package installation.
-- Produce exactly the output format above, with no commentary wrapped around it.
+- Installing the project's test runner, and with an explicit yes its documented setup, are the only exceptions
+  to "no network, no package installation". Nothing else may be installed.
+- The final report is exactly the output format above, with no commentary wrapped around it. Consent requests
+  are separate messages before it.

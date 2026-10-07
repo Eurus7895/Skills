@@ -1,0 +1,6 @@
+{
+  "format_version": 99,
+  "note": "every reader must exit 2 on this, not guess what the fields mean",
+  "packet_version": 99,
+  "schema_version": 99
+}

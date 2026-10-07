@@ -185,6 +185,15 @@ def check_skill(plugin, skill_dir, skill_md):
         fail(where, "is %d lines, over the %d-line budget -- move detail to references/"
              % (lines, SKILL_LINE_BUDGET))
 
+    # A skill that cannot say when it does not apply fires on routine work. CONTRIBUTING
+    # requires the section, and its presence is a fact rather than a judgement, so it fails.
+    if not WHEN_NOT.search(text):
+        fail(where, "has no \"When not to use\" section -- name the adjacent cases that "
+                    "should not trigger it, and where they go instead")
+
+    check_reference_tocs(skill_dir)
+    check_anchors(where, text)
+
     plugin_root = os.path.join(PLUGINS, plugin)
     for link in local_links(text):
         target = os.path.normpath(os.path.join(skill_dir, link))
@@ -212,6 +221,85 @@ def local_links(text):
         if target and not target.startswith(("http://", "https://", "mailto:", "#")):
             links.append(target)
     return links
+
+
+WHEN_NOT = re.compile(r"^#{2,3}\s+When not to use", re.M | re.I)
+TOC_THRESHOLD = 300
+TOC_WINDOW = 40
+TOC_HEADING = re.compile(r"^#{2,3}\s+(Table of )?Contents\s*$", re.I)
+
+
+def check_reference_tocs(skill_dir):
+    """A long reference opens with a table of contents.
+
+    A reference is read whole once opened, and an agent told to read "the relevant
+    section" of a 750-line file with no contents reads all of it. CONTRIBUTING sets the
+    line at ~300; the anchors the contents link to are checked like any other.
+    """
+    references = os.path.join(skill_dir, "references")
+    if not os.path.isdir(references):
+        return
+    for name in sorted(os.listdir(references)):
+        if not name.endswith(".md"):
+            continue
+        path = os.path.join(references, name)
+        lines = read(path).splitlines()
+        if len(lines) <= TOC_THRESHOLD:
+            continue
+        if not any(TOC_HEADING.match(line) for line in lines[:TOC_WINDOW]):
+            fail(rel(path), "is %d lines with no `## Contents` in its first %d -- a reference "
+                            "over %d lines opens with a table of contents"
+                 % (len(lines), TOC_WINDOW, TOC_THRESHOLD))
+        check_anchors(rel(path), "\n".join(lines))
+
+
+def strip_emphasis(title):
+    """Markdown emphasis removed the way a renderer removes it, and no further.
+
+    An anchor is slugified from the *rendered* heading, so `_em_` contributes `em` while
+    `foo_bar` contributes `foo_bar` -- the underscore is only syntax between word
+    boundaries. Stripping every underscore made `## foo_bar` resolve as `#foobar`:
+    the real `#foo_bar` link failed the check and the broken one passed it.
+    """
+    title = re.sub(r"`([^`]*)`", r"\1", title)
+    title = re.sub(r"\*\*(.+?)\*\*", r"\1", title)
+    title = re.sub(r"\*(.+?)\*", r"\1", title)
+    return re.sub(r"(?<!\w)_(?=\S)(.+?)(?<=\S)_(?!\w)", r"\1", title)
+
+
+def heading_anchors(text):
+    """The anchors a markdown renderer derives from this file's own headings.
+
+    GitHub's rule: lowercase, drop everything that is not a word character, a space or a
+    hyphen, then spaces to hyphens. Matching it here rather than guessing is the whole
+    point -- a table of contents whose anchors are written by hand is one heading rename
+    away from being wrong, and `local_links` skips anchors, so nothing else would say so.
+    """
+    anchors = set()
+    for line in re.sub(r"```.*?```", "", text, flags=re.S).split("\n"):
+        match = re.match(r"^#{1,6}\s+(.*?)\s*$", line)
+        if not match:
+            continue
+        title = strip_emphasis(match.group(1))
+        slug = re.sub(r"[^\w\s-]", "", title.lower()).strip().replace(" ", "-")
+        if slug:
+            anchors.add(slug)
+    return anchors
+
+
+def in_file_anchors(text):
+    """Link targets of the form `](#thing)` -- a table of contents, or a cross-reference."""
+    without_code = re.sub(r"```.*?```", "", text, flags=re.S)
+    return sorted({t.strip()[1:] for t in re.findall(r"\]\(([^)]+)\)", without_code)
+                   if t.strip().startswith("#") and len(t.strip()) > 1})
+
+
+def check_anchors(where, text):
+    anchors = heading_anchors(text)
+    for target in in_file_anchors(text):
+        if target not in anchors:
+            fail(where, "links to anchor %r, which no heading in the file produces"
+                 % ("#" + target))
 
 
 BUNDLED_DIRS = ("references", "scripts", "assets")
@@ -299,6 +387,21 @@ def check_skill_collisions():
             fail("plugins/", "skill name %r is defined in %d places (%s) -- names are "
                              "global once installed, so both entries compete and cost "
                              "listing budget twice" % (name, len(paths), ", ".join(paths)))
+
+    # A sibling in the same plugin is the skill most likely to compete for a request, and
+    # the hand-off clause is what keeps them apart. Its absence is a judgement call about
+    # whether the two could collide, so it warns.
+    by_plugin = {}
+    for name, path, desc in skills:
+        by_plugin.setdefault(path.split(os.sep)[1], []).append((name, path, desc))
+    for siblings in by_plugin.values():
+        if len(siblings) < 2:
+            continue
+        for name, path, desc in siblings:
+            others = [n for n, _, _ in siblings if n != name]
+            if "instead" not in desc.lower() and not any(o in desc for o in others):
+                warn(path, "description hands nothing off to its sibling(s) %s -- add a "
+                           "\"for X, use Y instead\" clause" % ", ".join(others))
 
     # Trigger similarity is a judgement call, so it only ever warns.
     # Keyed by path, not name: duplicate names would otherwise collapse into one entry
@@ -430,6 +533,55 @@ def check_materialized():
                 fail("materialize", line.strip())
 
 
+def check_merge_markers():
+    """Reject unresolved conflicts in the instructions installed with a plugin."""
+    start = re.compile(r"^<<<<<<<(?: .*)?$")
+    middle = re.compile(r"^=======[ \t]*$")
+    end = re.compile(r"^>>>>>>>(?: .*)?$")
+    for root in (PLUGINS, os.path.join(REPO, "shared")):
+        for dirpath, _, filenames in os.walk(root):
+            for filename in filenames:
+                if not filename.endswith(".md"):
+                    continue
+                path = os.path.join(dirpath, filename)
+                try:
+                    content = read(path)
+                except OSError as exc:
+                    fail(rel(path), "cannot be read (%s)" % exc)
+                    continue
+                lines = content.splitlines()
+                # Examples of conflict syntax inside Markdown fences are data, not
+                # unresolved changes to the installed instructions.
+                visible = []
+                fence = None
+                for line in lines:
+                    marker = re.match(r"^[ \t]*(" + "`" + r"{3,}|~{3,})", line)
+                    if marker:
+                        token = marker.group(1)
+                        if fence is None:
+                            fence = token
+                        elif token[0] == fence[0] and len(token) >= len(fence):
+                            fence = None
+                        visible.append("")
+                    else:
+                        visible.append(line if fence is None else "")
+                for i, line in enumerate(visible):
+                    if not start.fullmatch(line):
+                        continue
+                    separator = False
+                    for later in visible[i + 1:]:
+                        if start.fullmatch(later):
+                            break
+                        if middle.fullmatch(later):
+                            separator = True
+                        elif separator and end.fullmatch(later):
+                            fail(rel(path), "unresolved merge marker at line %d" % (i + 1))
+                            break
+                    else:
+                        continue
+                    break
+
+
 def main():
     names = plugin_names()
     if not names:
@@ -446,6 +598,7 @@ def main():
     check_skill_collisions()
     check_readme(names)
     check_repo_links()
+    check_merge_markers()
     check_tracked()
     check_materialized()
 

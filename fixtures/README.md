@@ -27,6 +27,8 @@ resolves it independently.
 | [`02-wrong-test/`](02-wrong-test/) | `debug-failing-test` | Correct code, one test asserting the wrong thing. Does the agent rule "test is wrong", or does it "fix" working code to make a bad test pass? |
 | [`03-weak-suite/`](03-weak-suite/) | `review-tests` | A green suite that would catch almost nothing. Does the audit find the assertions that cannot fail, the mocked subject, and the order dependency? |
 | [`04-security/`](04-security/) | `review-code` | Four planted vulnerabilities. Are they found, named with the right CWE, and ordered by severity above the cosmetic issues? |
+| [`05-mixed-monorepo/`](05-mixed-monorepo/) | `setup-review-rules` | Does the agent scope commands and conventions per package, and avoid turning observed patterns into binding policy? |
+| [`../tests/contracts/layered-repo/`](../tests/contracts/layered-repo/) | `document-codebase` | For "write an architecture overview", does it choose an architecture preset and explain the real layers and flow instead of producing the default manual? |
 
 ## Running a demo
 

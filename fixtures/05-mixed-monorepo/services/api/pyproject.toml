@@ -1,0 +1,9 @@
+[project]
+name = "parcelboard-api"
+version = "0.1.0"
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

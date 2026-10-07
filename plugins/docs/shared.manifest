@@ -1,0 +1,65 @@
+# Shared sources materialized into this plugin.
+#   <path under shared/>  ->  <path under this plugin>
+#
+# Destinations are per-skill: a SKILL.md resolves bundled paths relative to its own
+# folder, so each skill needs its own copy.
+#
+# The component layout under scripts/ is load-bearing, not tidiness: pipeline.py resolves
+# a stage by its component directory, and quality_docs.py imports across two of them by
+# the same relative path. Materializing them flat would break both.
+#
+# Regenerate with: python3 tools/materialize.py
+
+scripts/pipeline.py                        -> skills/document-codebase/scripts/pipeline.py
+scripts/build_dir.py                       -> skills/document-codebase/scripts/build_dir.py
+# Data only, imported by nothing: it ships so that a reader holding a report with `G003` in
+# it can look the code up beside the scripts that raised it.
+scripts/findings.py                        -> skills/document-codebase/scripts/findings.py
+scripts/draft_artifact.py                  -> skills/document-codebase/scripts/draft_artifact.py
+
+scripts/survey/scan_repo.py                -> skills/document-codebase/scripts/survey/scan_repo.py
+scripts/survey/validate_index.py           -> skills/document-codebase/scripts/survey/validate_index.py
+scripts/survey/annotate_import_usage.py    -> skills/document-codebase/scripts/survey/annotate_import_usage.py
+scripts/survey/select_units.py             -> skills/document-codebase/scripts/survey/select_units.py
+scripts/survey/extract_config.py           -> skills/document-codebase/scripts/survey/extract_config.py
+scripts/survey/validate_config.py          -> skills/document-codebase/scripts/survey/validate_config.py
+scripts/survey/scope_record.py             -> skills/document-codebase/scripts/survey/scope_record.py
+
+scripts/analyze/query_graph.py             -> skills/document-codebase/scripts/analyze/query_graph.py
+scripts/analyze/derive_claims.py           -> skills/document-codebase/scripts/analyze/derive_claims.py
+
+scripts/check/validate_analysis.py         -> skills/document-codebase/scripts/check/validate_analysis.py
+scripts/check/assemble.py                  -> skills/document-codebase/scripts/check/assemble.py
+scripts/check/verify_doc.py                -> skills/document-codebase/scripts/check/verify_doc.py
+
+scripts/document/validate_architecture.py  -> skills/document-codebase/scripts/document/validate_architecture.py
+scripts/document/validate_flows.py         -> skills/document-codebase/scripts/document/validate_flows.py
+scripts/document/validate_operations.py    -> skills/document-codebase/scripts/document/validate_operations.py
+scripts/document/build_class_graph.py      -> skills/document-codebase/scripts/document/build_class_graph.py
+scripts/document/build_diagrams.py         -> skills/document-codebase/scripts/document/build_diagrams.py
+scripts/document/validate_diagrams.py      -> skills/document-codebase/scripts/document/validate_diagrams.py
+scripts/document/build_flow_diagrams.py    -> skills/document-codebase/scripts/document/build_flow_diagrams.py
+scripts/document/validate_flow_diagrams.py -> skills/document-codebase/scripts/document/validate_flow_diagrams.py
+scripts/document/build_document_model.py   -> skills/document-codebase/scripts/document/build_document_model.py
+
+scripts/publish/render_docs.py             -> skills/document-codebase/scripts/publish/render_docs.py
+# Standalone: imports nothing from the pipeline and reads no build directory, so it runs
+# against a docs/ tree on a machine that has none of the other scripts.
+scripts/publish/readability.py             -> skills/document-codebase/scripts/publish/readability.py
+scripts/publish/sphinx_support.py          -> skills/document-codebase/scripts/publish/sphinx_support.py
+scripts/publish/wire_toctree.py            -> skills/document-codebase/scripts/publish/wire_toctree.py
+scripts/publish/check_prose.py             -> skills/document-codebase/scripts/publish/check_prose.py
+scripts/publish/review_records.py          -> skills/document-codebase/scripts/publish/review_records.py
+scripts/publish/release_hygiene.py         -> skills/document-codebase/scripts/publish/release_hygiene.py
+scripts/publish/quality_docs.py            -> skills/document-codebase/scripts/publish/quality_docs.py
+scripts/render/prepare_stage.py            -> skills/document-codebase/scripts/render/prepare_stage.py
+scripts/render/snapshot_draft.py           -> skills/document-codebase/scripts/render/snapshot_draft.py
+scripts/review/seal_draft.py               -> skills/document-codebase/scripts/review/seal_draft.py
+scripts/review/validate_draft.py            -> skills/document-codebase/scripts/review/validate_draft.py
+scripts/publish/promote_docs.py             -> skills/document-codebase/scripts/publish/promote_docs.py
+scripts/publish/approvals.py                -> skills/document-codebase/scripts/publish/approvals.py
+
+scripts/document/manual.py -> skills/document-codebase/scripts/document/manual.py
+scripts/document/template.py -> skills/document-codebase/scripts/document/template.py
+scripts/document/authored.py -> skills/document-codebase/scripts/document/authored.py
+scripts/document/manual_questions.json -> skills/document-codebase/scripts/document/manual_questions.json

@@ -9,7 +9,8 @@ Work top to bottom and stop at the first confident answer.
 
 1. **Run the detector.** `python3 scripts/detect_stack.py <repo-root> [target]` prints JSON. Pass the file or
    directory you are working on as `target` — in a monorepo it selects the nearest enclosing package instead of
-   the first marker found repository-wide.
+   the first marker found repository-wide. Without a target, a marker found only below the root is reported
+   at `low` confidence, because it names one package rather than the repository.
 
    ```json
    {"ecosystem": "python", "test_framework": "pytest", "runner_command": "pytest",
@@ -43,6 +44,66 @@ Work top to bottom and stop at the first confident answer.
 | Ruby | `Gemfile` | RSpec, minitest | `bundle exec rspec` | `spec/**/*_spec.rb` |
 | PHP | `composer.json` | PHPUnit, Pest | `vendor/bin/phpunit` | `tests/*Test.php` |
 | Swift | `Package.swift` | XCTest, swift-testing | `swift test` | `Tests/**/*Tests.swift` |
+
+`node:test` is Node's built-in runner: the package's `test` script calls `node --test`, nothing appears in its
+dependencies, and `node` itself is the runner. `env.invocation` is then the `node` executable, so run the
+suite through the package's `test` script and add flags after `--`.
+
+## Running one test, repeatedly, or in another order
+
+Isolation is how a shared-state failure is told apart from a real one. Use only what the runner already
+offers. **A flag that needs a plugin the project does not have is not available** — installing one is outside
+what any skill in this plugin may install.
+
+| Framework | One test | Another order (built in unless noted) |
+| --------- | -------- | ------------------------------------- |
+| pytest | `pytest path/test_x.py::test_name` (`-k expr` to filter) | Only with `pytest-randomly` already installed: `pytest --randomly-seed=<n>`; `-p no:randomly` turns it off |
+| unittest | `python -m unittest pkg.test_x.TestCase.test_name` | none |
+| Jest | `npx jest path/x.test.js -t "name"` | `npx jest --randomize --seed=<n>` (Jest 29.2+) |
+| Vitest | `npx vitest run path/x.test.ts -t "name"` | `npx vitest run --sequence.shuffle --sequence.seed=<n>` |
+| Mocha | `npx mocha path/x.test.js --grep "name"` | none |
+| node:test | `node --test --test-name-pattern="name" path/x.test.js` | none |
+| Go | `go test ./pkg -run '^TestName$'` | `go test -shuffle=on ./...`; reproduce with `-shuffle=<seed>`; repeat with `-count=<n>` |
+| Rust | `cargo test test_name -- --exact` | none stable; `-- --test-threads=1` removes parallelism |
+| Maven | `mvn -Dtest=ClassTest#method test` | `mvn -Dsurefire.runOrder=random test` |
+| Gradle | `gradle test --tests 'pkg.ClassTest.method'` | none |
+| RSpec | `bundle exec rspec spec/x_spec.rb:42` | `bundle exec rspec --order random --seed <n>`; `--bisect` finds the polluter |
+| minitest | `bundle exec ruby -Itest test/x_test.rb -n test_name` | random by default; reproduce with `--seed <n>` |
+| PHPUnit | `vendor/bin/phpunit --filter test_name tests/XTest.php` | `--order-by=random --random-order-seed=<n>` |
+| .NET | `dotnet test --filter "FullyQualifiedName~Ns.Class.Method"` | none |
+| Swift | `swift test --filter Module.Class/testMethod` | none |
+| CTest | `ctest -R '<regex>'` | `ctest --schedule-random` |
+
+Where the runner has no repeat flag, repeat in the shell and stop at the first failure:
+`for i in $(seq 20); do <one-test command> || break; done`.
+
+Use the command the project's CI or `package.json` script wraps the runner in when there is one, and append
+the filter to it — `npm test -- -t "name"` — so the run keeps the project's configuration.
+
+## The `env` object (`--check-env`)
+
+Passing `--check-env` adds one key, `env`, saying whether the detected runner can actually be invoked. Without
+the flag the output is unchanged.
+
+| Field | Means |
+| ----- | ----- |
+| `available` | the runner exists **and** is executable. False means nothing can be run yet. |
+| `invocation` | the command that runs it. Prefer this over `runner_command`: an inactive project virtualenv holds a working runner that the bare command will not reach. |
+| `working_directory` | where `command` must be run, relative to the root you passed. In a workspace this is the member, not the root — running an add from the wrong directory edits the wrong manifest. |
+| `declared` | the project's own manifest depends on this runner. Read from dependency tables and requirements files only — configuring a tool is not depending on it. |
+| `action` | `none`, `sync` (install what the lockfile already pins), `add` (introduce a dependency the project lacks), or `unknown` (no safe command could be worked out). |
+| `command` | the exact command. Run this or nothing. |
+| `modifies` | tracked files the command rewrites, relative to the root you passed. A workspace lockfile is reported where it actually lives, which is not always beside the manifest. |
+| `consent` | how much agreement the command needs: `none`, `notify`, or `ask`. |
+| `notes` | what the check concluded and why. Worth reading before acting. |
+
+**`consent` is the authority.** It is derived here so that every skill applies the same rule; re-deriving it
+from `action` or `modifies` gets it wrong, because plain `pip install` adds a dependency while writing no file
+at all and still needs asking. The full rules for acting on it live in each `SKILL.md`, because they are
+safety rules and a rule a model must decide to go and read is not a rule.
+
+A `sync` is not always harmless: with no lockfile to install from, the command has to create one, and
+`consent` is raised to `ask` accordingly. Read the field, not the shape of the situation.
 
 ## Rules
 

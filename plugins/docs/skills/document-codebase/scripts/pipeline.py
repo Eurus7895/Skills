@@ -1,0 +1,1869 @@
+#!/usr/bin/env python3
+# GENERATED FILE -- DO NOT EDIT.
+# Source: shared/scripts/pipeline.py
+# Regenerate: python3 tools/materialize.py
+"""Run one component of the documentation pipeline, and stop where reading is needed.
+
+    python3 scripts/pipeline.py survey  --root .
+    python3 scripts/pipeline.py analyze
+    #   ... read the packets; write module-analysis.jsonl and fragments.jsonl ...
+    python3 scripts/pipeline.py check
+    #   ... write architecture-analysis.json, flow-analysis.json, operations-analysis.json ...
+    python3 scripts/pipeline.py document
+    python3 scripts/pipeline.py render --docs docs
+    python3 scripts/pipeline.py review
+    python3 scripts/pipeline.py publish --docs docs
+
+Seven runtime components answer one kind of question each. `survey` asks what is in the
+repository, `analyze` what the model needs in front of it, `check` whether a claim holds,
+`document` what the pages will say, `render` what the draft looks like, `review` whether
+that exact draft may ship, and `publish` promotes it. This driver runs a
+component's scripts in order with the arguments that component fixes; nothing here decides
+anything a script was already the authority on.
+
+The arguments are the point. They never vary between runs, so typing them out is only ever
+a chance to omit one: `--analysis` omitted produced a document that read like an inventory,
+`--flow-report` omitted produced counts that included flows nothing had validated. Neither
+is reachable from here.
+
+**The pauses between components are the pipeline.** `analyze` ends because a module's
+purpose is not in an index; `check` ends because what the modules add up to is not in a
+claim; `review` ends by queueing the sentences only a person can settle. A driver that ran
+straight through would be a pipeline that documents nothing.
+
+**A component stops at the first stage that fails, and says which one.** Exit codes pass
+through unchanged -- `1` a policy was not met, `2` bad input or a missing dependency, `3`
+internal -- so a driver never converts a verdict into silence. Two stages may fail without
+stopping their component, and both say so as they do it: `build_flow_diagrams` exits `1`
+when nothing was traced, the expected outcome on most repositories, and `check_prose` exits
+`1` on a block queued for review, which the final report is meant to carry.
+
+A stage whose input was never written is skipped with the reason printed. The architecture,
+flow and operations analyses are optional by design, and a run without them is a visibly
+thinner document rather than a failed one.
+
+Standard library only. Exit codes: 0 ok, 1 a stage's policy was not met, 2 input error,
+3 internal error.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import build_dir  # noqa: E402
+
+
+def fail(message, code=2):
+    sys.stderr.write("FAIL  %s\n" % message)
+    return code
+
+
+class Stage(object):
+    """One script invocation, with the conditions under which it runs and may fail.
+
+    `needs` names inputs that must exist; a stage missing one is skipped rather than run,
+    because the optional analyses are absent far more often than they are broken.
+    `tolerate` names exit codes that do not stop the component -- only for stages whose
+    failure is a documented outcome, never to paper over one. `capture` sends stdout to a
+    file instead of the terminal, for the stages whose output *is* the artefact.
+    """
+
+    def __init__(self, component, script, args, needs=(), tolerate=(), skip_note=None,
+                 capture=None, label=None, script_component=None):
+        self.component = component
+        self.script = script
+        self.args = [str(a) for a in args]
+        self.needs = list(needs)
+        self.tolerate = set(tolerate)
+        self.skip_note = skip_note
+        self.capture = capture
+        self.label = label
+        self.script_component = script_component or component
+
+    @property
+    def name(self):
+        stem = self.script[:-3] if self.script.endswith(".py") else self.script
+        return "%s/%s%s" % (self.component, stem, self.label or "")
+
+    @property
+    def path(self):
+        return os.path.join(HERE, self.script_component, self.script)
+
+    def missing(self):
+        return [path for path in self.needs if not os.path.exists(path)]
+
+
+def utc_now():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def append_timing(path, record):
+    """Append one measurement without making telemetry a pipeline dependency."""
+    if not path:
+        return
+    try:
+        directory = os.path.dirname(os.path.abspath(path))
+        if directory and not os.path.isdir(directory):
+            os.makedirs(directory, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, sort_keys=True) + "\n")
+    except OSError as exc:
+        sys.stderr.write("WARN  could not write timing record: %s\n" % exc)
+
+
+def run(stages, dry_run=False, timings=None, invocation_id=None):
+    """Run each stage in order. Returns the exit code the component should report."""
+    worst = 0
+    for position, stage in enumerate(stages):
+        started_at = utc_now()
+        started = time.perf_counter()
+        absent = stage.missing()
+        if absent:
+            note = stage.skip_note or "input not written: %s" % ", ".join(absent)
+            print("\n-- skip %s (%s)" % (stage.name, note))
+            append_timing(timings, {
+                "schema_version": 1, "record_type": "stage",
+                "invocation_id": invocation_id, "component": stage.component,
+                "stage": stage.name, "status": "skipped", "exit_code": None,
+                "started_at": started_at, "finished_at": utc_now(),
+                "duration_seconds": round(time.perf_counter() - started, 6),
+                "note": note,
+            })
+            continue
+        command = [sys.executable, stage.path] + stage.args
+        print("\n-- %s%s" % (stage.name, " > %s" % stage.capture if stage.capture else ""))
+        if dry_run:
+            print(" ".join(command))
+            append_timing(timings, {
+                "schema_version": 1, "record_type": "stage",
+                "invocation_id": invocation_id, "component": stage.component,
+                "stage": stage.name, "status": "dry_run", "exit_code": None,
+                "started_at": started_at, "finished_at": utc_now(),
+                "duration_seconds": round(time.perf_counter() - started, 6),
+            })
+            continue
+        if stage.capture:
+            directory = os.path.dirname(stage.capture)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            with open(stage.capture, "w", encoding="utf-8") as fh:
+                code = subprocess.call(command, stdout=fh)
+        else:
+            code = subprocess.call(command)
+        status = "passed" if code == 0 else (
+            "tolerated" if code in stage.tolerate else "failed")
+        duration = time.perf_counter() - started
+        print("-- timing %s %.3fs" % (stage.name, duration))
+        append_timing(timings, {
+            "schema_version": 1, "record_type": "stage",
+            "invocation_id": invocation_id, "component": stage.component,
+            "stage": stage.name, "status": status, "exit_code": code,
+            "started_at": started_at, "finished_at": utc_now(),
+            "duration_seconds": round(duration, 6),
+        })
+        if code == 0:
+            continue
+        if code in stage.tolerate:
+            print("-- %s exited %d; the component continues, and the report carries it."
+                  % (stage.name, code))
+            worst = max(worst, code)
+            continue
+        remaining = len(stages) - position - 1
+        sys.stderr.write("\nFAIL  %s exited %d -- %s\n"
+                         % (stage.name, code,
+                            "%d later stage(s) did not run." % remaining
+                            if remaining else "it was the last stage of this component."))
+        return code
+    return worst
+
+
+def measure(args):
+    """Start or stop a model-driven step that runs between component commands."""
+    active_path = os.path.join(args.build, "timing-active.json")
+    timings = os.path.join(args.build, "timings.jsonl")
+    if not (args.step or "").strip():
+        return fail("measure requires --step")
+    step = args.step.strip()
+    if args.state == "start":
+        if os.path.isfile(active_path):
+            try:
+                with open(active_path, encoding="utf-8") as fh:
+                    active = json.load(fh)
+            except (OSError, ValueError):
+                active = {}
+            return fail("%s is already being measured; stop it before starting %s"
+                        % (active.get("step", "another step"), step), 1)
+        record = {"schema_version": 1, "step": step, "started_at": utc_now(),
+                  "started_epoch": time.time(), "kind": "model"}
+        with open(active_path, "w", encoding="utf-8") as fh:
+            json.dump(record, fh, indent=1, sort_keys=True)
+            fh.write("\n")
+        print("timing started: %s" % step)
+        return 0
+    if not os.path.isfile(active_path):
+        return fail("no model step is being measured", 1)
+    try:
+        with open(active_path, encoding="utf-8") as fh:
+            active = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return fail("cannot read %s: %s" % (active_path, exc))
+    if active.get("step") != step:
+        return fail("%s is being measured, not %s" % (active.get("step"), step), 1)
+    finished = time.time()
+    append_timing(timings, {
+        "schema_version": 1, "record_type": "model_step", "step": step,
+        "status": args.status, "started_at": active.get("started_at"),
+        "finished_at": utc_now(),
+        "duration_seconds": round(max(0.0, finished - active["started_epoch"]), 6),
+    })
+    os.remove(active_path)
+    print("timing stopped: %s (%s)" % (step, args.status))
+    return 0
+
+
+DERIVED_KINDS = {"defines", "imports", "inherits", "contains"}
+
+
+def handwritten_claims(path):
+    """Claims in `claims.jsonl` that `derive_claims.py` could not have written.
+
+    A `calls` claim needs a call site somebody read, so it is appended here by hand after
+    an analyze pass. Re-running `analyze` rewrites the file and would take those with it --
+    silently, since a shorter flow analysis validates as cleanly as a longer one. This is
+    what makes that loud.
+    """
+    if not os.path.isfile(path):
+        return []
+    found = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                if isinstance(row, dict) and row.get("kind") not in DERIVED_KINDS:
+                    found.append(row.get("id"))
+    except (OSError, ValueError):
+        # An unreadable claims file is about to be replaced by a good one; that is a
+        # repair, not a loss, and nothing here should stand in its way.
+        return []
+    return found
+
+
+def packet_name(unit):
+    """A file name for this unit's packet that no other unit can also produce.
+
+    Flattening separators alone does not: `a/b__c.py` and `a__b/c.py` flatten to the same
+    name, and the second packet would overwrite the first while the component reported
+    success -- leaving no context for a unit whose analysis is still required. The digest
+    of the original path is what makes it injective; the flattened stem is kept so the
+    directory is still readable.
+    """
+    flat = unit.replace(os.sep, "__").replace("/", "__")
+    digest = hashlib.sha256(unit.encode("utf-8")).hexdigest()[:8]
+    return "%s.%s.json" % (flat, digest)
+
+
+def units_of(path):
+    if not os.path.isfile(path):
+        return []
+    with open(path, encoding="utf-8") as fh:
+        return [line.strip() for line in fh if line.strip()]
+
+
+def survey(args):
+    """What is in this repository: scan it, check the index, and pick the scope."""
+    index = os.path.join(args.build, "structure.json")
+    stages = [
+        Stage("survey", "scan_repo.py", ["--root", args.root, "--out", index,
+                                         "--summary", "--top", 20, "--detail"]),
+        Stage("survey", "validate_index.py", [index, "--root", args.root]),
+    ]
+    if args.policy != "disabled":
+        stages.append(Stage("survey", "annotate_import_usage.py",
+                            [index, "--root", args.root, "--policy", args.policy]))
+    stages.append(Stage("survey", "select_units.py",
+                        ["--index", index, "--top", args.top,
+                         "--out", os.path.join(args.build, "units.txt")]))
+    # Settings are cross-cutting: the answer to "what does this project take" is spread
+    # across every file that reads one, which is the shape a per-module packet cannot
+    # deliver. Extracting them here, once, is what lets a configuration answer cite
+    # something a check passed instead of something the model went looking for.
+    config = os.path.join(args.build, "config-analysis.json")
+    stages.append(Stage("survey", "extract_config.py",
+                        ["--index", index, "--root", args.root, "--out", config]))
+    stages.append(Stage("survey", "validate_config.py",
+                        [config, "--index", index, "--root", args.root,
+                         "--out", os.path.join(args.build, "config-report.json")]))
+    return stages
+
+
+def analyze(args):
+    """What the model needs in front of it: the derived claims, and a packet per unit."""
+    build = args.build
+    index = os.path.join(build, "structure.json")
+    units_path = os.path.join(build, "units.txt")
+    stages = [
+        Stage("analyze", "derive_claims.py", ["--index", index, "--units", units_path,
+                                              "--out", os.path.join(build, "claims.jsonl")]),
+    ]
+    # One packet per unit, on disk rather than on the terminal: a packet is the input to
+    # the reading that comes next, and reading it from a file is what lets that reading be
+    # fanned out without every task re-running the query.
+    for unit in units_of(units_path):
+        stages.append(Stage("analyze", "query_graph.py",
+                            ["--index", index, "--root", args.root, "--packet", unit],
+                            capture=os.path.join(build, "packets", packet_name(unit)),
+                            label=" %s" % unit))
+    return stages
+
+
+def check(args):
+    """Whether the claims hold: validate the analysis, gate the fragments, verify."""
+    build = args.build
+    index = os.path.join(build, "structure.json")
+    analysis = os.path.join(build, "module-analysis.jsonl")
+    return [
+        Stage("check", "validate_analysis.py", [analysis, "--index", index],
+              needs=[analysis],
+              skip_note="no module-analysis.jsonl -- this run has no reading in it"),
+        Stage("check", "assemble.py", [
+            "--schema", "fragment_id:str, source:str, role:str, claim_ids:list, status:str",
+            "--input", os.path.join(build, "fragments.jsonl"),
+            "--unit-list", os.path.join(build, "units.txt"),
+            "--unit-field", "source",
+            "--out", os.path.join(build, "fragments.csv")]),
+        Stage("check", "verify_doc.py", ["--claims", os.path.join(build, "claims.jsonl"),
+                                         "--fragments", os.path.join(build, "fragments.jsonl"),
+                                         "--index", index, "--root", args.root,
+                                         "--out-dir", build]),
+    ]
+
+
+TEMPLATE_FILE = "template.json"
+# Committed in the documented repository, never in the build: whoever can edit it decides
+# whose signature counts, so it is read from the tree and must be tracked and unmodified.
+SIGNERS_FILE = os.path.join(".github", "docs-allowed-signers")
+
+
+def chosen_template(build):
+    """The recorded template choice, or None when nobody has made one."""
+    record = _json(os.path.join(build, TEMPLATE_FILE))
+    return record if isinstance(record, dict) and record.get("kind") else None
+
+
+def preset_for(args, *analyses):
+    """(preset, template.json or None) -- what `document` builds, and against what.
+
+    **No outline is mandatory.** The run used to fall back to the built-in manual template,
+    so a user who wanted an architecture report, or had their own documentation template,
+    got a 26-page questionnaire because nobody chose. Now the choice is recorded with
+    `template --use` -- a preset, the manual template or a selection from it, or the user's
+    own outline. When nobody has chosen, `document` records the survey's recommendation as
+    *provisional* and builds that, so a run is never stopped for want of a choice -- and
+    `publish` holds until the user confirms it or picks another.
+
+    The behaviour before that inferred the preset from which analyses happened to be on
+    disk, so the delivered document was a side effect of what the run wrote. A choice is a
+    decision and reads better as one; a recommendation is labelled as one.
+    """
+    record = chosen_template(args.build)
+    template_path = os.path.join(args.build, TEMPLATE_FILE)
+    if args.preset != "auto":
+        if args.preset == "manual" and record and record.get("kind") == "questions":
+            return "manual", template_path
+        return args.preset, None
+    if record is None:
+        return None, None
+    if record.get("kind") == "questions":
+        return "manual", template_path
+    return record.get("name"), None
+
+
+def record_default_choice(args):
+    """Make sure a choice is on record before `document` builds; return it, or an exit code.
+
+    With nothing recorded, an explicit `--preset` is the caller's choice and is recorded as
+    such; with neither, the survey's recommendation is recorded as provisional. Either way
+    `publish` can then compare what was built with what was chosen.
+    """
+    existing = chosen_template(args.build)
+    if existing:
+        return existing
+    script = os.path.join(HERE, "document", "template.py")
+    out = os.path.join(args.build, TEMPLATE_FILE)
+    if args.preset != "auto":
+        argv = [sys.executable, script, "--use", args.preset, "--out", out, "--note",
+                "named with --preset %s on the document command" % args.preset]
+    else:
+        argv = [sys.executable, script, "--recommend",
+                "--index", os.path.join(args.build, "structure.json"), "--root", args.root]
+        if not args.dry_run:
+            argv.extend(["--out", out])
+    if args.dry_run and args.preset != "auto":
+        return {"kind": "preset", "name": args.preset}
+    proc = subprocess.run(argv, capture_output=True, text=True)
+    if proc.returncode:
+        return fail("could not record the template choice: %s"
+                    % (proc.stderr.strip() or proc.stdout.strip()), proc.returncode)
+    if args.preset == "auto":
+        return json.loads(proc.stdout)
+    return chosen_template(args.build) or {}
+
+
+def template_mismatch(build):
+    """Why the document on disk is not what the user chose, or None when it is."""
+    record = chosen_template(build)
+    if record is None or record.get("provisional"):
+        return ("the template is provisional: nobody chose it%s. Show the user the "
+                "choices, then confirm it with `template --use <name> --note \"<their "
+                "choice and why>\"` -- or record another and rerun document, render and "
+                "review" % (" (recommended: %s, because %s)"
+                            % (record.get("name"),
+                               "; ".join(record.get("recommended_because") or ()))
+                            if record else ""))
+    doc = _json(os.path.join(build, "doc.json"), {}) or {}
+    if record.get("kind") == "questions":
+        built = (doc.get("template") or {}).get("template_hash") \
+            if doc.get("preset") == "manual" else None
+        if built != record.get("template_hash"):
+            return ("the document was built from %s, but the chosen template is %s. Rerun "
+                    "document, render and review to build what was chosen"
+                    % ((doc.get("template") or {}).get("name") or doc.get("preset"),
+                       record.get("name")))
+    elif doc.get("preset") != record.get("name"):
+        return ("the document was built from the %s preset, but the chosen template is %s. "
+                "Rerun document, render and review to build what was chosen"
+                % (doc.get("preset"), record.get("name")))
+    return None
+
+
+def document(args):
+    """What the pages will say: check the three analyses, draw, then build the model."""
+    build = args.build
+    diagrams = os.path.join(build, "diagrams")
+    index = os.path.join(build, "structure.json")
+    verified = os.path.join(build, "claims.verified.jsonl")
+    architecture = os.path.join(build, "architecture-analysis.json")
+    flows = os.path.join(build, "flow-analysis.json")
+    operations = os.path.join(build, "operations-analysis.json")
+    config = os.path.join(build, "config-analysis.json")
+    report = os.path.join(build, "flow-report.json")
+    graph = os.path.join(build, "class-graph.json")
+    recorded = record_default_choice(args)
+    if isinstance(recorded, int):
+        return recorded
+    preset, template = preset_for(args, architecture, operations, flows)
+    if preset is None:
+        # A dry run records nothing, so its recommendation lives only in this process.
+        preset = recorded.get("name") if recorded.get("kind") == "preset" else "manual"
+        template = None
+    record = chosen_template(args.build) or recorded or {}
+    if record.get("provisional"):
+        print("preset: %s (PROVISIONAL -- recommended by the survey: %s. Confirm it with "
+              "`template --use %s --note ...`, or choose another; publish waits until "
+              "one is chosen)" % (preset, "; ".join(record.get("recommended_because") or ()),
+                                  record.get("name")))
+    else:
+        print("preset: %s%s" % (
+            preset,
+            " (template %s, chosen: %s)" % (record.get("name"), record.get("note"))
+            if template else " (recorded choice: %s)" % record.get("note")
+            if record.get("note") else ""))
+
+    if preset == "manual":
+        answers = os.path.join(build, "manual-analysis.json")
+        if not os.path.exists(answers) and args.dry_run:
+            # `--dry-run` reports the plan and writes nothing, this draft included.
+            print("would write %s and stop: a manual cannot be built before it is "
+                  "answered" % answers)
+        elif not os.path.exists(answers):
+            # Once a question template is chosen, reaching `document`
+            # without an answer artifact is the ordinary first run, not a mistake. Write
+            # the draft here rather than failing with a command to go and type -- `--init`
+            # refuses to overwrite, so this can never eat answers that already exist.
+            argv = [sys.executable, os.path.join(HERE, "document", "manual.py"),
+                    "--init", answers, "--index", index,
+                    "--authored", os.path.join(build, "authored.jsonl")]
+            if template:
+                argv.extend(["--template", template])
+            # The two largest sources of citable ids. Left off, the reading list held only
+            # what the three optional analyses contributed -- an end-to-end run offered 2
+            # facts where 15 existed -- and an answer cannot be `observed` or `declared`
+            # without naming an id the draft never told the model was there.
+            for flag, path in (("--claims", verified),
+                               ("--analysis", os.path.join(build,
+                                                           "module-analysis.jsonl"))):
+                if os.path.exists(path):
+                    argv.extend([flag, path])
+            for flag, path in (("--architecture", architecture), ("--flows", flows),
+                               ("--operations", operations), ("--config", config)):
+                if os.path.exists(path):
+                    argv.extend([flag, path])
+            code = subprocess.call(argv)
+            if code:
+                return fail("could not write %s" % answers, code)
+            # Exit 1: a verdict, not breakage. The run cannot build a manual nobody has
+            # answered, and saying so is the honest stopping point.
+            return fail("answer %s, compose each page's sections from those answers, "
+                        "then rerun `document`. `unknown` is for a question the "
+                        "repository does not answer, not one nobody looked up." % answers,
+                        1)
+
+    model = ["--index", index, "--claims", verified,
+             "--fragments", os.path.join(build, "fragments.verified.jsonl"),
+             "--analysis", os.path.join(build, "module-analysis.jsonl"),
+             "--preset", preset, "--diagrams", diagrams,
+             "--out", os.path.join(build, "doc.json")]
+    if preset == "manual":
+        model.extend(["--manual-analysis", os.path.join(build, "manual-analysis.json"),
+                      "--root", args.root,
+                      "--authored", os.path.join(build, "authored.jsonl")])
+        if template:
+            model.extend(["--template", template])
+    for flag, path in (("--architecture", architecture), ("--flows", flows),
+                       ("--operations", operations), ("--config", config)):
+        if os.path.exists(path):
+            model.extend([flag, path])
+
+    return [
+        Stage("document", "validate_architecture.py",
+              [architecture, "--index", index,
+               "--analysis", os.path.join(build, "module-analysis.jsonl")],
+              needs=[architecture],
+              skip_note="no architecture-analysis.json -- the components page will say so"),
+        Stage("document", "validate_flows.py",
+              [flows, "--index", index, "--claims", verified, "--out", report],
+              needs=[flows],
+              skip_note="no flow-analysis.json -- the flows page will say so"),
+        Stage("document", "validate_operations.py",
+              [operations, "--index", index, "--root", args.root],
+              needs=[operations],
+              skip_note="no operations-analysis.json -- the operations page will say so"),
+        Stage("document", "build_class_graph.py",
+              ["--index", index, "--claims", verified,
+               "--detail", args.detail, "--out", graph]),
+        Stage("document", "build_diagrams.py", ["--class-graph", graph, "--out", diagrams]),
+        Stage("document", "validate_diagrams.py", [diagrams, "--class-graph", graph]),
+        # Exit 1 here means no flow was traceable, which is the common case and not a
+        # defect; the flows page says so and the run goes on.
+        Stage("document", "build_flow_diagrams.py",
+              ["--flows", flows, "--report", report, "--out", diagrams],
+              needs=[flows, report], tolerate=(1,),
+              skip_note="no validated flow to draw"),
+        Stage("document", "validate_flow_diagrams.py", [diagrams, "--flows", flows],
+              needs=[flows, report], skip_note="no flow diagram was drawn"),
+        Stage("document", "build_document_model.py", model),
+    ]
+
+
+def staging_of(args):
+    return args.staging or os.path.join(args.build, "rendered-docs")
+
+
+def render(args):
+    """Render a reviewable draft without changing the published documentation."""
+    build, staging = args.build, staging_of(args)
+    render_args = ["--doc", os.path.join(build, "doc.json"), "--out", staging,
+                   # `prepare_stage` rebuilds the stage from this tree on every render, so
+                   # an authored-page scaffold written into the stage -- and whatever an
+                   # author had filled into it -- would not survive the cycle the ledger
+                   # update requires. Scaffolds go here instead, and the stage inherits
+                   # them the way it inherits every other authored page.
+                   "--source-docs", args.docs,
+                   "--diagrams", os.path.join(build, "diagrams"),
+                   "--format", args.format, "--check"]
+    if args.write_conf:
+        render_args.append("--write-conf")
+        if args.project:
+            render_args.extend(["--project", args.project])
+    return [
+        Stage("render", "prepare_stage.py", ["--source", args.docs, "--out", staging]),
+        Stage("render", "render_docs.py", render_args, script_component="publish"),
+        Stage("render", "snapshot_draft.py",
+              ["--draft", staging, "--doc", os.path.join(build, "doc.json"),
+               "--out", os.path.join(build, "render-manifest.json")]),
+    ]
+
+
+def review(args):
+    """Review and seal the exact rendered draft; never promote it."""
+    build, staging = args.build, staging_of(args)
+    diagrams = os.path.join(staging, "_diagrams")
+    doc = os.path.join(build, "doc.json")
+    prose = os.path.join(build, "prose-report.json")
+    architecture = os.path.join(build, "architecture-analysis.json")
+    flows = os.path.join(build, "flow-analysis.json")
+    operations = os.path.join(build, "operations-analysis.json")
+    report = os.path.join(build, "flow-report.json")
+
+    checker = [doc, "--require-review", "--out", prose]
+    gate = ["--index", os.path.join(build, "structure.json"),
+            "--analysis", os.path.join(build, "module-analysis.jsonl"),
+            "--units", os.path.join(build, "units.txt"),
+            "--claims", os.path.join(build, "claims.verified.jsonl"),
+            "--doc", doc, "--diagrams", diagrams, "--prose", prose,
+            "--checkpoints", os.path.join(build, "checkpoints"),
+            "--hygiene", os.path.join(build, "hygiene-report.json"),
+            "--draft", staging,
+            "--signers", os.path.join(args.root, SIGNERS_FILE),
+            "--out", os.path.join(build, "generation-report.json")]
+    for flag, path in (("--architecture", architecture), ("--flows", flows),
+                       ("--operations", operations)):
+        if os.path.exists(path):
+            checker.extend([flag, path])
+            gate.extend([flag, path])
+    if os.path.exists(report):
+        gate.extend(["--flow-report", report])
+    if args.review:
+        checker.extend(["--review", args.review])
+
+    generation = os.path.join(build, "generation-report.json")
+    return [
+        Stage("review", "validate_draft.py",
+              ["--draft", staging, "--doc", doc,
+               "--manifest", os.path.join(build, "render-manifest.json")]),
+        # A block queued for review is honest, not broken: quality_docs still has to run
+        # so the report carries `review_required` rather than the component ending in
+        # silence.
+        Stage("review", "check_prose.py", checker, tolerate=(1,),
+              script_component="publish"),
+        # Between the prose check and the gate, and tolerated, so the gate reads the
+        # findings and decides. A tree finding is a real defect and not one that should
+        # stop the report that names it.
+        #
+        # Pointed at the staging draft rather than at `docs`: the shape problems this
+        # catches -- two indexes, two configurations, a page the model named and the tree
+        # does not hold -- must block publication, and after `publish` has promoted the
+        # tree atomically it is too late to say so. `H004`/`H005`, which ask git about
+        # committed build output, do not fire on a staging directory that is ignored in
+        # its entirety; those are about a published tree and are not what holds a seal.
+        Stage("review", "release_hygiene.py",
+              ["--docs", staging, "--root", args.root,
+               "--doc", os.path.join(build, "doc.json"),
+               "--out", os.path.join(build, "hygiene-report.json")],
+              tolerate=(1,), script_component="publish"),
+        Stage("review", "quality_docs.py", gate, script_component="publish"),
+        Stage("review", "seal_draft.py",
+              ["--draft", staging, "--doc", doc, "--report", generation,
+               "--render-manifest", os.path.join(build, "render-manifest.json"),
+               "--out", os.path.join(build, "publish-seal.json")]),
+    ]
+
+
+def publish(args):
+    """Promote only the sealed draft; perform no generation or review."""
+    # The one place a recommendation stops. A provisional template got the run this far
+    # without anyone choosing; it does not get to reach readers that way.
+    mismatch = template_mismatch(args.build)
+    if mismatch and not args.dry_run:
+        return fail(mismatch, 1)
+    return [
+        # With an allowed-signers file committed, every user decision has to carry a
+        # signature over exactly what it approved; without one this reports the approvals
+        # as unverified and lets promotion go ahead, which is the behaviour it replaces.
+        Stage("publish", "approvals.py",
+              ["verify", "--build", args.build, "--draft", staging_of(args),
+               "--root", args.root, "--signers", SIGNERS_FILE,
+               "--out", os.path.join(args.build, "approvals-report.json")]),
+        Stage("publish", "promote_docs.py",
+                  ["--draft", staging_of(args), "--target", args.docs,
+                   "--doc", os.path.join(args.build, "doc.json"),
+                   "--report", os.path.join(args.build, "generation-report.json"),
+                   "--seal", os.path.join(args.build, "publish-seal.json")]),
+    ]
+
+
+COMPONENTS = {"survey": survey, "analyze": analyze, "check": check,
+              "document": document, "render": render, "review": review,
+              "publish": publish}
+ORDER = ["survey", "analyze", "check", "document", "render", "review", "publish"]
+
+# Named once, because a suggested recovery command has to know whether the build it is
+# about is the default one or a path the reader chose.
+DEFAULT_BUILD = ".docs-build"
+
+# What each component cannot start without, and the component that produces it.
+#
+# **A skipped step must read as a skipped step.** Running `document` on a build with no
+# survey in it used to reach the script and die on `FileNotFoundError:
+# .docs-build/structure.json`, under a `FAIL could not write ...` line that named the
+# output rather than the missing input. A traceback is an invitation to debug the tooling,
+# or to satisfy it by writing the missing file by hand -- and an agent resuming with no
+# memory of this run is exactly who receives it. The order of this pipeline is enforced by
+# nothing else: `blocking_checkpoint` holds the four human decisions, and a component whose
+# predecessor never ran simply crashed.
+#
+# So the check is here, where the next command can be named. Optional inputs are not in
+# this table: those are the ones components already report as `-- skip`, with a note saying
+# what the document will lack. These are the ones without which there is nothing to do.
+REQUIRES = {
+    "analyze": (("structure.json", "survey"),),
+    "check": (("structure.json", "survey"), ("claims.jsonl", "analyze")),
+    "document": (("structure.json", "survey"), ("claims.verified.jsonl", "check")),
+    "render": (("doc.json", "document"),),
+    "review": (("doc.json", "document"), ("render-manifest.json", "render")),
+    "publish": (("publish-seal.json", "review"),),
+}
+
+# The staging tree is a directory rather than a file in the build, so it is checked apart
+# from the table above. `review` reads the draft `render` wrote; `publish` promotes it.
+NEEDS_STAGING = ("review", "publish")
+
+# The judgements the document rests on that no script can make, and the component each
+# one stands in front of.
+#
+# These were written in `SKILL.md` as prose and nothing enforced them, which made them the
+# only rule in this pipeline that fails silently. Every other invariant here is a script
+# that refuses -- `analyze` will not overwrite hand-written claims, `assemble` will not
+# accept a unit with no row, the gate will not call a thin run `passed`. A checkpoint that
+# only exists in a paragraph is one a reader skips without ever seeing an error, and then
+# a wrong scope or a wrong set of module roles survives every check downstream, because a
+# check compares a claim against evidence and never against what the repository is *for*.
+#
+# P4 was left out of this table once, on the reasoning that a queued block nobody decided
+# already holds the run at `review_required`. That confuses two things. Holding the *gate*
+# is not opening a *pause*: nothing printed the question, nothing refused to run, and a
+# run went all the way to a published manual with twenty blocks queued, zero reviewed, and
+# the final validation never executed -- because the workflow was never told to stop.
+# P1-P3 stop it by refusing the next component. P4 now does the same.
+CHECKPOINTS = (
+    {"id": "P1", "opened_by": "survey", "blocks": "analyze",
+     "show": "the selected units with their fan-in, the cutoff, and every warning the "
+             "selection printed",
+     "ask": "is this the right scope to spend the budget on"},
+    {"id": "P2", "opened_by": "analyze", "blocks": "check",
+     "show": "one line per module -- what you decided it is for -- and every `unknown`",
+     "show_from": "uncertain_modules",
+     "ask": "do these roles match what the repository is"},
+    {"id": "P3", "opened_by": "check", "blocks": "document",
+     "show": "the components and their boundaries, the flows traced and the ones "
+             "refused, the operations found",
+     "ask": "is this the architecture, and are the boundaries where they would put them"},
+    # Opened by `review` and blocking `review`: the first run queues, and
+    # the second -- the one that carries `--review` and reaches the final gate -- is the
+    # one held. `opens_when` keeps it quiet on a run that queued nothing, because a
+    # checkpoint that opens with no question to ask teaches people to decide it blind.
+    {"id": "P4", "opened_by": "review", "blocks": "review", "opens_when": "prose_queued",
+     "opens_on": (0, 1),
+     "show_from": "queued_readings",
+     "show": "each queued block beside the evidence under it, and the verb you propose",
+     "ask": "are these the intended readings"},
+)
+
+
+def prose_queued(build):
+    """Whether `check_prose` left blocks nobody has decided.
+
+    **Read `coverage`, not the top level.** The first version of this read
+    `report["queued"]` and `report["reviewed"]`, which `check_prose` has never written
+    there -- the counts live under `coverage`, beside `blocks_checked`. So it returned
+    False on every real report and P4 never opened, which is the exact failure the
+    checkpoint was added to fix. It passed by hand at the time because the report it was
+    tried against was written to match the reader instead of the producer.
+
+    `unreviewed` is the list of blocks nobody decided, and is checked first because it is
+    the thing the question is actually about.
+    """
+    try:
+        with open(os.path.join(build, "prose-report.json"), encoding="utf-8") as fh:
+            report = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    # Checked ahead of the counts, and not only as a shortcut: a review file can hold as
+    # many records as there are queued blocks and still leave some undecided, when a record
+    # was written against content that has since changed. `queued == reviewed` is then true
+    # while `unreviewed` is not empty, and the blocks nobody decided are what the question
+    # is about.
+    if report.get("unreviewed"):
+        return True
+    coverage = report.get("coverage") or {}
+    return (coverage.get("queued") or 0) > (coverage.get("reviewed") or 0)
+
+
+SHOW_SAMPLE = 3
+SHOW_CAP = 8
+
+
+def uncertain_modules(build):
+    """What P2 should actually put in front of someone, or None if nothing is written yet.
+
+    **The question was right and the unit was wrong.** "One line per module" is fifty lines
+    of the model's own prose handed to a person for confirmation on a fifty-module
+    repository, which is the review load that produces a habitual yes -- and a checkpoint
+    answered out of habit is worse than no checkpoint, because it leaves a record saying
+    somebody looked. So the ask is bounded, and it is pointed at the modules where the
+    analysis is least sure of itself rather than spread evenly over all of them:
+
+    * every module carrying an `unknown` statement -- the ones where the analysis said the
+      repository does not answer, which is exactly where a wrong role hides
+    * every module with fewer than the four kinds answered, which the gate counts as read
+      but not answered
+    * a small sample of the rest, so a run where nothing is uncertain is still spot-checked
+      rather than waved through
+
+    Returns None when `module-analysis.jsonl` holds nothing. That is the ordinary state at
+    the moment P2 opens: `analyze` opens it, and the roles are written by hand afterwards.
+    The static `show` stands in then, and this list appears where it can be acted on -- in
+    the refusal `check` gives, which is when the material exists and somebody is looking.
+    """
+    kinds = module_kinds(build)
+    unknowns = set()
+    for line in _lines(os.path.join(build, "module-analysis.jsonl")):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(row, dict) or not row.get("path"):
+            continue
+        statements = row.get("statements")
+        if not isinstance(statements, (list, tuple)):
+            continue
+        for statement in statements:
+            if isinstance(statement, dict) and statement.get("status") == "unknown":
+                unknowns.add(row["path"])
+    if not kinds:
+        return None
+    # Modules in scope with no row at all, and rows that recorded nothing. Neither was in
+    # this list before, and between them they are the modules least likely to have been read
+    # -- so P2 asked someone to approve the roles while showing them only the settled ones.
+    # A module cannot be absent from its own review list for the reason that nothing is
+    # written about it.
+    scope = _lines(os.path.join(build, "units.txt"))
+    missing = {path for path in scope if path not in kinds}
+    silent = {path for path, seen in kinds.items() if not seen}
+
+    def listed(paths):
+        paths = sorted(paths)
+        shown = ", ".join(paths[:SHOW_CAP])
+        if len(paths) > SHOW_CAP:
+            shown += ", and %d more" % (len(paths) - SHOW_CAP)
+        return shown
+
+    thin = {path for path, seen in kinds.items()
+            if seen and len(seen & set(READ_KINDS)) < len(READ_KINDS)}
+    parts = []
+    unwritten = missing | silent
+    if unwritten:
+        parts.append("the %d module(s) with no reading recorded at all, which cannot have "
+                     "a role to approve: %s" % (len(unwritten), listed(unwritten)))
+    if unknowns:
+        parts.append("the %d that recorded an `unknown`, where the repository does not "
+                     "answer and a wrong role hides: %s"
+                     % (len(unknowns), listed(unknowns)))
+    remaining = thin - unknowns - unwritten
+    if remaining:
+        parts.append("the %d with fewer than the four kinds answered: %s"
+                     % (len(remaining), listed(remaining)))
+    rest = sorted(set(kinds) - unknowns - thin - unwritten)
+    if rest:
+        parts.append("and %d of the %d settled one(s) as a sample: %s"
+                     % (min(SHOW_SAMPLE, len(rest)), len(rest),
+                        ", ".join(rest[:SHOW_SAMPLE])))
+    return "; ".join(parts)
+
+
+def queued_readings(build):
+    """A bounded P4 handoff with the actual words and their recorded evidence."""
+    report = _json(os.path.join(build, "prose-report.json"), {}) or {}
+    doc = _json(os.path.join(build, "doc.json"), {}) or {}
+    queue = report.get("review_queue") or []
+    if not isinstance(queue, list) or not queue:
+        return None
+    blocks = {block.get("id"): block
+              for page in doc.get("pages", ())
+              for block in page.get("blocks", ()) if isinstance(block, dict)}
+    lines = []
+    for item in queue[:SHOW_CAP]:
+        block = blocks.get(item.get("block"), {})
+        prose = " ".join((block.get("body") or block.get("text") or "").split())
+        evidence = block.get("evidence") or block.get("claim_refs") or \
+            block.get("analysis_refs") or []
+        lines.append("%s/%s: %s%s [evidence: %s]" %
+                     (item.get("page"), item.get("block"),
+                      prose[:180], "..." if len(prose) > 180 else "",
+                      str(evidence)[:120] if evidence else "see source inputs"))
+    if len(queue) > SHOW_CAP:
+        lines.append("... and %d more; inspect all review_queue entries in "
+                     "prose-report.json before requesting approval" % (len(queue) - SHOW_CAP))
+    return " | ".join(lines)
+
+
+SHOW_FROM = {"uncertain_modules": uncertain_modules,
+             "queued_readings": queued_readings}
+
+
+def checkpoint_show(checkpoint, build):
+    """What to put in front of the person: the computed list where there is one.
+
+    A checkpoint may name a function that reads the build and says what is actually
+    uncertain. Where it returns nothing -- because the material is not written yet -- the
+    static description stands, so a checkpoint never loses its question to an empty list.
+    """
+    compute = SHOW_FROM.get(checkpoint.get("show_from"))
+    if compute:
+        try:
+            computed = compute(build)
+        except (OSError, ValueError):
+            # Naming what to review must not be able to fail the run. The static text says
+            # the same thing less precisely.
+            computed = None
+        if computed:
+            return computed
+    return checkpoint["show"]
+
+
+OPENS_WHEN = {"prose_queued": prose_queued}
+
+# The floor a recorded decision has to clear, in words, and the same one `manual.py` puts on
+# a brevity exception -- where the rule is that "Short." is a label rather than a reason.
+#
+# **A checkpoint that accepts "ok" records a signature, not a judgement.** Until this, the
+# only requirement was a note that was not empty, so `--note "ok"` cleared a question about
+# the scope of an entire run, and nothing downstream could tell it from a decision somebody
+# made. That is a stricter standard applied to the smaller decision: an exception about the
+# length of one section had to be argued in five words, and the scope the whole budget is
+# spent on did not.
+#
+# A floor is not a guarantee of substance -- five words can be spent on nothing. What it buys
+# is that the reflex costs more than the judgement did, and that a rubber stamp is legible as
+# one in the closing report, which carries these notes verbatim.
+DECISION_NOTE_WORDS = 5
+
+
+def invoked_as():
+    """The command the reader typed, so the one this prints can be retyped."""
+    return sys.argv[0] or "scripts/pipeline.py"
+
+
+def checkpoint_path(build, checkpoint_id):
+    return os.path.join(build, "checkpoints", "%s.json" % checkpoint_id)
+
+
+def review_queue_hash(build):
+    """Bind P4 to the exact prose blocks and input hashes shown to the user."""
+    try:
+        with open(os.path.join(build, "prose-report.json"), encoding="utf-8") as fh:
+            queue = json.load(fh).get("review_queue")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(queue, list):
+        return None
+    payload = json.dumps(queue, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def retire_empty_p4(build, digest):
+    """Retire an obsolete prose question when a repair leaves no queued readings.
+
+    Keep the earlier user response in the checkpoint record for the closing report;
+    an empty queue has no question to ask, but a later nonempty queue must open P4
+    again instead of inheriting this retired state.
+    """
+    report = _json(os.path.join(build, "prose-report.json"))
+    if not isinstance(report, dict) or report.get("review_queue") != [] or prose_queued(build):
+        return False
+    path = checkpoint_path(build, "P4")
+    record = _json(path)
+    if not isinstance(record, dict) or record.get("state") == "retired":
+        return False
+    record.update(state="retired", index_hash=digest,
+                  retired_reason="current review queue is empty")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(record, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+    return True
+
+
+def index_hash_of(build):
+    """Which scan the build directory currently describes, or None before the survey."""
+    try:
+        with open(os.path.join(build, "structure.json"), encoding="utf-8") as fh:
+            return json.load(fh).get("index_hash")
+    except (OSError, ValueError):
+        return None
+
+
+def checkpoint_input_hash(build, checkpoint_id):
+    """Identity of the material a person approves, independent of scan revision.
+
+    A missing hand-authored file has no identity: legacy decisions or decisions made
+    before the analysis was written cannot authorize a later component.
+    """
+    if checkpoint_id == "P4":
+        return review_queue_hash(build)
+    paths = {
+        "P1": ("units.txt",),
+        "P2": ("units.txt", "module-analysis.jsonl"),
+        "P3": ("units.txt", "module-analysis.jsonl",
+               "architecture-analysis.json", "flow-analysis.json",
+               "operations-analysis.json"),
+    }[checkpoint_id]
+    payload = []
+    for name in paths:
+        path = os.path.join(build, name)
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read()
+        except OSError:
+            if checkpoint_id != "P3" or name in ("units.txt", "module-analysis.jsonl"):
+                return None
+            data = b""  # Optional analyses absent at the decision are still a choice.
+        payload.append((name, hashlib.sha256(data).hexdigest()))
+    if checkpoint_id in ("P1", "P2", "P3"):
+        options = _json(os.path.join(build, "selection-options.json"))
+        if isinstance(options, dict):
+            payload.append(("selection-options", options))
+    # Scope classification can change without changing the shortlist. Reading progress
+    # does not change the promise, so exclude it from this approval identity.
+    scope = _json(os.path.join(build, "scope.json"))
+    if isinstance(scope, dict):
+        files = sorted((r.get("path"), r.get("disposition"))
+                       for r in scope.get("files", ()) if isinstance(r, dict))
+        payload.append(("scope", scope.get("product_roots"),
+                        scope.get("required_topics"), files))
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def decision_for(build, checkpoint_id, digest):
+    """A recorded decision on this checkpoint for this scan, or None.
+
+    Bound to `index_hash` for the same reason every other artifact here is: a scope
+    approved against one scan says nothing about a tree that has since moved. Rescanning
+    reopens the checkpoints, which is the honest outcome -- the units may be different.
+    """
+    try:
+        with open(checkpoint_path(build, checkpoint_id), encoding="utf-8") as fh:
+            record = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if record.get("state") != "decided":
+        return None
+    current = checkpoint_input_hash(build, checkpoint_id)
+    if not current or record.get("input_hash") != current:
+        return None
+    # Decisions recorded by older drivers with a generic note did not require the
+    # user's response. Do not silently inherit such a decision for P4.
+    if checkpoint_id == "P4" and (record.get("source") != "user_response" or
+                                  record.get("verdict") != "accepted"):
+        return None
+    if checkpoint_id == "P4" and (not review_queue_hash(build) or
+                                  record.get("review_queue_hash") != review_queue_hash(build)):
+        return None
+    if digest and record.get("index_hash") != digest:
+        return None
+    return record
+
+
+def open_checkpoint(build, checkpoint, digest):
+    """Mark a checkpoint pending, unless it is already decided for this scan."""
+    if decision_for(build, checkpoint["id"], digest):
+        return False
+    path = checkpoint_path(build, checkpoint["id"])
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    record = {"checkpoint": checkpoint["id"], "state": "pending",
+              "input_hash": checkpoint_input_hash(build, checkpoint["id"]),
+              "index_hash": digest, "show": checkpoint["show"],
+              "ask": checkpoint["ask"]}
+    if checkpoint["id"] == "P4":
+        record["review_queue_hash"] = review_queue_hash(build)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(record, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+    return True
+
+
+# What `status` reads. Every one of these is an artifact some component already writes;
+# nothing here is computed a second way. The point is only that one command can read them
+# all without running a stage, because the session that needs them most is the one that
+# cannot run a stage.
+READ_KINDS = ("responsibility", "state", "interface", "failure")
+READ_KINDS_FLOOR = 2                      # the same bar quality_docs applies
+
+
+def _json(path, default=None):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return default
+
+
+def _lines(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return [line for line in (l.strip() for l in fh) if line]
+    except OSError:
+        return []
+
+
+def module_kinds(build):
+    """{module path: the statement kinds recorded about it}, from the analysis ledger.
+
+    One parse, shared by everything that asks about progress, so a defensive reading is
+    written once. The file is hand-authored, so a half-written line is an ordinary state to
+    find it in -- and a line that is valid JSON but not an object, such as `[]`, is another.
+    `row.get` raised on that one, which turned reporting a run's position into an exit 3
+    before `validate_analysis` could report the malformed row as the finding it is. Saying
+    where a run is must never be able to stop the validator that would explain it.
+
+    A path with no statements is kept with an empty set, not dropped. It is a module
+    somebody started a row for and recorded nothing in, which is a state of its own and the
+    one most worth naming.
+    """
+    kinds = {}
+    for line in _lines(os.path.join(build, "module-analysis.jsonl")):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue                       # validate_analysis owns the verdict on this
+        if not isinstance(row, dict):
+            continue                       # and on this
+        path = row.get("path")
+        if not path:
+            continue
+        statements = row.get("statements")
+        if not isinstance(statements, (list, tuple)):
+            statements = ()
+        kinds.setdefault(path, set()).update(
+            s.get("kind") for s in statements if isinstance(s, dict))
+    return kinds
+
+
+def unanswered_modules(build):
+    """Modules in scope that do not answer all four kinds, in `units.txt` order.
+
+    **Not `analysis_progress`'s `read`, and the difference is the point.** `read` uses the
+    gate's two-of-four floor, which separates a module somebody worked on from one nobody
+    touched. Answered is four of four, which is what `analyze.md` requires and what the
+    quality gate counts: a run of two-kind modules is `partial` however cleanly it verifies.
+
+    Reusing `read` meant the orientation banner told a run with every module at three kinds
+    that it had the inputs it needs, while the work it owed was exactly those modules and
+    the gate was going to reject them.
+    """
+    kinds = module_kinds(build)
+    return [path for path in _lines(os.path.join(build, "units.txt"))
+            if len(kinds.get(path, set()) & set(READ_KINDS)) < len(READ_KINDS)]
+
+
+def analysis_progress(build):
+    """(in scope, read, remaining) module paths, from units.txt and module-analysis.jsonl.
+
+    **This is the number a resumed session actually needs, and it was the one it could not
+    get.** `quality_docs.py` computes it and names the remainder, but that runs in
+    `publish` -- and a partial analysis fails `check` first, so a run interrupted halfway
+    through the modules could not reach the report that would say which half. Nothing was
+    missing from the pipeline except a way to ask without running it.
+
+    `read` uses the same floor as the gate: at least `READ_KINDS_FLOOR` of the four module
+    kinds. A module named once and left there is not a module that was read.
+    """
+    scope = _lines(os.path.join(build, "units.txt"))
+    kinds = module_kinds(build)
+    read = [p for p in scope
+            if len(kinds.get(p, set()) & set(READ_KINDS)) >= READ_KINDS_FLOOR]
+    # Touched but not read is its own state, and the one a resumed session most needs
+    # told apart: a module with a single statement has work already in it, and reporting
+    # it beside the untouched ones invites someone to write it a second time.
+    touched = [p for p in scope if p in kinds and p not in set(read)]
+    untouched = [p for p in scope if p not in kinds]
+    return scope, read, touched, untouched
+
+
+def template_command(args):
+    """List the choices, record the user's pick, or check a document against it.
+
+    A thin pass-through to `document/template.py`, which owns the format; the driver adds
+    only where the record lives, so every later component finds the same file.
+    """
+    script = os.path.join(HERE, "document", "template.py")
+    record = os.path.join(args.build, TEMPLATE_FILE)
+    if args.check_docs:
+        # An explicit template wins; otherwise the recorded choice; otherwise the built-in.
+        argv = [script, "--check-docs", args.check_docs, "--template",
+                args.use or (record if os.path.isfile(record) else "manual")]
+    elif args.use:
+        argv = [script, "--use", args.use, "--note", args.note or "", "--out", record]
+    elif args.show:
+        argv = [script, "--show", args.show]
+    else:
+        argv = [script, "--list"]
+        current = chosen_template(args.build)
+        if current and current.get("provisional"):
+            line = ("PROVISIONAL %s %s -- recommended because %s; confirm it or choose "
+                    "another" % (current.get("kind"), current.get("name"),
+                                 "; ".join(current.get("recommended_because") or ())))
+        elif current:
+            line = "%s %s -- %s" % (current.get("kind"), current.get("name"),
+                                    current.get("note"))
+        else:
+            line = ("none yet -- `document` will record the survey's recommendation as "
+                    "provisional, and publish waits until one is chosen")
+        print("current choice: %s\n" % line)
+    for flag, value in (("--sections", args.sections), ("--drop", args.drop)):
+        if value and (args.use or args.show or args.check_docs):
+            argv.extend([flag, value])
+    if args.dry_run:
+        print("would run: python3 %s" % " ".join(argv))
+        return 0
+    code = subprocess.call([sys.executable] + argv)
+    if code == 0 and args.use and os.path.isfile(
+            os.path.join(args.build, "manual-analysis.json")):
+        print("note: manual-analysis.json already exists. If it answers a different "
+              "template, `document` will refuse it -- move it aside and rerun `document` "
+              "to draft against this one.")
+    return code
+
+
+def approve_command(args):
+    """Write the payloads the user signs, and print the command for each."""
+    argv = [sys.executable, os.path.join(HERE, "publish", "approvals.py"), "payloads",
+            "--build", args.build, "--draft", staging_of(args), "--root", args.root,
+            "--signers", SIGNERS_FILE]
+    if args.dry_run:
+        print("would run: %s" % " ".join(argv[1:]))
+        return 0
+    return subprocess.call(argv)
+
+
+def status(args, build):
+    """Where the run is, read-only, and never blocked by anything.
+
+    A checkpoint refuses to let the next component run, and a failing stage stops the ones
+    behind it -- both correct, and between them they mean the state of a run is only ever
+    reported by something that might decline to report it. This declines nothing: it runs
+    no stage, writes nothing, and answers the same whether the last component passed,
+    failed, or was never reached.
+    """
+    digest = index_hash_of(build)
+    if not digest:
+        print("no scan yet in %s. Start with: python3 %s survey --root %s"
+              % (build, os.path.basename(__file__), args.root))
+        return 0
+    index = _json(os.path.join(build, "structure.json"), {}) or {}
+    source = index.get("source") or {}
+    print("scan       %s" % digest)
+    print("           revision %s%s"
+          % (source.get("revision") or "untracked",
+             " (uncommitted changes when scanned)" if source.get("dirty") else ""))
+
+    record = chosen_template(build)
+    if record:
+        pages = record.get("pages") or ()
+        print("template   %s%s %s%s -- %s"
+              % ("PROVISIONAL " if record.get("provisional") else "",
+                 record.get("kind"), record.get("name"),
+                 " (%d page(s))" % len(pages) if pages else "",
+                 "recommended because %s; publish waits until the user chooses"
+                 % "; ".join(record.get("recommended_because") or ())
+                 if record.get("provisional") else record.get("note")))
+    else:
+        print("template   not chosen -- `document` will record the survey's "
+              "recommendation as provisional; `%s template` lists the choices"
+              % os.path.basename(__file__))
+    if os.path.isfile(os.path.join(args.root, SIGNERS_FILE)):
+        signed = [n for n in os.listdir(os.path.join(build, "approvals"))
+                  if n.endswith(".payload.sig")] \
+            if os.path.isdir(os.path.join(build, "approvals")) else []
+        print("approvals  signed approvals required by %s; %d signature(s) on disk -- "
+              "`approve` writes what the user signs" % (SIGNERS_FILE, len(signed)))
+    else:
+        print("approvals  recorded as text, unverified -- commit %s to require "
+              "signatures" % SIGNERS_FILE)
+
+    print("\ncheckpoints")
+    for checkpoint in CHECKPOINTS:
+        path = checkpoint_path(build, checkpoint["id"])
+        decided = decision_for(build, checkpoint["id"], digest)
+        if decided:
+            state = "decided -- %s" % (decided.get("note") or "no note recorded")
+        elif os.path.isfile(path):
+            # Stale means opened against an earlier scan: the units may now be different,
+            # so the question has to be asked again rather than inherited.
+            record = _json(path, {}) or {}
+            stale = record.get("index_hash") != digest
+            if checkpoint["id"] == "P4" and record.get("state") == "retired" and \
+                    not prose_queued(build):
+                state = "retired -- current review queue is empty"
+            else:
+                state = "OPEN (from an earlier scan)" if stale else "OPEN"
+                state += " -- blocks %s" % checkpoint["blocks"]
+        else:
+            state = "not opened yet (%s opens it)" % checkpoint["opened_by"]
+        print("  %-3s %s" % (checkpoint["id"], state))
+
+    scope, read, touched, untouched = analysis_progress(build)
+    if scope:
+        print("\nmodules    %d in scope, %d read, %d partly written, %d not started"
+              % (len(scope), len(read), len(touched), len(untouched)))
+        for label, paths in (("finish", touched), ("start", untouched)):
+            for path in paths[:10]:
+                print("           %-6s %s" % (label, path))
+            if len(paths) > 10:
+                print("           %-6s ... and %d more" % ("", len(paths) - 10))
+
+    manual = _json(os.path.join(build, "manual-analysis.json"))
+    if isinstance(manual, dict):
+        answers = manual.get("answers") or {}
+        answered = sum(1 for a in answers.values()
+                       if isinstance(a, dict)
+                       and a.get("completeness") not in (None, "unanswered"))
+        composed = sum(len((p or {}).get("sections") or [])
+                       for p in (manual.get("pages") or {}).values())
+        print("\nmanual     %d of %d question(s) answered, %d section(s) composed"
+              % (answered, len(answers), composed))
+
+    # Parsed defensively, like `analysis_progress` already does. The ledger is edited by a
+    # person, so a half-written line is an ordinary state to find it in -- and `status`
+    # crashing on one would defeat the single thing it exists for, which is answering while
+    # something else is broken.
+    ledger, unreadable = [], 0
+    for line in _lines(os.path.join(build, "authored.jsonl")):
+        try:
+            ledger.append(json.loads(line))
+        except ValueError:
+            unreadable += 1
+    if ledger or unreadable:
+        settled = [r for r in ledger if r.get("status") in ("complete", "waived")]
+        print("authored   %d of %d page(s) settled" % (len(settled), len(ledger)))
+        for row in ledger:
+            if not isinstance(row, dict):
+                unreadable += 1
+            elif row.get("status") not in ("complete", "waived"):
+                print("           - %s (%s)" % (row.get("page_id"), row.get("status")))
+        if unreadable:
+            # Named rather than skipped silently: an unreadable row is a page whose state
+            # nobody knows, which is worse than an unsettled one.
+            print("           %d row(s) could not be read -- the ledger needs repair"
+                  % unreadable)
+
+    report = _json(os.path.join(build, "prose-report.json"))
+    if isinstance(report, dict):
+        # `coverage`, for the same reason `prose_queued` reads it there: the counts have
+        # never been at the top level, and the list is `review_queue`, not `queue`.
+        coverage = report.get("coverage") or {}
+        print("review     %d block(s) queued, %d reviewed, %d undecided"
+              % (coverage.get("queued") or 0, coverage.get("reviewed") or 0,
+                 len(report.get("unreviewed") or ())))
+
+    # The breakdown above uses the gate's two-of-four floor, which is the right line between
+    # a module somebody worked on and one nobody touched. What is *owed* is four of four, so
+    # the advice is computed from that and not from the same split.
+    print("\nnext       %s" % next_step(build, digest,
+                                        remaining=unanswered_modules(build)))
+    return 0
+
+
+def next_step(build, digest, remaining):
+    """One line naming the next action, in the order the run would hit them.
+
+    **A checkpoint first, except the one whose material is not written yet.** `analyze`
+    opens `P2` the moment it finishes, but the roles `P2` asks about are written by hand
+    into `module-analysis.jsonl` afterwards -- so a resumed session with modules still
+    unread was told to decide whether the module roles were right before any role existed.
+
+    The exception is only `P2`, and the distinction is which side of the component the work
+    falls on. `P1` blocks `analyze` itself: while it is open no packet can be produced and
+    no module can be read, so naming the module work there would advise something that
+    cannot be done. `P2` blocks `check`, and the module analysis is written between the two.
+    """
+    open_checkpoints = {}
+    for component in ORDER:
+        blocking = blocking_checkpoint(build, component, digest)
+        if blocking:
+            open_checkpoints[blocking["id"]] = blocking
+            break
+    if remaining and set(open_checkpoints) <= {"P2"}:
+        return ("write the analysis for %d remaining module(s), appending one scope at a "
+                "time, then run check" % len(remaining))
+    for blocking in open_checkpoints.values():
+        return "decide %s (%s) -- it blocks %s" % (
+            blocking["id"], blocking["ask"], blocking["blocks"])
+    if remaining:
+        return ("write the analysis for %d remaining module(s), appending one scope at a "
+                "time, then run check" % len(remaining))
+    record = chosen_template(build)
+    if record and record.get("provisional"):
+        return ("confirm the provisional template (%s) with the user, or record their "
+                "choice: `template --use ... --note ...`" % record.get("name"))
+    manual = _json(os.path.join(build, "manual-analysis.json"))
+    if isinstance(manual, dict):
+        answers = manual.get("answers") or {}
+        open_questions = [q for q, a in answers.items() if isinstance(a, dict)
+                          and a.get("completeness") in (None, "unanswered")]
+        if open_questions:
+            return "answer %d remaining question(s) in manual-analysis.json" % \
+                len(open_questions)
+        # Every page, not any page. `any(...)` reported the run finished as soon as one
+        # page had a section, with nineteen still uncomposed and a `document` step that
+        # would reject them.
+        pages = manual.get("pages") or {}
+        if not pages:
+            # No map at all means nothing is composed, not that nothing needs composing.
+            return "compose each page's sections from the answers"
+        bare = [page for page, held in sorted(pages.items())
+                if not (held or {}).get("sections")]
+        if bare:
+            return ("compose the sections for %d remaining page(s) from the answers: %s%s"
+                    % (len(bare), ", ".join(bare[:3]),
+                       ", ..." if len(bare) > 3 else ""))
+    return "run the next component: it has the inputs it needs"
+
+
+def missing_inputs(args):
+    """[(path, producing component)] this component needs and does not have, in order.
+
+    In pipeline order, so the first entry is the earliest step that did not run -- which is
+    the one worth naming. Reporting the latest would send a reader to `check` when the
+    survey is what is missing.
+    """
+    absent = [(os.path.join(args.build, name), producer)
+              for name, producer in REQUIRES.get(args.component, ())
+              if not os.path.exists(os.path.join(args.build, name))]
+    if args.component in NEEDS_STAGING:
+        staging = staging_of(args)
+        if not os.path.isdir(staging):
+            absent.append((staging, "render"))
+    absent.sort(key=lambda pair: ORDER.index(pair[1]))
+    return absent
+
+
+def orientation(args):
+    """Where this run is, printed by every component before it does anything.
+
+    `status` answers this, and answers it better -- but only when someone thinks to ask, and
+    the reader who most needs it is the one who does not know there is a run in progress. An
+    agent resuming with no memory of starting has no reason to type `status` first: it has a
+    task, and the pipeline looked like a sequence of commands. So the orientation stops being
+    something to remember and becomes something every command says.
+
+    Two lines at most, because this prints on every invocation and a banner nobody reads is
+    worse than no banner. The second appears only when the run owes something no script can
+    produce -- the modules to read, the questions to answer, the sections to compose. Those
+    are the steps that cannot be enforced by refusing to run, because nothing downstream can
+    tell a thin answer from an absent one until the gate. Naming them on every command is
+    the closest thing to enforcement they can have.
+
+    `next_step` writes that sentence already and is the single place that decides it; this
+    prints it, and drops it when it says the run is simply ready to proceed.
+    """
+    digest = index_hash_of(args.build)
+    if not digest:
+        # Before the first survey there is nothing to orient against, and `preflight` is
+        # about to name the survey anyway.
+        return []
+    lines = ["step %d of %d: %s   scan %s"
+             % (ORDER.index(args.component) + 1, len(ORDER), args.component, digest[:12])]
+    # `unanswered_modules`, not `analysis_progress`'s split: a module at three of the four
+    # kinds counts as `read` against the gate's floor, so reusing that told a run whose every
+    # module was three-quarters written that it had the inputs it needs -- while the work it
+    # owed was exactly those modules, and the gate was going to call the run partial.
+    owed = next_step(args.build, digest, remaining=unanswered_modules(args.build))
+    if not owed.startswith("run the next component"):
+        lines.append("still owed: %s" % owed)
+    return lines
+
+
+def invocation_args(args, component):
+    """The path options this run is using, so a suggested command acts on the same build.
+
+    A recovery command that drops `--build` is a command that reads `.docs-build` while the
+    build whose missing input was just reported is somewhere else: copying it appears to do
+    nothing, and the reader concludes the tool is wrong rather than that they are one flag
+    short. Only the options that change *where* the work is are carried, and only when they
+    differ from the default -- a suggestion cluttered with every flag is one nobody copies.
+    """
+    parts = ["--root %s" % args.root]
+    if args.build != DEFAULT_BUILD:
+        parts.append("--build %s" % args.build)
+    # `render` is the only suggested producer that writes the staging tree, and `publish`
+    # the only consumer that reads it, so the flag rides those two and nothing else.
+    if component in ("render", "publish") and getattr(args, "staging", None):
+        parts.append("--staging %s" % args.staging)
+    return " " + " ".join(parts)
+
+
+def preflight(args):
+    """The message for a component whose inputs are not there yet, or None.
+
+    Names the earliest missing step and the command that produces it, because the reader is
+    often an agent resuming a run it has no memory of starting. `status` is offered beside
+    it: it answers the same question for the whole run rather than for this one component.
+    """
+    absent = missing_inputs(args)
+    if not absent:
+        return None
+    path, producer = absent[0]
+    others = ""
+    if len(absent) > 1:
+        others = " (%d more input(s) are also missing)" % (len(absent) - 1)
+    return ("%s needs %s, which %s produces, and it is not there%s.\n"
+            "      Run:  python3 %s %s%s\n"
+            "      Or:   python3 %s status%s -- it says where this run is"
+            % (args.component, path, producer, others,
+               invoked_as(), producer, invocation_args(args, producer),
+               invoked_as(), invocation_args(args, "status")))
+
+
+def blocking_checkpoint(build, component, digest, review_file=None):
+    """The open checkpoint standing in front of this component, if there is one.
+
+    A checkpoint that was never opened does not block. It is opened by the component
+    before it, so its absence means that component never succeeded -- and then the honest
+    error is the one this component's own first stage gives about its missing input, not
+    a question about a decision nobody was ever asked to make.
+
+    **An open checkpoint blocks every component after it, not only the next one.** A
+    build directory that already holds artifacts from an earlier run is the case: with
+    `P1` open again, blocking only `analyze` still leaves `document` and `publish` free to
+    run over what is already on disk and produce a finished report with the scope decision
+    outstanding. The rule is that nothing downstream of an unanswered question runs, so
+    the first open checkpoint at or before this component in the order is the one that
+    holds it.
+    """
+    try:
+        position = ORDER.index(component)
+    except ValueError:
+        return None
+    for checkpoint in CHECKPOINTS:
+        # An unreviewed pass may refresh the queue after a repair. P4 holds the
+        # reviewed pass and publication, not the pass that prepares its question.
+        if checkpoint["id"] == "P4" and component == "review" and not review_file:
+            continue
+        if ORDER.index(checkpoint["blocks"]) > position:
+            continue
+        if not os.path.isfile(checkpoint_path(build, checkpoint["id"])):
+            continue
+        if checkpoint["id"] == "P4" and \
+                (_json(checkpoint_path(build, "P4"), {}) or {}).get("state") == "retired" \
+                and not prose_queued(build):
+            continue
+        if not decision_for(build, checkpoint["id"], digest):
+            return checkpoint
+    return None
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("component",
+                        choices=ORDER + ["decide", "measure", "status", "template",
+                                         "approve"],
+                        metavar="COMPONENT",
+                        help="one of: %s, decide, measure, status, template, or approve"
+                             % ", ".join(ORDER))
+    parser.add_argument("--use", help="template: record the chosen preset, `manual`, or a "
+                                      "template file")
+    parser.add_argument("--show", help="template: print one choice's outline")
+    parser.add_argument("--sections", help="template: page ids or groups/ to keep")
+    parser.add_argument("--drop", help="template: page ids or groups/ to leave out")
+    parser.add_argument("--check-docs", help="template: check a written document "
+                                             "directory against the chosen template")
+    parser.add_argument("--checkpoint", help="decide: which checkpoint (P1, P2, P3, P4)")
+    parser.add_argument("--note", help="decide: what was decided, and by whom -- this is "
+                                       "what the closing report carries")
+    parser.add_argument("--user-response", help="decide P4: the user's direct response "
+                                                "after seeing the queued readings")
+    parser.add_argument("--p4-verdict", choices=("accepted", "changes-requested"),
+                        help="decide P4: whether the user accepted these readings")
+    parser.add_argument("--step", help="measure: model-driven step name")
+    parser.add_argument("--state", choices=("start", "stop"), default="start",
+                        help="measure: start or stop the named step")
+    parser.add_argument("--status", choices=("completed", "failed", "cancelled"),
+                        default="completed", help="measure --state stop: outcome")
+    parser.add_argument("--root", default=".", help="the repository being documented")
+    parser.add_argument("--build", default=DEFAULT_BUILD,
+                        help="where intermediates go")
+    parser.add_argument("--docs", default="docs", help="where the document is written")
+    parser.add_argument("--staging", help="rendered draft directory; defaults to "
+                                          ".docs-build/rendered-docs")
+    parser.add_argument("--top", type=int, default=25, help="survey: fan-in cutoff")
+    parser.add_argument("--policy", default="optional",
+                        choices=("disabled", "optional", "required"),
+                        help="survey: whether Ruff annotates import usage")
+    parser.add_argument("--force", action="store_true",
+                        help="analyze: rewrite claims.jsonl even if it holds hand-written "
+                             "claims")
+    parser.add_argument("--preset", default="auto",
+                        help="document: document preset, or auto")
+    parser.add_argument("--detail", default="public",
+                        help="document: class-diagram detail")
+    parser.add_argument("--format", default="rst", choices=("rst", "myst"),
+                        help="render: markup the renderer emits")
+    parser.add_argument("--review", help="review: prose-review.jsonl with your verdicts")
+    parser.add_argument("--write-conf", action="store_true",
+                        help="render: generate a Sphinx conf.py in staging if none exists")
+    parser.add_argument("--project", help="render: project name for --write-conf")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="print the commands this component would run, and run nothing")
+    args = parser.parse_args()
+
+    if not os.path.isdir(args.root):
+        return fail("no such directory: %s" % args.root)
+    # The build, the documentation and the draft belong to the repository being documented,
+    # not to wherever the command was typed. Resolved against the current directory, a run
+    # started from this skill's own folder wrote `.docs-build/` -- and would have published
+    # `docs/` -- into the installed plugin.
+    if os.path.abspath(args.root) != os.getcwd():
+        for name in ("build", "docs", "staging", "review"):
+            value = getattr(args, name)
+            if value and not os.path.isabs(value):
+                setattr(args, name, os.path.join(args.root, value))
+    if args.top < 0:
+        return fail("--top must not be negative")
+    if args.review and not os.path.isfile(args.review):
+        return fail("no such review file: %s" % args.review)
+
+    # Ahead of `build_dir.ensure`, deliberately. `status` answers questions about a run and
+    # must not start one: creating the build directory to report that there is no build
+    # directory would be the command changing the thing it was asked to describe.
+    if args.component == "status":
+        return status(args, args.build)
+
+    if args.component == "template":
+        # Listing the choices or checking a document must not create a build directory;
+        # recording one is the first thing that needs it.
+        if args.use and not args.dry_run:
+            build_dir.ensure(args.build)
+        return template_command(args)
+
+    build_dir.ensure(args.build)
+    digest = index_hash_of(args.build)
+
+    if args.component == "approve":
+        return approve_command(args)
+
+    if args.component == "measure":
+        if args.dry_run:
+            print("would %s timing for %s" % (args.state, args.step or "<missing step>"))
+            return 0
+        return measure(args)
+
+    if args.component == "decide":
+        known = {c["id"]: c for c in CHECKPOINTS}
+        if args.checkpoint not in known:
+            return fail("--checkpoint must be one of: %s" % ", ".join(sorted(known)))
+        if args.checkpoint == "P4":
+            if args.note:
+                return fail("P4 requires --user-response, not --note; show the queued "
+                            "readings and wait for the user's direct answer", 1)
+            if not (args.user_response or "").strip():
+                return fail("P4 requires --user-response after the user sees the queue; "
+                            "an unattended decision is not accepted", 1)
+            if not args.p4_verdict:
+                return fail("P4 requires --p4-verdict accepted|changes-requested; "
+                            "a response alone is not approval", 1)
+            note = args.user_response.strip()
+        else:
+            if args.user_response or args.p4_verdict:
+                return fail("--user-response and --p4-verdict are reserved for P4", 2)
+            if not (args.note or "").strip():
+                return fail("--note is required: a decision with no record of what was "
+                            "decided is not one the closing report can carry")
+            note = args.note.strip()
+            if len(note.split()) < DECISION_NOTE_WORDS:
+                return fail("--note needs at least %d words saying what was decided "
+                            "and on what basis. %r is a signature, not a decision "
+                            "for %s." % (DECISION_NOTE_WORDS, note[:40],
+                                         args.checkpoint))
+        path = checkpoint_path(args.build, args.checkpoint)
+        # Only a checkpoint that is actually open may be decided. Without this a caller
+        # can answer a question nobody has been asked yet -- decide `P2` straight after
+        # `survey`, and when `analyze` later finishes it finds a decision carrying the
+        # current `index_hash`, leaves it alone, and `check` runs with the module roles
+        # unreviewed. Pre-approval defeats the whole mechanism, and it is the shape a
+        # script written for the old behaviour naturally takes.
+        if not os.path.isfile(path):
+            return fail("%s has not been opened yet, so there is nothing to decide: %s "
+                        "opens it, and a decision recorded before the question exists "
+                        "is not one anybody answered."
+                        % (args.checkpoint, known[args.checkpoint]["opened_by"]), 1)
+        pending = _json(path, {}) or {}
+        if args.checkpoint == "P4" and (not review_queue_hash(args.build) or
+                                        pending.get("review_queue_hash") !=
+                                        review_queue_hash(args.build)):
+            return fail("P4 review queue changed; run review without --review to "
+                        "refresh the queue, then ask the user again", 1)
+        current_input = checkpoint_input_hash(args.build, args.checkpoint)
+        if not current_input:
+            return fail("%s has no complete material to approve yet" % args.checkpoint, 1)
+        if pending.get("input_hash") and pending["input_hash"] != current_input:
+            return fail("%s material changed since the checkpoint opened; rerun %s "
+                        "and show the current material" %
+                        (args.checkpoint, known[args.checkpoint]["opened_by"]), 1)
+        if args.dry_run:
+            print("would record %s: %s (%s)" %
+                  (args.checkpoint, note, args.p4_verdict or "decided"))
+            print("would write %s" % path)
+            return 0
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        state = ("pending" if args.p4_verdict == "changes-requested" else "decided")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"checkpoint": args.checkpoint, "state": state,
+                       "index_hash": digest, "note": note,
+                       "input_hash": current_input,
+                       "verdict": args.p4_verdict,
+                       "source": "user_response" if args.checkpoint == "P4" else "note",
+                       "review_queue_hash": review_queue_hash(args.build)
+                       if args.checkpoint == "P4" else None,
+                       "ask": known[args.checkpoint]["ask"]}, fh, indent=1,
+                      sort_keys=True)
+            fh.write("\n")
+        print("%s %s: %s" % (args.checkpoint, state, note))
+        print("wrote %s" % path)
+        return 0
+
+    # Ahead of every gate below, so a component that is about to refuse still says where the
+    # run is. A refusal names one thing -- an undecided checkpoint, a missing input -- and a
+    # reader who does not know a run is in progress needs the position more than the reason.
+    for line in orientation(args):
+        print("-- %s" % line)
+
+    # Refuse rather than run on. The message has to be enough to act on without opening
+    # anything: what to put in front of the person, what to ask them, and the one command
+    # that records the answer.
+    if not args.dry_run:
+        blocked = blocking_checkpoint(args.build, args.component, digest,
+                                      review_file=args.review)
+        if blocked is not None:
+            decision_command = ("--user-response '<the user's answer>' "
+                                "--p4-verdict accepted|changes-requested"
+                                if blocked["id"] == "P4" else
+                                "--note '<what they said>'")
+            unattended = ("      P4 requires a direct user response; leave it pending "
+                          "on an unattended run.\n" if blocked["id"] == "P4" else
+                          "      On an unattended run, record what you chose and why "
+                          "in the closing report.\n")
+            sys.stderr.write(
+                "FAIL  %s is held at checkpoint %s, which %s opens and nothing has "
+                "decided.\n"
+                "      Show them: %s\n"
+                "      Ask them:  %s\n"
+                "      Then:      python3 %s decide --checkpoint %s %s\n%s"
+                % (args.component, blocked["id"], blocked["opened_by"],
+                   checkpoint_show(blocked, args.build),
+                   blocked["ask"], invoked_as(), blocked["id"], decision_command,
+                   unattended))
+            return 1
+
+    if args.component == "analyze" and not args.force:
+        written = handwritten_claims(os.path.join(args.build, "claims.jsonl"))
+        if written:
+            return fail("%s holds %d claim(s) no script can regenerate (%s) and this "
+                        "component would overwrite them. Move them aside, or pass --force "
+                        "if the scan is what changed."
+                        % (os.path.join(args.build, "claims.jsonl"), len(written),
+                           ", ".join(str(i) for i in written[:3])), 1)
+
+    if args.component == "analyze" and not args.dry_run:
+        # The skill tells the reader to work through every file in packets/, so one left
+        # behind by a wider earlier scope is a module they would analyse and `assemble`
+        # would then reject as outside the current units -- after the budget was spent.
+        packets = os.path.join(args.build, "packets")
+        if os.path.isdir(packets):
+            shutil.rmtree(packets)
+
+    # Before anything runs, and after the checkpoint gate: a decision nobody was asked for
+    # is the better complaint where both apply, since a build with an open P1 has no scope
+    # settled and its missing artifacts are a consequence of that.
+    #
+    # A dry run is told rather than stopped. It exists to show what a component would do,
+    # and a reader previewing a run they have not started yet is entitled to see the stages
+    # and the gap at once instead of one of the two.
+    warning = preflight(args)
+    if warning:
+        if not args.dry_run:
+            return fail(warning, 2)
+        print("-- note: %s" % warning)
+
+    component_started_at = utc_now()
+    component_started = time.perf_counter()
+    invocation_id = "%s-%d" % (args.component, time.time_ns())
+    stages = COMPONENTS[args.component](args)
+    if isinstance(stages, int):
+        # A component may end the run before it has any stage to run: `document` does it
+        # when a manual has no answer artifact yet, which is a verdict about the run
+        # rather than a stage that failed. The code is the exit code.
+        append_timing(os.path.join(args.build, "timings.jsonl"), {
+            "schema_version": 1, "record_type": "component",
+            "invocation_id": invocation_id, "component": args.component,
+            "status": "passed" if stages == 0 else "failed", "exit_code": stages,
+            "started_at": component_started_at, "finished_at": utc_now(),
+            "duration_seconds": round(time.perf_counter() - component_started, 6),
+        })
+        return stages
+    print("== %s: %d stage(s)" % (args.component, len(stages)))
+    timings = None if args.dry_run else os.path.join(args.build, "timings.jsonl")
+    code = run(stages, dry_run=args.dry_run, timings=timings,
+               invocation_id=invocation_id)
+    if args.component == "survey" and code == 0 and not args.dry_run:
+        # The cutoff and import-annotation policy are part of the scope question,
+        # even when two cutoffs happen to select the same modules.
+        with open(os.path.join(args.build, "selection-options.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({"top": args.top, "policy": args.policy}, fh, sort_keys=True)
+            fh.write("\n")
+    if not args.dry_run:
+        append_timing(timings, {
+            "schema_version": 1, "record_type": "component",
+            "invocation_id": invocation_id, "component": args.component,
+            "status": "passed" if code == 0 else "failed", "exit_code": code,
+            "started_at": component_started_at, "finished_at": utc_now(),
+            "duration_seconds": round(time.perf_counter() - component_started, 6),
+            "stage_count": len(stages),
+        })
+    print("\n== %s %s" % (args.component, "ok" if code == 0 else "exited %d" % code))
+
+    if args.component == "review" and not args.review and not args.dry_run:
+        if retire_empty_p4(args.build, index_hash_of(args.build)):
+            print("P4 retired: the refreshed review queue is empty")
+
+    # Ordinarily a checkpoint opens only on success: a failed survey has no scope to
+    # approve. A conditional checkpoint is different. P4 is intentionally produced by
+    # the review-required result (exit 1), so its predicate -- the report the stage just
+    # wrote -- is the authority on whether there is material to review.
+    if not args.dry_run:
+        for checkpoint in CHECKPOINTS:
+            if checkpoint["opened_by"] != args.component:
+                continue
+            if code not in checkpoint.get("opens_on", (0,)):
+                continue
+            condition = OPENS_WHEN.get(checkpoint.get("opens_when"))
+            if code != 0 and condition is None:
+                continue
+            if condition and not condition(args.build):
+                continue
+            if open_checkpoint(args.build, checkpoint, index_hash_of(args.build)):
+                decision_command = ("--user-response '<the user's answer>' "
+                                    "--p4-verdict accepted|changes-requested"
+                                    if checkpoint["id"] == "P4" else
+                                    "--note '<what they said>'")
+                print("\n-- checkpoint %s is open, and %s will not run until it is "
+                      "decided.\n   Show them: %s\n   Ask them:  %s\n   Then:      "
+                      "python3 %s decide --checkpoint %s %s"
+                      % (checkpoint["id"], checkpoint["blocks"],
+                         checkpoint_show(checkpoint, args.build),
+                         checkpoint["ask"], invoked_as(), checkpoint["id"],
+                         decision_command))
+    return code
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(3)
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write("ERROR %s\n" % exc)
+        sys.exit(3)

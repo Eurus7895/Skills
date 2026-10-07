@@ -12,7 +12,16 @@ A **plugin marketplace**. It ships plugins; each plugin bundles one or more Agen
 
 There is no application here — no build, no test suite, no runtime, no dependencies to install. Do not look
 for a `package.json` to run, and do not add a toolchain unless explicitly asked. The deliverable is always
-Markdown and JSON, plus standard-library Python.
+Markdown and JSON, plus Python that is standard library by default. A third-party import is possible but
+narrow: optional, with a working stdlib fallback, and named in the allowlist in
+[`scripts.instructions.md`](../domain/scripts.instructions.md). No bundled script may *require* a package to
+be installed before it runs.
+
+That is a rule about the scripts this repository ships, not about what a skill may do in the user's project.
+A skill can run the project's own package manager where its `SKILL.md` says so — `testing` installs the test
+runner a repository already needs, under the consent rules in
+[`universal/safety.instructions.md`](../universal/safety.instructions.md). The line being drawn is that our
+scripts run on a clean machine with no install step.
 
 Agent Skills are an open standard. Nothing here may use syntax specific to one vendor.
 

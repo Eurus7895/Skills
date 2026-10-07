@@ -89,8 +89,11 @@ python3 tools/validate.py
 
 It verifies: every JSON parses; `plugin.json` and skill frontmatter `name`s match their folders; every
 `skills[]` path resolves to a `SKILL.md`; no skill folder is missing from `skills[]`; `marketplace.json` agrees
-with each `plugin.json` on `description` and `version`; no dead or plugin-escaping links; skills stay under the
-500-line budget; every plugin has a README catalog row; and no materialized file has drifted.
+with each `plugin.json` on `description` and `version`; no dead or plugin-escaping links, and no in-file anchor
+that no heading produces; skills stay under the 500-line budget; every skill has a "When not to use" section;
+every reference over 300 lines opens with a `## Contents`; every plugin has a README catalog row; and no
+materialized file has drifted. It warns — without failing — when a skill's description hands nothing off to a
+sibling skill in the same plugin, or overlaps one.
 
 The same check runs in CI on every pull request
 ([`.github/workflows/validate.yml`](.github/workflows/validate.yml)), against Python 3.9 and 3.13. CI is the
@@ -298,7 +301,12 @@ effectively executable. Therefore:
 - No destructive commands (`rm -rf`, force-push, `DROP`, bulk delete) without an explicit confirmation step
   written into the instructions.
 - No obfuscated, minified, or encoded scripts. If a reviewer cannot read it, it does not ship.
-- Declare side effects in `SKILL.md`: network access, package installs, writes outside the working directory.
+- Declare side effects in `SKILL.md`: network access, package installs, writes outside the working directory,
+  and any third-party import a bundled script uses.
+- **Bundled scripts are standard library by default.** A third-party import ships only as an optional
+  accelerator with a working stdlib fallback, and only if it is named in the allowlist in
+  [`.github/instructions/domain/scripts.instructions.md`](.github/instructions/domain/scripts.instructions.md).
+  A script that cannot run on a clean machine is a broken skill — there is no install step on the user's side.
 - No instructions that try to override the host agent's safety behavior or suppress its confirmations.
 
 ## Fixtures

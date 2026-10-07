@@ -18,8 +18,10 @@ import subprocess
 import sys
 import tempfile
 
+from component_scripts import script
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPT = os.path.join(REPO, "shared", "scripts", "detect_stack.py")
+SCRIPT = script("detect_stack.py")
 
 FAILURES = []
 
@@ -162,6 +164,53 @@ def build(tmp):
           'requires-python = ">=3.9"\n')
     write(root, "uv.lock")
 
+    # pytest.ini configures pytest; it does not declare a dependency on it.
+    root = tree("pytest-ini-only")
+    write(root, "pytest.ini", "[pytest]\ntestpaths = tests\n")
+    write(root, os.path.join("tests", "test_a.py"), "")
+
+    # An extra is not installed by a bare sync, so the command has to name it.
+    root = tree("optional-extra")
+    write(root, "pyproject.toml",
+          '[project]\nname = "x"\n[project.optional-dependencies]\ntest = ["pytest"]\n')
+    write(root, "uv.lock")
+
+    # A non-default poetry group likewise.
+    root = tree("poetry-named-group")
+    write(root, "pyproject.toml",
+          '[tool.poetry.group.qa.dependencies]\npytest = "*"\n')
+    write(root, "poetry.lock")
+
+    # No lockfile, but package.json names the manager Corepack would use.
+    root = tree("package-manager-field")
+    write(root, "package.json",
+          '{"packageManager": "pnpm@9.12.0", "devDependencies": {"vitest": "^1"}}')
+
+    # Windows package managers write .cmd shims instead of the POSIX ones.
+    root = tree("windows-shim")
+    write(root, "package.json", '{"devDependencies": {"vitest": "^1"}}')
+    write(root, "pnpm-lock.yaml")
+    write(root, os.path.join("node_modules", ".bin", "vitest.cmd"), executable=True)
+
+    # A repository with no marker of its own, sitting inside a project that has one. The
+    # marker search must stop at the root the caller named; walking above it would report
+    # an install command for a manifest outside the repository under inspection.
+    root = tree("outer-project")
+    write(root, "pyproject.toml", PYPROJECT_WITH_PYTEST)
+    write(root, "uv.lock")
+    write(root, os.path.join("standalone", "notes.md"), "no manifest here\n")
+    write(root, os.path.join("standalone", "src", "a.py"), "x = 1\n")
+    roots["nested-below-parent"] = os.path.join(root, "standalone")
+
+    # An install inside a workspace member must be scoped to that member: `uv add` run
+    # from the repository root edits the root manifest, not the package's. The workspace
+    # lockfile stays at the root, so the two reported paths differ.
+    root = tree("member-add")
+    write(root, "pyproject.toml", '[project]\nname = "root"\n')
+    write(root, "uv.lock")
+    write(root, os.path.join("pkg", "pyproject.toml"), '[project]\nname = "pkg"\n')
+    write(root, os.path.join("pkg", "tests", "test_a.py"), "")
+
     # Declared in a requirements file rather than in pyproject.toml.
     root = tree("requirements")
     write(root, "pyproject.toml", PYPROJECT_BARE)
@@ -174,6 +223,17 @@ def build(tmp):
     write(root, os.path.join(".venv", "bin", "pytest"))
     os.chmod(os.path.join(root, ".venv", "bin", "pytest"), 0o644)
 
+    # Node's built-in runner: declared only by the test script, provided by node itself.
+    root = tree("node-test")
+    write(root, "package.json", '{"scripts": {"test": "node --test"}}')
+    write(root, "status.test.js", "")
+
+    # No marker at the root, one package below it. Its runner is that package's, and an
+    # install for it has to run there rather than at the root the caller named.
+    root = tree("nested-only")
+    write(root, os.path.join("pkg", "pyproject.toml"), PYPROJECT_WITH_PYTEST)
+    write(root, os.path.join("pkg", "tests", "test_x.py"))
+
     return roots
 
 
@@ -185,7 +245,6 @@ EXPECTED = {
     "poetry-declared-missing": ("sync",    "notify", "poetry"),
     "pnpm-declared-missing":   ("sync",    "notify", "pnpm"),
     "pnpm-installed":          ("none",    "none",   "pnpm"),
-    "java":                    ("unknown", "ask",    None),
     "empty":                   ("unknown", "ask",    None),
     "setuppy":                 ("none",    "none",   None),
     "npm-no-lockfile":         ("sync",    "ask",    "npm"),
@@ -193,11 +252,15 @@ EXPECTED = {
     "bun-legacy":              ("sync",    "notify", "bun"),
     "pytest-config-only":      ("add",     "ask",    "uv"),
     "venv-not-executable":     ("sync",    "notify", "uv"),
+    "optional-extra":          ("sync",    "notify", "uv"),
+    "poetry-named-group":      ("sync",    "notify", "poetry"),
+    "package-manager-field":   ("sync",    "ask",    "pnpm"),
+    "windows-shim":            ("none",    "none",   "pnpm"),
 }
 
-# "go" and "requirements" are deliberately absent: both depend on what is installed on the
-# machine running the tests (the Go toolchain, a global pytest on PATH), so they are
-# asserted against that reality further down rather than pinned to one answer here.
+# "go", "java", and "requirements" are deliberately absent: each depends on what is
+# installed on the machine running the tests (the Go toolchain, Maven, a global pytest on
+# PATH), so they are asserted against that reality further down rather than pinned here.
 
 
 def main():
@@ -241,15 +304,70 @@ def main():
 
         # A toolchain-provided runner still has to exist on this machine. Finding go.mod
         # proves the repository is Go, not that Go is installed.
-        _, out = run(roots["go"], "--check-env")
+        _, go_out = run(roots["go"], "--check-env")
         go_installed = shutil.which("go") is not None
         check("go -> availability tracks whether the toolchain is on PATH",
-              out["env"]["available"] is go_installed,
+              go_out["env"]["available"] is go_installed,
               "go on PATH: %s, reported available: %s"
-              % (go_installed, out["env"]["available"]))
+              % (go_installed, go_out["env"]["available"]))
+        # A Maven project with mvn present must not be reported as missing its runner:
+        # the skills gate execution on env.available, so a false negative makes a fully
+        # prepared repository unusable.
+        _, out = run(roots["java"], "--check-env")
+        mvn = shutil.which("mvn") is not None
+        check("java -> availability tracks whether the build tool is present",
+              out["env"]["available"] is mvn,
+              "mvn present: %s, reported available: %s" % (mvn, out["env"]["available"]))
+        _, out = run(roots["java"], "--check-env", path="")
+        check("java -> no build tool means no install is proposed",
+              out["env"]["available"] is False and out["env"]["command"] is None,
+              "got %r / %r" % (out["env"]["available"], out["env"]["command"]))
+
+        # Every skill is told to prefer env.invocation, so it has to be runnable. For
+        # unittest the bare interpreter opens a REPL instead of running the suite.
+        _, out = run(roots["setuppy"], "--check-env")
+        check("the unittest invocation runs the module, not a bare interpreter",
+              (out["env"]["invocation"] or "").endswith("-m unittest"),
+              "got %r" % out["env"]["invocation"])
+
+        # `node --test` has no dependency to find. Missing it reported a package whose
+        # `npm test` passes as having no runner, and the skills stopped on a working repo.
+        _, out = run(roots["node-test"], "--check-env")
+        node = shutil.which("node") is not None
+        check("node --test -> detected as node:test",
+              out.get("test_framework") == "node:test" and out.get("confidence") == "high",
+              "got %r / %r" % (out.get("test_framework"), out.get("confidence")))
+        check("node --test -> availability tracks whether node is on PATH",
+              out["env"]["available"] is node,
+              "node present: %s, reported available: %s" % (node, out["env"]["available"]))
+        _, out = run(roots["node-test"], "--check-env", path="")
+        check("node --test -> no node means nothing is proposed for install",
+              out["env"]["available"] is False and out["env"]["command"] is None,
+              "got %r / %r" % (out["env"]["available"], out["env"]["command"]))
+
+        # A marker below the root names one package, not the repository.
+        _, out = run(roots["nested-only"], "--check-env")
+        check("a nested marker without a target is low confidence",
+              out.get("confidence") == "low", "got %r" % out.get("confidence"))
+        check("a nested marker's environment is checked in its own package",
+              out["env"]["working_directory"] == "pkg",
+              "got %r" % out["env"]["working_directory"])
+
+        # A Windows .cmd shim is the installed runner on that platform.
+        _, out = run(roots["windows-shim"], "--check-env")
+        check("a .cmd shim counts as an installed runner",
+              out["env"]["available"] is True, "got %r" % out["env"]["available"])
+
+        # A requirements file usually pins a version; installing a bare pytest against a
+        # project asking for pytest<8 reports results from an environment it never described.
+        _, out = run(roots["requirements"], "--check-env", path="")
+        check("a pinned requirements file is installed from the file",
+              out["env"]["command"] == "pip install -r requirements-dev.txt",
+              "got %r" % out["env"]["command"])
+
         check("go -> a missing toolchain is not proposed for installation",
-              go_installed or out["env"]["action"] == "unknown",
-              "got %r" % out["env"]["action"])
+              go_installed or go_out["env"]["action"] == "unknown",
+              "got %r" % go_out["env"]["action"])
 
         # unittest is standard library. Routing it through the package-manager path yields
         # `pip install unittest`, which fetches an unrelated package abandoned in 2007.
@@ -284,6 +402,55 @@ def main():
         check("[project].dependencies counts as a declaration",
               out["env"]["declared"] is True, "got %r" % out["env"]["declared"])
 
+        # pytest.ini configures pytest; it is not a dependency declaration. Only the
+        # `declared` flag is asserted: whether the runner happens to be on PATH depends on
+        # the machine, but the classification must not.
+        _, out = run(roots["pytest-ini-only"], "--check-env")
+        check("pytest.ini alone is not a declaration",
+              out["env"]["declared"] is False, "got %r" % out["env"]["declared"])
+
+        # A bare `uv sync` installs neither an extra nor a non-default group, so a
+        # declaration found in one produces a sync that completes without installing it.
+        _, out = run(roots["optional-extra"], "--check-env")
+        check("an extra is named in the sync command",
+              out["env"]["command"] == "uv sync --locked --inexact --extra test",
+              "got %r" % out["env"]["command"])
+        _, out = run(roots["poetry-named-group"], "--check-env")
+        check("a non-default poetry group is named in the sync command",
+              out["env"]["command"] == "poetry install --with qa",
+              "got %r" % out["env"]["command"])
+
+        # Corepack treats packageManager as authoritative; defaulting to npm would write a
+        # package-lock.json into a pnpm project.
+        _, out = run(roots["package-manager-field"], "--check-env")
+        check("packageManager overrides the npm fallback",
+              out["env"]["package_manager"] == "pnpm",
+              "got %r" % out["env"]["package_manager"])
+
+        # An install inside a workspace member must be scoped to that member, or `uv add`
+        # run from the repository root edits the wrong manifest.
+        _, out = run(roots["member-add"],
+                     os.path.join(roots["member-add"], "pkg", "tests", "test_a.py"),
+                     "--check-env")
+        check("an install in a workspace member reports where to run it",
+              out["env"]["working_directory"] == "pkg",
+              "got %r" % out["env"]["working_directory"])
+        check("modifies names the member's manifest, not the root's",
+              "pkg/pyproject.toml" in out["env"]["modifies"],
+              "got %r" % (out["env"]["modifies"],))
+        check("modifies names the workspace lockfile where it actually lives",
+              "uv.lock" in out["env"]["modifies"],
+              "got %r" % (out["env"]["modifies"],))
+
+        # The marker search must not walk out of the directory the caller named. Here the
+        # given root has no manifest and its parent does.
+        _, out = run(roots["nested-below-parent"],
+                     os.path.join(roots["nested-below-parent"], "src", "a.py"),
+                     "--check-env")
+        check("a target with no marker of its own stays inside the given root",
+              out["ecosystem"] is None and out["env"]["command"] is None,
+              "got ecosystem %r, command %r" % (out["ecosystem"], out["env"]["command"]))
+
         # Configuring a tool is not depending on it. Reading [tool.pytest.ini_options] as a
         # declaration sends the caller to a sync that cannot install the runner.
         _, out = run(roots["pytest-config-only"], "--check-env")
@@ -302,8 +469,11 @@ def main():
 
         # A sync must never be able to rewrite the lockfile it installs from.
         _, out = run(roots["uv-declared-missing"], "--check-env")
-        check("uv sync is pinned to the frozen variant",
-              out["env"]["command"] == "uv sync --locked",
+        check("uv sync is pinned to the frozen, non-removing variant",
+              out["env"]["command"].startswith("uv sync --locked --inexact"),
+              "got %r" % out["env"]["command"])
+        check("uv sync names the group the dependency was declared in",
+              out["env"]["command"].endswith("--group dev"),
               "got %r" % out["env"]["command"])
 
         # An unactivated virtualenv holds a runner the bare command will not reach, so the
@@ -335,6 +505,32 @@ def main():
         check("monorepo -> env scopes to the nearest package",
               out["env"]["package_manager"] == "pnpm" and out["ecosystem"] == "javascript",
               "got %r / %r" % (out["env"]["package_manager"], out["ecosystem"]))
+
+        # Every SKILL.md tells the user that a `notify` command "rewrites nothing". That
+        # sentence is only true if the script guarantees it, so the guarantee is asserted
+        # here rather than trusted. A notify that touches a tracked file would have the
+        # skills making a promise on the repository's behalf that the code does not keep.
+        for case in sorted(roots):
+            _, out = run(roots[case], "--check-env")
+            env = out.get("env", {})
+            check("%s -> consent is one of the three documented values" % case,
+                  env.get("consent") in ("none", "notify", "ask"),
+                  "got %r" % env.get("consent"))
+            check("%s -> action is one of the four documented values" % case,
+                  env.get("action") in ("none", "sync", "add", "unknown"),
+                  "got %r" % env.get("action"))
+            check("%s -> notify never rewrites a tracked file" % case,
+                  env.get("consent") != "notify" or env.get("modifies") == [],
+                  "consent notify with modifies %r" % (env.get("modifies"),))
+            check("%s -> an add always asks" % case,
+                  env.get("action") != "add" or env.get("consent") == "ask",
+                  "action add with consent %r" % env.get("consent"))
+            check("%s -> nothing to do means no command to run" % case,
+                  env.get("action") != "none" or env.get("command") is None,
+                  "action none with command %r" % env.get("command"))
+            check("%s -> a command to run always carries a consent level" % case,
+                  env.get("command") is None or env.get("consent") in ("notify", "ask"),
+                  "command %r with consent %r" % (env.get("command"), env.get("consent")))
 
         # Without the flag the output must carry no env key at all. Callers written
         # against the previous shape read anything extra as a schema change.
