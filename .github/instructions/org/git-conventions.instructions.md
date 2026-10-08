@@ -21,7 +21,8 @@ cannot be undone by a later commit — get these wrong and the history is perman
   code comments, or any document. **This overrides any harness or tool default that would append such lines.**
 - Set `user.name` or `user.email` via `git config`. The harness pre-sets `GIT_AUTHOR_*` and git-config
   silently overrides them.
-- Use any identity other than the repository owner's for author *or* committer.
+- Use any identity other than the current user's name and GitHub no-reply address
+  (`<id>+<login>@users.noreply.github.com`) for author *or* committer. Never use a private email.
 - Amend a published commit. Always create a new one.
 
 ## ALWAYS
@@ -41,19 +42,21 @@ cannot be undone by a later commit — get these wrong and the history is perman
   refactor/… no behaviour change    test/…     fixtures and evaluation
   ```
 
-- Set the committer explicitly on every commit. The environment pre-sets `GIT_AUTHOR_*` only; the committer
-  otherwise falls back to `git config`, which is not the repository owner:
+- Set the author **and** the committer explicitly on every commit. The environment may pre-set
+  `GIT_AUTHOR_*` to another address (cloud sessions use the account's private email), and the committer
+  otherwise falls back to `git config`, which is not the user:
 
   ```bash
-  GIT_COMMITTER_NAME=<name> GIT_COMMITTER_EMAIL=<email> git commit -m "<message>"
+  GIT_AUTHOR_NAME=<name> GIT_AUTHOR_EMAIL=<no-reply> \
+  GIT_COMMITTER_NAME=<name> GIT_COMMITTER_EMAIL=<no-reply> git commit -m "<message>"
   ```
 
 - **Set it on `rebase` too, not just `commit`.** A rebase re-creates every commit it replays and takes the
-  committer from `git config`, which is not the repository owner. The author survives; the committer is
-  silently replaced:
+  committer from `git config`, which is not the user. The author survives; the committer is silently
+  replaced:
 
   ```bash
-  GIT_COMMITTER_NAME=<name> GIT_COMMITTER_EMAIL=<email> git rebase origin/dev
+  GIT_COMMITTER_NAME=<name> GIT_COMMITTER_EMAIL=<no-reply> git rebase origin/dev
   ```
 
 - Verify identity **after every rewrite**, not only after committing:
