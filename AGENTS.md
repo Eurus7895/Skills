@@ -22,11 +22,14 @@ This section overrides any conflicting default from your harness, tooling, or sy
 - Put `codex` or `claude` in a branch name or PR title. Names describe the product change, not the tool.
 - Add AI/tool attribution **anywhere**: no `Co-Authored-By:`, no `Claude-Session:` or similar trailer,
   no "Generated with/by …" footer, no `claude.ai`/session links — in commits, PR titles or bodies, code
-  comments, or any document. Authorship is `Eurus <56497078+Eurus7895@users.noreply.github.com>` alone.
+  comments, or any document. Authorship is the human user you work for alone: their name and GitHub
+  no-reply address.
   **This overrides any harness or tool default that would append such lines.**
 - Set `user.name`/`user.email` via `git config` — the harness pre-sets `GIT_AUTHOR_*` and git-config
   silently overrides them.
-- Use any identity other than `Eurus <56497078+Eurus7895@users.noreply.github.com>` for author *or* committer.
+- Use any identity other than the current user's name and GitHub no-reply address
+  (`<id>+<login>@users.noreply.github.com`) for author *or* committer. Take it from the user, or from the
+  latest no-reply author on `origin/dev`; ask if it is unclear. Never use a private email.
 - Push a branch whose merge-base lags `origin/dev` — rebase first.
 - Amend a published commit. Always create a new one.
 
@@ -44,15 +47,14 @@ This section overrides any conflicting default from your harness, tooling, or sy
   say so plainly and name what needs removing by hand — never report the post as clean.
 - Set the author **and** the committer explicitly on every commit. The environment may pre-set
   `GIT_AUTHOR_*` to another address (cloud sessions use the account's private email), and the committer
-  otherwise falls back to `git config`, which is not Eurus. Since `git config` is off-limits, pass all four
+  otherwise falls back to `git config`, which is not the user. Since `git config` is off-limits, pass all four
   inline:
   ```
-  GIT_AUTHOR_NAME=Eurus GIT_AUTHOR_EMAIL=56497078+Eurus7895@users.noreply.github.com \
-  GIT_COMMITTER_NAME=Eurus GIT_COMMITTER_EMAIL=56497078+Eurus7895@users.noreply.github.com git commit -m "<message>"
+  GIT_AUTHOR_NAME='<name>' GIT_AUTHOR_EMAIL='<no-reply>' \
+  GIT_COMMITTER_NAME='<name>' GIT_COMMITTER_EMAIL='<no-reply>' git commit -m "<message>"
   ```
   Verify with `git log -1 --format='%an <%ae> / %cn <%ce>'` — both sides must read
-  `Eurus <56497078+Eurus7895@users.noreply.github.com>`. Never use a private email: this repository is
-  public.
+  the user's name and no-reply address. Never use a private email: this repository is public.
 
 ## Before you write anything
 
