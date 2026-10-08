@@ -9,7 +9,7 @@
   "author": {
     "name": "Eurus7895"
   },
-  "repository": "https://github.com/Eurus7895/Skills",
+  "repository": "https://github.com/eurus-labs/Skills",
   "license": "MIT",
   "skills": [
     "./skills/example-skill/"

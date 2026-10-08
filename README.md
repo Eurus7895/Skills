@@ -24,12 +24,12 @@ agent. Nothing in this repo uses Copilot-only syntax.
 Register this repository as a plugin marketplace, then install the plugins you want:
 
 ```bash
-copilot plugin marketplace add Eurus7895/Skills
+copilot plugin marketplace add eurus-labs/Skills
 copilot plugin install <plugin-name>@CopilotBox
 ```
 
 The marketplace registers under the name in its manifest — **`CopilotBox`** — not under the repository
-name. `add` takes `Eurus7895/Skills`; everything afterwards takes `CopilotBox`. The name is
+name. `add` takes `eurus-labs/Skills`; everything afterwards takes `CopilotBox`. The name is
 case-sensitive.
 
 Useful companions:
@@ -52,7 +52,7 @@ Inside an interactive Copilot session, the same commands work as `/plugin instal
 with `#` — `@` is not the separator, and `owner/repo@ref` is parsed as a hostname:
 
 ```bash
-copilot plugin marketplace add Eurus7895/Skills#some-branch
+copilot plugin marketplace add eurus-labs/Skills#some-branch
 ```
 
 `add` also accepts a **directory** — the folder containing `.github/plugin/marketplace.json`, not the file
