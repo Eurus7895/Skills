@@ -71,3 +71,19 @@ jobs:
             python3 "$test" || status=1
           done
           exit $status
+
+  # The one check the branch ruleset requires. Its name stays fixed when the matrix
+  # above changes, so adding or dropping a Python version never strands the ruleset.
+  # always(): without it a failed validate makes this job "skipped", and GitHub
+  # counts a skipped required check as passing.
+  verify:
+    if: always()
+    needs: [validate]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every validate job passed
+        env:
+          RESULT: ${{ needs.validate.result }}
+        run: |
+          echo "validate: $RESULT"
+          test "$RESULT" = success

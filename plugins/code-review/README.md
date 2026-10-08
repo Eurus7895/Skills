@@ -12,7 +12,7 @@ The two skills connect: the review checklist `setup-review-rules` writes is link
 ## Install
 
 ```bash
-copilot plugin marketplace add Eurus7895/Skills
+copilot plugin marketplace add eurus-labs/Skills
 copilot plugin install code-review@CopilotBox
 ```
 

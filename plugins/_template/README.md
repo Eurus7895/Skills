@@ -32,7 +32,7 @@ One or two sentences on the job this plugin helps with.
 
 ## Install
 
-    copilot plugin marketplace add Eurus7895/Skills
+    copilot plugin marketplace add eurus-labs/Skills
     copilot plugin install my-plugin-name@CopilotBox
 
 ## Skills

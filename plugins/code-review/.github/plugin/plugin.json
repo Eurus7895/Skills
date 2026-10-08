@@ -1,7 +1,7 @@
 {
   "name": "code-review",
   "description": "Review code against Google's Standard of Code Review and the repository's own rules files and review checklist, reporting findings with Conventional Comments labels and CWE-named security categories. Also generates those rules files and the checklist the review reads.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "keywords": [
     "code-review",
     "pull-request",
@@ -12,7 +12,7 @@
   "author": {
     "name": "Eurus7895"
   },
-  "repository": "https://github.com/Eurus7895/Skills",
+  "repository": "https://github.com/eurus-labs/Skills",
   "license": "MIT",
   "skills": [
     "./skills/review-code/",
